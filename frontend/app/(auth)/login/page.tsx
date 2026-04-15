@@ -18,7 +18,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card"
-import { apiFetch } from "@/lib/api"
+import { login } from "@/services/auth"
 
 const schema = z.object({
   username: z.string().min(1, "Usuário é obrigatório"),
@@ -40,10 +40,7 @@ export default function LoginPage() {
   async function onSubmit(data: FormData) {
     setLoading(true)
     try {
-      await apiFetch("/api/auth/login", {
-        method: "POST",
-        body: JSON.stringify(data),
-      })
+      await login(data)
       toast.success("Login realizado com sucesso!")
       router.replace("/dashboard")
     } catch (err) {

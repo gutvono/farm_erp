@@ -23,10 +23,11 @@
 
 -- -----------------------------------------------------------------------------
 -- 1. USERS
--- Senha padrão para admin@fazenda.com: admin123
+-- Senha padrão para admin: admin123
+-- Hash gerado com bcrypt (rounds=12)
 -- -----------------------------------------------------------------------------
-INSERT INTO users (id, email, name, hashed_password, is_admin, is_active) VALUES
-('11111111-1111-1111-1111-111111111001', 'admin@fazenda.com', 'Administrador', '$2b$12$Qu/tWbeyYlYlaj/zppVJiu86YgptYIPbe1RRvUnxOlkG3i.DCxxFq', TRUE, TRUE)
+INSERT INTO users (id, username, hashed_password, is_active) VALUES
+('11111111-1111-1111-1111-111111111001', 'admin', '$2b$12$Qu/tWbeyYlYlaj/zppVJiu86YgptYIPbe1RRvUnxOlkG3i.DCxxFq', TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

@@ -31,7 +31,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 # ---------------------------------------------------------------------------
 # Module routers — uncomment as each module is implemented
 # ---------------------------------------------------------------------------
-# from app.modules.auth.router import router as auth_router
+from app.modules.auth.router import router as auth_router
 # from app.modules.comercial.router import router as comercial_router
 # from app.modules.compras.router import router as compras_router
 # from app.modules.estoque.router import router as estoque_router
@@ -40,8 +40,8 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 # from app.modules.folha.router import router as folha_router
 # from app.modules.pcp.router import router as pcp_router
 # from app.modules.dashboard.router import router as dashboard_router
-#
-# app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
+
+app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 # app.include_router(comercial_router, prefix="/api/comercial", tags=["comercial"])
 # app.include_router(compras_router, prefix="/api/compras", tags=["compras"])
 # app.include_router(estoque_router, prefix="/api/estoque", tags=["estoque"])
