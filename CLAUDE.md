@@ -174,7 +174,7 @@ Cada agente documenta seu trabalho:
 ## Próximas Etapas
 
 1. ✅ Estrutura de pastas e documentação
-2. Inicializar repositórios (poetry/pip para backend, npm para frontend)
+2. ✅ Inicializar repositórios (Poetry para backend, npm para frontend)
 3. Configurar banco PostgreSQL
 4. Implementar módulo Auth
 5. Implementar módulos por ordem de dependência

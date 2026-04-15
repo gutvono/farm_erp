@@ -1,29 +1,26 @@
-.PHONY: help reset-db backend frontend dev
+.PHONY: help install backend frontend dev reset-db
 
 help:
 	@echo "Coffee Farm ERP - Available Commands"
 	@echo "===================================="
-	@echo "  make reset-db     Reset and populate database"
+	@echo "  make install      Install all dependencies (backend + frontend)"
 	@echo "  make backend      Start FastAPI backend server"
 	@echo "  make frontend     Start Next.js frontend dev server"
 	@echo "  make dev          Start both backend and frontend"
+	@echo "  make reset-db     Reset and populate database"
 
-reset-db:
-	python backend/scripts/reset_db.py
+install:
+	cd backend && python -m poetry install
+	cd frontend && npm install
 
 backend:
-	cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000
+	cd backend && python -m poetry run uvicorn app.main:app --reload --port 8000
 
 frontend:
 	cd frontend && npm run dev
 
 dev:
-	@echo "Starting Coffee Farm ERP development environment..."
-	@echo "Backend: http://localhost:8000"
-	@echo "Frontend: http://localhost:3000"
-	@echo "Backend logs in one terminal, frontend in another"
-	@(cd backend && uvicorn app.main:app --reload --host 0.0.0.0 --port 8000) & \
-	(cd frontend && npm run dev) & \
-	wait
+	make -j2 backend frontend
 
-.PHONY: help reset-db backend frontend dev
+reset-db:
+	cd backend && python -m poetry run python scripts/reset_db.py
