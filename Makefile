@@ -1,26 +1,22 @@
-.PHONY: help install backend frontend dev reset-db
+.PHONY: up down reset-db logs build shell-backend shell-db
 
-help:
-	@echo "Coffee Farm ERP - Available Commands"
-	@echo "===================================="
-	@echo "  make install      Install all dependencies (backend + frontend)"
-	@echo "  make backend      Start FastAPI backend server"
-	@echo "  make frontend     Start Next.js frontend dev server"
-	@echo "  make dev          Start both backend and frontend"
-	@echo "  make reset-db     Reset and populate database"
+up:
+	docker-compose up
 
-install:
-	cd backend && python -m poetry install
-	cd frontend && npm install
+down:
+	docker-compose down
 
-backend:
-	cd backend && python -m poetry run uvicorn app.main:app --reload --port 8000
+build:
+	docker-compose build
 
-frontend:
-	cd frontend && npm run dev
-
-dev:
-	make -j2 backend frontend
+logs:
+	docker-compose logs -f
 
 reset-db:
-	cd backend && python -m poetry run python scripts/reset_db.py
+	docker-compose exec backend poetry run python scripts/reset_db.py
+
+shell-backend:
+	docker-compose exec backend bash
+
+shell-db:
+	docker-compose exec postgres psql -U postgres -d coffee_farm_erp
