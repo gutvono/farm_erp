@@ -152,6 +152,8 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
         reference_id=sale.id,
     )
 
+    # Reload sale after all side-effect commits cleared the injected __dict__
+    sale = comercial_repo.get_sale(db, sale.id)
     return sale
 
 
