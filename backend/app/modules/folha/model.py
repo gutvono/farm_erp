@@ -34,6 +34,7 @@ class Employee(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     base_salary = Column(Numeric(12, 2), nullable=False, default=0)
     hire_date = Column(Date, nullable=False)
     termination_date = Column(Date, nullable=True)
+    termination_cost_override = Column(Numeric(12, 2), nullable=True)
     photo_path = Column(String(500), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
@@ -66,6 +67,7 @@ class PayrollPeriod(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     closed_at = Column(DateTime(timezone=True), nullable=True)
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
 
     entries = relationship(
         "PayrollEntry",
