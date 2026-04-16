@@ -33,7 +33,7 @@ app.mount("/uploads", StaticFiles(directory=settings.upload_dir), name="uploads"
 # ---------------------------------------------------------------------------
 from app.modules.auth.router import router as auth_router
 # from app.modules.comercial.router import router as comercial_router
-# from app.modules.compras.router import router as compras_router
+from app.modules.compras.router import router as compras_router
 from app.modules.estoque.router import router as estoque_router
 # from app.modules.faturamento.router import router as faturamento_router
 from app.modules.financeiro.router import router as financeiro_router
@@ -43,7 +43,7 @@ from app.modules.financeiro.router import router as financeiro_router
 
 app.include_router(auth_router, prefix="/api/auth", tags=["auth"])
 # app.include_router(comercial_router, prefix="/api/comercial", tags=["comercial"])
-# app.include_router(compras_router, prefix="/api/compras", tags=["compras"])
+app.include_router(compras_router, prefix="/api/compras", tags=["compras"])
 app.include_router(estoque_router, prefix="/api/estoque", tags=["estoque"])
 # app.include_router(faturamento_router, prefix="/api/faturamento", tags=["faturamento"])
 app.include_router(financeiro_router, prefix="/api/financeiro", tags=["financeiro"])
