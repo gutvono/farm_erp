@@ -35,7 +35,8 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         nullable=False,
         index=True,
     )
-    executed_at = Column(DateTime(timezone=True), nullable=False)
+    planned_date = Column(Date, nullable=True)
+    executed_at = Column(DateTime(timezone=True), nullable=True)
     total_sacas = Column(Numeric(12, 3), nullable=False, default=0)
     especial_sacas = Column(Numeric(12, 3), nullable=False, default=0)
     superior_sacas = Column(Numeric(12, 3), nullable=False, default=0)
@@ -48,7 +49,7 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
             values_callable=sa_enum_values,
         ),
         nullable=False,
-        default=ProductionOrderStatus.CONCLUIDA,
+        default=ProductionOrderStatus.PLANEJADA,
         index=True,
     )
     notes = Column(Text, nullable=True)

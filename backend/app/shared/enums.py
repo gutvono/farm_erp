@@ -88,6 +88,8 @@ class PayrollEntryStatus(str, enum.Enum):
 
 
 class ProductionOrderStatus(str, enum.Enum):
+    PLANEJADA = "planejada"
+    EM_PRODUCAO = "em_producao"
     CONCLUIDA = "concluida"
     CANCELADA = "cancelada"
 
