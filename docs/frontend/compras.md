@@ -1,46 +1,82 @@
 # Frontend Module: Compras
 
-## Overview
+## Visão Geral
 
-Módulo responsável pela interface de fornecedores e ordens de compra.
+Página única com 2 abas (Tabs shadcn): **Ordens de Compra** e **Fornecedores**. Ordens são criadas com itens dinâmicos e gerenciadas via cards expandíveis com dropdown de status protegido por AlertDialog.
 
-## Pages
+## Arquivos
 
-- `/compras` — Lista de ordens
-- `/compras/criar` — Criar nova ordem
-- `/compras/[id]` — Detalhes da ordem
-- `/compras/fornecedores` — Lista de fornecedores
-- `/compras/fornecedores/criar` — Criar novo fornecedor
-- `/compras/fornecedores/[id]` — Detalhes do fornecedor
+| Arquivo | Tipo | Descrição |
+|---------|------|-----------|
+| `app/(modules)/compras/page.tsx` | Page | Página em abas; carrega ordens, fornecedores e itens de estoque |
+| `services/compras.ts` | Service | Orquestra chamadas a `/api/compras/*`; converte Decimal → number |
+| `types/index.ts` | Tipos | `Supplier`, `PurchaseOrderItem`, `PurchaseOrder`, `PurchaseOrderStatus` |
+| `components/modules/compras/FornecedorForm.tsx` | Componente | Dialog (criar/editar) com React Hook Form + Zod |
+| `components/modules/compras/FornecedorRow.tsx` | Componente | Linha com nome, doc, email, telefone, endereço; ações editar/excluir |
+| `components/modules/compras/OrdemForm.tsx` | Componente | Dialog com seção de itens dinâmica (`useFieldArray`), subtotais e total calculados |
+| `components/modules/compras/OrdemCard.tsx` | Componente | Card expandível com tabela de itens e dropdown de status + AlertDialogs |
 
-## Components
+## Campos reais do backend (vs. spec original)
 
-- `PurchaseForm` — Formulário de criação de ordem (fornecedor, itens)
-- `PurchaseCard` — Card com resumo da ordem
-- `PurchasesList` — Tabela de ordens com filtros
-- `PurchaseDetail` — Detalhes de ordem com dropdown de status
-- `SupplierForm` — Formulário de fornecedor
-- `SupplierCard` — Card de fornecedor
-- `SuppliersList` — Tabela de fornecedores
-- `SupplierDetail` — Detalhes do fornecedor
+| Spec | Backend real |
+|------|-------------|
+| `contact_name` | Inexistente — campo não existe em `Supplier` |
+| `total_price` (item) | `subtotal` |
+| — | `ordered_at`, `received_at` em `PurchaseOrder` |
 
-## Services
+## Abas
 
-- `comprasService.getPurchases()` — Lista ordens
-- `comprasService.createPurchase(data)` — Cria ordem
-- `comprasService.updatePurchaseStatus(id, status)` — Atualiza status
-- `comprasService.getSuppliers()` — Lista fornecedores
-- `comprasService.createSupplier(data)` — Cria fornecedor
-- `comprasService.updateSupplier(id, data)` — Atualiza fornecedor
+### 1. Ordens de Compra
+- Select de filtro por status (`all`, `em_andamento`, `concluida`, `cancelada`)
+- Botão "Nova Ordem" abre `OrdemForm`
+- Lista de `OrdemCard`; card expandível mostra tabela de itens
 
-## Features
+### 2. Fornecedores
+- Botão "Novo Fornecedor" abre `FornecedorForm`
+- Lista de `FornecedorRow` com ações inline
 
-- CRUD de fornecedores
-- Criação de ordem com seleção de itens
-- Atualização de status via dropdown
-- Loading states e toasts
-- Filtros e busca
+## Componentes — Props
 
-## Known Limitations
+### `FornecedorForm`
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `open` | `boolean` | Estado do Dialog |
+| `onOpenChange` | `(open: boolean) => void` | Callback |
+| `supplier` | `Supplier \| null` | `null` → criação; preenchido → edição |
+| `onSuccess` | `() => void` | Recarrega lista |
 
-Documentação será preenchida durante o desenvolvimento do módulo.
+### `FornecedorRow`
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `supplier` | `Supplier` | Dados do fornecedor |
+| `onEdit` | `() => void` | Abre form de edição |
+| `onDeleted` | `() => void` | Recarrega lista |
+
+### `OrdemForm`
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `open` | `boolean` | Estado do Dialog |
+| `onOpenChange` | `(open: boolean) => void` | Callback |
+| `suppliers` | `Supplier[]` | Opções do Select de fornecedor |
+| `stockItems` | `StockItem[]` | Opções do Select de item por linha |
+| `onSuccess` | `() => void` | Recarrega lista |
+
+### `OrdemCard`
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `order` | `PurchaseOrder` | Dados da ordem |
+| `onChanged` | `() => void` | Recarrega lista após mudança de status |
+
+## Fluxo de status de Compras
+
+```
+em_andamento → concluida  (AlertDialog de confirmação: entra no estoque + conta a pagar)
+em_andamento → cancelada  (AlertDialog de confirmação simples)
+```
+- `concluida` e `cancelada` são status finais — Select desabilitado
+- Ao concluir: backend executa entrada no estoque para cada item + cria conta a pagar com vencimento em 30 dias + movimentação financeira (R$0,00 de rastreabilidade)
+- Ao cancelar: nenhum efeito colateral
+
+## Integração com Estoque
+
+A página busca `getItens()` do service de Estoque ao montar para popular o Select de itens no `OrdemForm`.

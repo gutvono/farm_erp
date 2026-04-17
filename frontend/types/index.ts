@@ -187,3 +187,84 @@ export interface Inventory {
   total_value: number
   generated_at: string
 }
+
+// ── COMPRAS ──────────────────────────────────────────────────────────────────
+
+export interface Supplier {
+  id: string
+  name: string
+  document: string | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface PurchaseOrderItem {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity: number
+  unit_price: number
+  subtotal: number
+  description: string | null
+}
+
+export type PurchaseOrderStatus = "em_andamento" | "concluida" | "cancelada"
+
+export interface PurchaseOrder {
+  id: string
+  supplier_id: string
+  supplier_name: string
+  status: PurchaseOrderStatus
+  total_amount: number
+  notes: string | null
+  ordered_at: string
+  received_at: string | null
+  items: PurchaseOrderItem[]
+  created_at: string
+  updated_at: string
+}
+
+// ── COMERCIAL ─────────────────────────────────────────────────────────────────
+
+export interface Client {
+  id: string
+  name: string
+  document: string | null
+  email: string | null
+  phone: string | null
+  address: string | null
+  notes: string | null
+  is_delinquent: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface SaleItem {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity: number
+  unit_price: number
+  subtotal: number
+  description: string | null
+}
+
+export type SaleStatus = "realizada" | "entregue" | "cancelada"
+
+export interface Sale {
+  id: string
+  client_id: string
+  client_name: string
+  status: SaleStatus
+  total_amount: number
+  notes: string | null
+  sold_at: string
+  delivered_at: string | null
+  items: SaleItem[]
+  created_at: string
+  updated_at: string
+}
