@@ -29,3 +29,25 @@ export interface User {
   is_active: boolean
   created_at: string
 }
+
+export interface DashboardKPIs {
+  balance: number
+  monthly_revenue: number
+  monthly_expenses: number
+  pending_payables: number
+  pending_receivables: number
+  low_stock_items: number
+  open_production_orders: number
+  defaulter_clients: number
+}
+
+export interface CashFlowPoint {
+  month: string
+  income: number
+  expenses: number
+}
+
+export interface DashboardData {
+  kpis: DashboardKPIs
+  cash_flow: CashFlowPoint[]
+}
