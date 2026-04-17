@@ -135,3 +135,55 @@ export interface DefaulterItem {
   amount_received: number
   due_date: string
 }
+
+export type StockCategory = "cafe" | "insumo" | "equipamento" | "veiculo" | "outro"
+export type StockUnit = "saca" | "litro" | "kg" | "unidade"
+export type StockMovementType = "entrada" | "saida"
+
+export interface StockItem {
+  id: string
+  sku: string
+  name: string
+  category: StockCategory
+  unit: StockUnit
+  quantity_on_hand: number
+  minimum_stock: number
+  unit_cost: number
+  description: string | null
+  is_below_minimum: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface StockMovement {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  movement_type: StockMovementType
+  quantity: number
+  unit_cost: number
+  total_value: number
+  description: string
+  source_module: string
+  reference_id: string | null
+  occurred_at: string
+  created_at: string
+}
+
+export interface InventoryItemOut {
+  id: string
+  sku: string
+  name: string
+  category: StockCategory
+  unit: StockUnit
+  quantity_on_hand: number
+  unit_cost: number
+  total_value: number
+  is_below_minimum: boolean
+}
+
+export interface Inventory {
+  items: InventoryItemOut[]
+  total_value: number
+  generated_at: string
+}
