@@ -268,3 +268,153 @@ export interface Sale {
   created_at: string
   updated_at: string
 }
+
+// ── FATURAMENTO ───────────────────────────────────────────────────────────────
+
+export interface InvoiceItem {
+  id: string
+  description: string
+  quantity: number
+  unit_price: number
+  subtotal: number
+}
+
+export type InvoiceStatus = "emitida" | "paga" | "cancelada"
+
+export interface Invoice {
+  id: string
+  number: string
+  sale_id: string | null
+  client_id: string
+  client_name: string
+  status: InvoiceStatus
+  total_amount: number
+  issue_date: string
+  due_date: string | null
+  notes: string | null
+  items: InvoiceItem[]
+  created_at: string
+  updated_at: string
+}
+
+// ── PCP ───────────────────────────────────────────────────────────────────────
+
+export interface Plot {
+  id: string
+  name: string
+  location: string | null
+  variety: string
+  capacity_sacas: number
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ActivityType = "plantio" | "adubacao" | "poda" | "colheita" | "irrigacao" | "outra"
+export type LaborType = "interna" | "externa"
+
+export interface PlotActivity {
+  id: string
+  plot_id: string
+  plot_name?: string
+  activity_type: ActivityType
+  activity_date: string
+  labor_type: LaborType
+  cost: number
+  details: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductionInput {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+  unit_cost: number
+  subtotal: number
+}
+
+export type ProductionOrderStatus = "planejada" | "em_producao" | "concluida" | "cancelada"
+
+export interface ProductionOrder {
+  id: string
+  plot_id: string
+  plot_name: string
+  status: ProductionOrderStatus
+  planned_date: string | null
+  executed_at: string | null
+  total_sacas: number
+  especial_sacas: number
+  superior_sacas: number
+  tradicional_sacas: number
+  total_cost: number
+  notes: string | null
+  inputs: ProductionInput[]
+  created_at: string
+  updated_at: string
+}
+
+export interface ProductionResult {
+  order_id: string
+  total_sacas: number
+  especial_sacas: number
+  superior_sacas: number
+  tradicional_sacas: number
+  inputs_consumed: ProductionInput[]
+  items_below_minimum: string[]
+  executed_at: string
+}
+
+// ── FOLHA DE PAGAMENTO ────────────────────────────────────────────────────────
+
+export type ContractType = "clt" | "pj" | "temporario"
+export type PayrollEntryStatus = "pendente" | "pago"
+export type PayrollPeriodStatus = "aberta" | "fechada"
+
+export interface Employee {
+  id: string
+  name: string
+  cpf: string
+  role: string
+  base_salary: number
+  contract_type: ContractType
+  admission_date: string
+  photo_path: string | null
+  photo_url: string | null
+  is_active: boolean
+  termination_cost_override: number | null
+  created_at: string
+}
+
+export interface PayrollEntry {
+  id: string
+  payroll_period_id: string
+  employee_id: string
+  employee_name: string
+  contract_type: ContractType
+  base_salary: number
+  overtime_amount: number
+  deductions: number
+  total_amount: number
+  status: PayrollEntryStatus
+  paid_at: string | null
+}
+
+export interface PayrollPeriod {
+  id: string
+  reference_month: number
+  reference_year: number
+  status: PayrollPeriodStatus
+  total_amount: number
+  entries: PayrollEntry[]
+  created_at: string
+}
+
+export interface PayrollBatchResult {
+  paid_count: number
+  total_paid: number
+  insufficient_balance: boolean
+  failed_employees: string[]
+}
