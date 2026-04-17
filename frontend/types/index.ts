@@ -51,3 +51,87 @@ export interface DashboardData {
   kpis: DashboardKPIs
   cash_flow: CashFlowPoint[]
 }
+
+export type MovementType = "entrada" | "saida"
+
+export interface FinancialMovement {
+  id: string
+  movement_type: MovementType
+  category: string
+  amount: number
+  description: string
+  source_module: string | null
+  reference_id: string | null
+  occurred_at: string
+  created_at: string
+}
+
+export type PayableStatus = "em_aberto" | "paga" | "cancelada"
+
+export interface AccountsPayable {
+  id: string
+  number: string
+  description: string
+  amount: number
+  due_date: string
+  paid_at: string | null
+  status: PayableStatus
+  supplier_id: string | null
+  purchase_order_id: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type ReceivableStatus =
+  | "em_aberto"
+  | "quitado"
+  | "parcialmente_pago"
+  | "cancelada"
+
+export interface AccountsReceivable {
+  id: string
+  number: string
+  description: string
+  amount: number
+  amount_received: number
+  due_date: string
+  received_at: string | null
+  status: ReceivableStatus
+  client_id: string
+  sale_id: string | null
+  invoice_id: string | null
+  notes: string | null
+  created_at: string
+  updated_at: string
+}
+
+export interface Balance {
+  total_entradas: number
+  total_saidas: number
+  saldo: number
+}
+
+export interface CashFlowItem {
+  period: string
+  entradas: number
+  saidas: number
+  saldo: number
+}
+
+export interface CashFlowResult {
+  items: CashFlowItem[]
+  total_entradas: number
+  total_saidas: number
+  saldo: number
+}
+
+export interface DefaulterItem {
+  client_id: string
+  client_name: string
+  receivable_id: string
+  receivable_number: string
+  amount: number
+  amount_received: number
+  due_date: string
+}
