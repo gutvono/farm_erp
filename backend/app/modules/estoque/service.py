@@ -36,14 +36,15 @@ def _get_item_or_404(db: Session, item_id: UUID) -> StockItem:
 def _notify_below_minimum(db: Session, item: StockItem) -> None:
     if Decimal(item.quantity_on_hand) < Decimal(item.minimum_stock):
         from app.modules.dashboard.service import criar_notificacao
+        unit_label = item.unit.value if hasattr(item.unit, "value") else str(item.unit)
         criar_notificacao(
             db,
             title=f"Estoque baixo: {item.name}",
             message=(
-                f"Quantidade atual ({item.quantity_on_hand} {item.unit}) "
-                f"abaixo do mínimo ({item.minimum_stock} {item.unit})"
+                f"Quantidade atual ({item.quantity_on_hand} {unit_label}) "
+                f"abaixo do mínimo ({item.minimum_stock} {unit_label})"
             ),
-            type="estoque",
+            type="warning",
             module="estoque",
         )
 
