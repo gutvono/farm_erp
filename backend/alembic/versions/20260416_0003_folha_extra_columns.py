@@ -15,18 +15,15 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "employees",
-        sa.Column("termination_cost_override", sa.Numeric(12, 2), nullable=True),
+    op.execute(
+        "ALTER TABLE employees ADD COLUMN IF NOT EXISTS termination_cost_override NUMERIC(12, 2)"
     )
-    op.add_column(
-        "payroll_periods",
-        sa.Column(
-            "total_amount",
-            sa.Numeric(12, 2),
-            nullable=False,
-            server_default="0",
-        ),
+    op.execute(
+        "ALTER TABLE payroll_periods ADD COLUMN IF NOT EXISTS total_amount NUMERIC(12, 2) NOT NULL DEFAULT 0"
+    )
+    # Ensure DEFAULT exists even if column was already created by migration 0001 (create_all)
+    op.execute(
+        "ALTER TABLE payroll_periods ALTER COLUMN total_amount SET DEFAULT 0"
     )
 
 

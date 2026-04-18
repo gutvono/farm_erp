@@ -33,9 +33,10 @@ def upgrade() -> None:
     )
 
     # New column: planned_date (nullable) for ordens planejadas.
-    op.add_column(
-        "production_orders",
-        sa.Column("planned_date", sa.Date(), nullable=True),
+    # IF NOT EXISTS guards against initial migration (0001) already creating it
+    # via Base.metadata.create_all() from the current model state.
+    op.execute(
+        "ALTER TABLE production_orders ADD COLUMN IF NOT EXISTS planned_date DATE"
     )
 
 

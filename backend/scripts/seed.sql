@@ -177,10 +177,10 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 13. PAYROLL PERIODS (3: 01/2026 fechada+paga, 02/2026 fechada+paga, 03/2026 aberta)
 -- -----------------------------------------------------------------------------
-INSERT INTO payroll_periods (id, competency_year, competency_month, status, closed_at) VALUES
-('dddddddd-dddd-dddd-dddd-dddddddd0001', 2026, 1, 'fechada', '2026-02-01 18:00:00-03'),
-('dddddddd-dddd-dddd-dddd-dddddddd0002', 2026, 2, 'fechada', '2026-03-01 18:00:00-03'),
-('dddddddd-dddd-dddd-dddd-dddddddd0003', 2026, 3, 'aberta',  NULL)
+INSERT INTO payroll_periods (id, competency_year, competency_month, status, closed_at, total_amount) VALUES
+('dddddddd-dddd-dddd-dddd-dddddddd0001', 2026, 1, 'fechada', '2026-02-01 18:00:00-03', 29300.00),
+('dddddddd-dddd-dddd-dddd-dddddddd0002', 2026, 2, 'fechada', '2026-03-01 18:00:00-03', 29943.33),
+('dddddddd-dddd-dddd-dddd-dddddddd0003', 2026, 3, 'aberta',  NULL,                      29300.00)
 ON CONFLICT (id) DO NOTHING;
 
 -- Entries 01/2026 (PAGO) - 8 funcionários

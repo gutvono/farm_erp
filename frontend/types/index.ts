@@ -16,11 +16,9 @@ export interface Notification {
   type: string
   title: string
   message: string
-  is_read: boolean
-  reference_module: string | null
-  reference_id: string | null
+  read: boolean
+  module: string | null
   created_at: string
-  read_at: string | null
 }
 
 export interface User {

@@ -67,7 +67,7 @@ class PayrollPeriod(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     closed_at = Column(DateTime(timezone=True), nullable=True)
-    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    total_amount = Column(Numeric(12, 2), nullable=False, server_default="0", default=0)
 
     entries = relationship(
         "PayrollEntry",

@@ -68,7 +68,7 @@ export default function LoginPage() {
         </CardHeader>
 
         <CardContent>
-          <form onSubmit={handleSubmit(onSubmit)} className="space-y-4">
+          <form onSubmit={handleSubmit(onSubmit)} method="post" className="space-y-4">
             <div className="space-y-1.5">
               <Label htmlFor="username">Usuário</Label>
               <Input

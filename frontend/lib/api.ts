@@ -34,19 +34,20 @@ export async function apiFetch<T = unknown>(
     },
   });
 
+  const data = await response.json().catch(() => null);
+
   if (response.status === 401) {
-    // Session expired or not authenticated — redirect to login
-    if (typeof window !== "undefined") {
+    const isLoginEndpoint = path === "/api/auth/login";
+    if (!isLoginEndpoint && typeof window !== "undefined") {
       window.location.href = "/login";
     }
-    throw new Error("Sessão expirada. Redirecionando para login...");
+    const message = data?.detail ?? "Sessão expirada. Faça login novamente.";
+    throw new Error(message);
   }
-
-  const data = await response.json().catch(() => null);
 
   if (!response.ok) {
     const message =
-      data?.message ?? `Erro ${response.status}: ${response.statusText}`;
+      data?.detail ?? data?.message ?? `Erro ${response.status}: ${response.statusText}`;
     throw new Error(message);
   }
 

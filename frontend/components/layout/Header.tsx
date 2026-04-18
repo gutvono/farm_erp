@@ -22,7 +22,7 @@ import {
 import { Separator } from "@/components/ui/separator"
 import { formatDateTime } from "@/lib/utils"
 import { getMe, logout } from "@/services/auth"
-import { apiFetch } from "@/lib/api"
+import { listNotifications, markNotificationRead } from "@/services/notificationService"
 import type { Notification, User } from "@/types"
 
 export function Header({ title }: { title: string }) {
@@ -32,7 +32,7 @@ export function Header({ title }: { title: string }) {
   const [user, setUser] = useState<User | null>(null)
   const [loggingOut, setLoggingOut] = useState(false)
 
-  const unreadCount = notifications.filter((n) => !n.is_read).length
+  const unreadCount = notifications.filter((n) => !n.read).length
 
   useEffect(() => {
     getMe()
@@ -55,7 +55,7 @@ export function Header({ title }: { title: string }) {
 
   async function fetchNotifications() {
     try {
-      const data = await apiFetch<Notification[]>("/api/notifications")
+      const data = await listNotifications()
       setNotifications(data)
     } catch {
       // Notifications failing should not block the UI
@@ -71,9 +71,9 @@ export function Header({ title }: { title: string }) {
 
   async function markAsRead(id: string) {
     try {
-      await apiFetch(`/api/notifications/${id}/read`, { method: "PATCH" })
+      await markNotificationRead(id)
       setNotifications((prev) =>
-        prev.map((n) => (n.id === id ? { ...n, is_read: true } : n))
+        prev.map((n) => (n.id === id ? { ...n, read: true } : n))
       )
     } catch {
       // Silent fail
@@ -83,8 +83,8 @@ export function Header({ title }: { title: string }) {
   function handleNotificationClick(notification: Notification) {
     markAsRead(notification.id)
     setOpen(false)
-    if (notification.reference_module) {
-      router.push(`/${notification.reference_module}`)
+    if (notification.module) {
+      router.push(`/${notification.module}`)
     }
   }
 
@@ -148,7 +148,7 @@ export function Header({ title }: { title: string }) {
               <div key={notification.id}>
                 <div
                   className={`cursor-pointer rounded-lg p-3 transition-colors hover:bg-slate-50 ${
-                    !notification.is_read ? "bg-blue-50" : ""
+                    !notification.read ? "bg-blue-50" : ""
                   }`}
                   onClick={() => handleNotificationClick(notification)}
                 >
@@ -164,7 +164,7 @@ export function Header({ title }: { title: string }) {
                         {formatDateTime(notification.created_at)}
                       </p>
                     </div>
-                    {!notification.is_read && (
+                    {!notification.read && (
                       <Button
                         variant="ghost"
                         size="sm"

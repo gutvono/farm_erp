@@ -24,7 +24,40 @@ import {
 import { createFuncionario, updateFuncionario } from "@/services/folha"
 import { ContractType, Employee } from "@/types/index"
 
+// ─── helpers ──────────────────────────────────────────────────────────────────
+
 const CPF_REGEX = /^\d{3}\.\d{3}\.\d{3}-\d{2}$/
+
+function formatCpf(digits: string): string {
+  return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
+}
+
+function parseCurrency(v: string): number | undefined {
+  if (!v || v.trim() === "") return undefined
+  const n = parseFloat(v.replace(",", "."))
+  return isNaN(n) ? undefined : n
+}
+
+function terminationPlaceholder(contractType: ContractType | undefined): string {
+  if (!contractType) return "Selecione o tipo de contrato primeiro"
+  if (contractType === "clt") return "Padrão: 13º proporcional + FGTS + aviso prévio"
+  return "Padrão: R$ 0,00 (sem encargos)"
+}
+
+// ─── schemas ──────────────────────────────────────────────────────────────────
+
+// Kept as string so RHF input type matches the text field; converted to number in submit handler.
+const terminationField = z
+  .string()
+  .optional()
+  .refine(
+    (v) => {
+      if (!v || v.trim() === "") return true
+      const n = parseCurrency(v)
+      return n !== undefined && n >= 0
+    },
+    { message: "Valor deve ser >= 0" }
+  )
 
 const baseFields = {
   name: z.string().min(1, "Nome é obrigatório"),
@@ -34,7 +67,7 @@ const baseFields = {
     error: "Tipo de contrato é obrigatório",
   }),
   admission_date: z.string().min(1, "Data de admissão é obrigatória"),
-  termination_cost_override: z.number().min(0, "Valor deve ser >= 0").optional(),
+  termination_cost_override: terminationField,
 }
 
 const createSchema = z.object({
@@ -46,6 +79,8 @@ const editSchema = z.object(baseFields)
 
 type CreateFormData = z.infer<typeof createSchema>
 type EditFormData = z.infer<typeof editSchema>
+
+// ─── component ────────────────────────────────────────────────────────────────
 
 interface FuncionarioFormProps {
   open: boolean
@@ -64,6 +99,9 @@ export function FuncionarioForm({
   const [loading, setLoading] = useState(false)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoError, setPhotoError] = useState<string | null>(null)
+
+  // Controlled display value for CPF (shows raw digits while typing, masked on blur)
+  const [cpfDisplay, setCpfDisplay] = useState("")
 
   const createForm = useForm<CreateFormData>({
     resolver: zodResolver(createSchema),
@@ -87,9 +125,13 @@ export function FuncionarioForm({
         base_salary: employee.base_salary,
         contract_type: employee.contract_type,
         admission_date: employee.admission_date,
-        termination_cost_override: employee.termination_cost_override ?? undefined,
+        termination_cost_override:
+          employee.termination_cost_override != null
+            ? String(employee.termination_cost_override)
+            : "",
       })
     } else {
+      setCpfDisplay("")
       createForm.reset({
         name: "",
         cpf: "",
@@ -97,10 +139,32 @@ export function FuncionarioForm({
         base_salary: 0,
         contract_type: undefined,
         admission_date: "",
-        termination_cost_override: undefined,
+        termination_cost_override: "",
       })
     }
   }, [open, employee, createForm, editForm])
+
+  // ── CPF handlers ────────────────────────────────────────────────────────────
+
+  const { ref: cpfRef, ...cpfFieldProps } = createForm.register("cpf")
+
+  function handleCpfChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const digits = e.target.value.replace(/\D/g, "").slice(0, 11)
+    setCpfDisplay(digits)
+    createForm.setValue("cpf", digits, { shouldValidate: false })
+  }
+
+  function handleCpfBlur() {
+    if (cpfDisplay.replace(/\D/g, "").length === 11) {
+      const formatted = formatCpf(cpfDisplay.replace(/\D/g, ""))
+      setCpfDisplay(formatted)
+      createForm.setValue("cpf", formatted, { shouldValidate: true })
+    } else {
+      createForm.setValue("cpf", cpfDisplay, { shouldValidate: true })
+    }
+  }
+
+  // ── photo handler ───────────────────────────────────────────────────────────
 
   function handlePhotoChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null
@@ -114,6 +178,8 @@ export function FuncionarioForm({
     setPhotoFile(file)
   }
 
+  // ── submit handlers ─────────────────────────────────────────────────────────
+
   async function submitCreate(data: CreateFormData) {
     setLoading(true)
     try {
@@ -124,11 +190,9 @@ export function FuncionarioForm({
       formData.append("base_salary", String(data.base_salary))
       formData.append("contract_type", data.contract_type)
       formData.append("admission_date", data.admission_date)
-      if (data.termination_cost_override !== undefined) {
-        formData.append(
-          "termination_cost_override",
-          String(data.termination_cost_override)
-        )
+      const terminationCost = parseCurrency(data.termination_cost_override ?? "")
+      if (terminationCost !== undefined) {
+        formData.append("termination_cost_override", String(terminationCost))
       }
       if (photoFile) {
         formData.append("photo_file", photoFile)
@@ -155,7 +219,7 @@ export function FuncionarioForm({
         base_salary: data.base_salary,
         contract_type: data.contract_type,
         admission_date: data.admission_date,
-        termination_cost_override: data.termination_cost_override,
+        termination_cost_override: parseCurrency(data.termination_cost_override ?? ""),
       })
       toast.success("Funcionário atualizado com sucesso")
       onSuccess()
@@ -166,6 +230,8 @@ export function FuncionarioForm({
       setLoading(false)
     }
   }
+
+  // ── render ──────────────────────────────────────────────────────────────────
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -256,18 +322,19 @@ export function FuncionarioForm({
 
             <div className="space-y-1">
               <Label htmlFor="edit-termination_cost_override">
-                Custo de demissão (opcional)
+                Custo de demissão{" "}
+                <span className="font-normal text-slate-400">(opcional)</span>
               </Label>
               <Input
                 id="edit-termination_cost_override"
-                type="number"
-                step="0.01"
-                placeholder="Sobrescreve o padrão por contrato"
-                {...editForm.register("termination_cost_override", {
-                  valueAsNumber: true,
-                  setValueAs: (v) => (v === "" || isNaN(v) ? undefined : Number(v)),
-                })}
+                type="text"
+                inputMode="decimal"
+                placeholder={terminationPlaceholder(contractTypeEdit)}
+                {...editForm.register("termination_cost_override")}
               />
+              <p className="text-xs text-slate-400">
+                Sobrescreve o padrão do contrato
+              </p>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -295,8 +362,15 @@ export function FuncionarioForm({
                 <Label htmlFor="cpf">CPF *</Label>
                 <Input
                   id="cpf"
-                  placeholder="000.000.000-00"
-                  {...createForm.register("cpf")}
+                  ref={cpfRef}
+                  value={cpfDisplay}
+                  onChange={handleCpfChange}
+                  onBlur={handleCpfBlur}
+                  placeholder="00000000000"
+                  inputMode="numeric"
+                  maxLength={14}
+                  autoComplete="off"
+                  {...{ name: cpfFieldProps.name }}
                 />
                 {createForm.formState.errors.cpf && (
                   <p className="text-xs text-red-500">
@@ -374,18 +448,19 @@ export function FuncionarioForm({
 
             <div className="space-y-1">
               <Label htmlFor="termination_cost_override">
-                Custo de demissão (opcional)
+                Custo de demissão{" "}
+                <span className="font-normal text-slate-400">(opcional)</span>
               </Label>
               <Input
                 id="termination_cost_override"
-                type="number"
-                step="0.01"
-                placeholder="Sobrescreve o padrão por contrato"
-                {...createForm.register("termination_cost_override", {
-                  valueAsNumber: true,
-                  setValueAs: (v) => (v === "" || isNaN(v) ? undefined : Number(v)),
-                })}
+                type="text"
+                inputMode="decimal"
+                placeholder={terminationPlaceholder(contractTypeCreate)}
+                {...createForm.register("termination_cost_override")}
               />
+              <p className="text-xs text-slate-400">
+                Sobrescreve o padrão do contrato
+              </p>
             </div>
 
             <div className="space-y-1">
