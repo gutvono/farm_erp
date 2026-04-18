@@ -1,5 +1,6 @@
-from pydantic_settings import BaseSettings, SettingsConfigDict
 from functools import lru_cache
+
+from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
 class Settings(BaseSettings):
@@ -14,8 +15,9 @@ class Settings(BaseSettings):
     upload_dir: str = "uploads"
     environment: str = "development"
 
-    # CORS
-    allowed_origins: list[str] = ["http://localhost:3000"]
+    # CORS — string separada por vírgulas; parsada em main.py
+    # No Railway: ALLOWED_ORIGINS=https://frontend.up.railway.app,https://outro.dominio.com
+    allowed_origins: str = "http://localhost:3000"
 
     # Session
     session_expire_minutes: int = 60 * 24  # 24 hours
