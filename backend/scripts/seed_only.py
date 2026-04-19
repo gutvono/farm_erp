@@ -16,6 +16,14 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sqlalchemy
 from sqlalchemy import text
 
+
+def _normalize_url(url: str) -> str:
+    # Railway (e Heroku) injetam DATABASE_URL com "postgres://" — prefixo legado
+    # que o SQLAlchemy 2.x rejeita. Normaliza para "postgresql://".
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
 # Tabelas na ordem correta para DELETE sem violar FK.
 # Filhas antes das pais.
 TABLES_TO_CLEAR = [
@@ -46,7 +54,7 @@ TABLES_TO_CLEAR = [
 
 
 def main() -> None:
-    database_url = os.environ.get("DATABASE_URL", "")
+    database_url = _normalize_url(os.environ.get("DATABASE_URL", ""))
     if not database_url:
         print("[seed-only] ERROR: DATABASE_URL não está definida no ambiente")
         sys.exit(1)
@@ -71,10 +79,12 @@ def main() -> None:
         print("[seed-only] Tabelas limpas.")
 
         # ── 2. Executa seed.sql ────────────────────────────────────────────────
+        # exec_driver_sql passa o SQL diretamente ao cursor do psycopg2,
+        # suportando múltiplos statements separados por ponto-e-vírgula.
         print(f"[seed-only] Aplicando seed de {seed_file}...")
         with open(seed_file, "r", encoding="utf-8") as f:
             sql = f.read()
-        conn.execute(text(sql))
+        conn.exec_driver_sql(sql)
         conn.commit()
         print("[seed-only] Seed aplicado com sucesso.")
 

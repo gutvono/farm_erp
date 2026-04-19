@@ -16,6 +16,12 @@ import sqlalchemy
 from sqlalchemy import text
 
 
+def _normalize_url(url: str) -> str:
+    if url.startswith("postgres://"):
+        return url.replace("postgres://", "postgresql://", 1)
+    return url
+
+
 def get_db_parts(database_url: str) -> tuple[str, str]:
     """Extract base URL (without db name) and db name from DATABASE_URL."""
     # e.g. postgresql://user:pass@host:port/dbname
@@ -24,7 +30,7 @@ def get_db_parts(database_url: str) -> tuple[str, str]:
 
 
 def main() -> None:
-    database_url = os.environ.get("DATABASE_URL", "")
+    database_url = _normalize_url(os.environ.get("DATABASE_URL", ""))
     if not database_url:
         print("ERROR: DATABASE_URL not set in .env")
         sys.exit(1)
@@ -74,7 +80,7 @@ def main() -> None:
         with seed_engine.connect() as conn:
             with open(seed_file, "r", encoding="utf-8") as f:
                 sql = f.read()
-            conn.execute(text(sql))
+            conn.exec_driver_sql(sql)
             conn.commit()
         seed_engine.dispose()
         print("[reset-db] Seed data applied.")
