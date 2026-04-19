@@ -32,12 +32,13 @@ def login(
     db: Session = Depends(get_db),
 ) -> SuccessResponse:
     user, token = auth_service.login(db, body.username, body.password)
+    is_prod = settings.environment == "production"
     response.set_cookie(
         key=SESSION_COOKIE,
         value=token,
         httponly=True,
-        secure=settings.environment != "development",
-        samesite="lax",
+        secure=is_prod,
+        samesite="none" if is_prod else "lax",
         max_age=settings.session_expire_minutes * 60,
     )
     return success("Login realizado com sucesso", UserResponse.model_validate(user))
