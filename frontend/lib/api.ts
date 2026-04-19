@@ -1,5 +1,10 @@
 const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
 
+// Debug temporário — confirmar que NEXT_PUBLIC_API_URL está correta em produção
+if (typeof window !== "undefined") {
+  console.log("[api] API_BASE_URL:", API_BASE_URL);
+}
+
 type FetchOptions = RequestInit & {
   params?: Record<string, string | number | boolean | undefined>;
 };
