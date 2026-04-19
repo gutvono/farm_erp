@@ -53,6 +53,48 @@ Isso executa as migrations do Alembic e o seed com dados de exemplo (clientes, f
 | `make shell-backend`| Abre shell dentro do container do backend      |
 | `make shell-db`     | Abre psql dentro do container do postgres      |
 
+## Deploy no Railway
+
+### Variáveis de ambiente
+
+Configure as seguintes variáveis no dashboard de cada serviço no Railway:
+
+**Backend:**
+| Variável | Descrição |
+|----------|-----------|
+| `DATABASE_URL` | Injetada automaticamente ao linkar o serviço Postgres |
+| `SECRET_KEY` | Chave secreta para sessões (gere com `python -c "import secrets; print(secrets.token_hex(32))"`) |
+| `ALLOWED_ORIGINS` | URL pública do frontend (ex: `https://meuapp.up.railway.app`) |
+
+**Frontend:**
+| Variável | Descrição |
+|----------|-----------|
+| `NEXT_PUBLIC_API_URL` | URL pública do backend (ex: `https://backend.up.railway.app`) |
+
+### Pre-deploy command (Backend)
+
+No serviço de backend do Railway, configure o **Pre-deploy command**:
+
+```
+poetry run alembic upgrade head && poetry run python scripts/seed_only.py
+```
+
+Esse comando:
+1. Aplica todas as migrations pendentes
+2. Limpa as tabelas na ordem correta (respeitando FK) e repopula com dados de seed
+
+> O script `seed_only.py` **não dropa nem recria o banco** — é seguro rodar em produção com dados existentes, pois apenas trunca e repopula.
+
+### Build local para produção
+
+```bash
+cp .env.prod.example .env.prod   # edite com suas variáveis reais
+make build-prod
+make up-prod
+```
+
+---
+
 ## Stack
 
 - **Backend:** FastAPI + SQLAlchemy + Alembic + PostgreSQL
