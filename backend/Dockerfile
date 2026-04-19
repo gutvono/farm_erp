@@ -14,7 +14,9 @@ RUN poetry install --no-root --only main
 # Copy application code
 COPY . .
 
-# Ensure uploads directory exists
-RUN mkdir -p uploads
+# Ensure uploads directory exists and entrypoint is executable
+RUN mkdir -p uploads && chmod +x /app/entrypoint.sh
 
 EXPOSE 8000
+
+CMD ["/app/entrypoint.sh"]
