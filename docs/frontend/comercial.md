@@ -64,6 +64,13 @@ Página única com 2 abas (Tabs shadcn): **Vendas** e **Clientes**. Vendas são 
 | `stockItems` | `StockItem[]` | Itens de estoque de categoria café |
 | `onSuccess` | `() => void` | Recarrega lista |
 
+#### Seção "Condições de Pagamento"
+- Select de parcelas (1x = À vista, 2x–12x)
+- Quando `installments >= 2`: campos "Vencimento 1ª Parcela" (date) e "Intervalo (dias)" aparecem
+- Tabela de preview em tempo real: Parcela X/Y | Vencimento | Valor (última parcela absorve resíduo de centavos)
+- Campos enviados ao backend apenas quando `installments >= 2`
+- Validação via Zod `.superRefine`: `first_due_date` obrigatório quando parcelado
+
 ### `VendaCard`
 | Prop | Tipo | Descrição |
 |------|------|-----------|
@@ -89,3 +96,13 @@ entregue  → cancelada (AlertDialog: "venda será cancelada")
 ## Integração com Estoque
 
 A página busca `getItens({ category: "cafe" })` ao montar para listar apenas itens de café no `VendaForm`.
+
+## Campos de parcelamento em `Sale`
+
+```typescript
+installments: number              // default 1
+first_due_date: string | null     // vencimento da 1ª parcela
+installment_interval_days: number // default 30
+```
+
+`createVenda` aceita esses campos opcionais — enviados apenas quando `installments >= 2`.

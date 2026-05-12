@@ -249,19 +249,46 @@ def finalize_receipt(
     supplier = _get_supplier_or_404(db, order.supplier_id)
 
     receipt_total = Decimal(updated.receipt_total_amount or 0)
+    installments = updated.installments or 1
     if receipt_total > 0:
-        fin_service.criar_conta_pagar(
-            db,
-            description=(
-                f"Ordem de compra #{order.id} — {supplier.name} (itens aceitos)"
-            ),
-            amount=receipt_total,
-            due_date=date.today() + timedelta(days=30),
-            supplier_id=order.supplier_id,
-            source_module="compras",
-            reference_id=order.id,
-            notes=order.notes,
-        )
+        if installments <= 1:
+            fin_service.criar_conta_pagar(
+                db,
+                description=(
+                    f"Ordem de compra #{order.id} — {supplier.name} (itens aceitos)"
+                ),
+                amount=receipt_total,
+                due_date=date.today() + timedelta(days=30),
+                supplier_id=order.supplier_id,
+                source_module="compras",
+                reference_id=order.id,
+                notes=order.notes,
+            )
+        else:
+            base_share = (receipt_total / Decimal(installments)).quantize(
+                Decimal("0.01")
+            )
+            last_share = receipt_total - (base_share * (installments - 1))
+            interval = updated.installment_interval_days or 30
+            first_due = updated.first_due_date or date.today() + timedelta(days=30)
+            for idx in range(installments):
+                amount = last_share if idx == installments - 1 else base_share
+                due = first_due + timedelta(days=interval * idx)
+                fin_service.criar_conta_pagar(
+                    db,
+                    description=(
+                        f"Ordem de compra #{order.id} — {supplier.name} "
+                        f"(parcela {idx + 1}/{installments})"
+                    ),
+                    amount=amount,
+                    due_date=due,
+                    supplier_id=order.supplier_id,
+                    source_module="compras",
+                    reference_id=order.id,
+                    notes=order.notes,
+                    installment_number=idx + 1,
+                    installment_total=installments,
+                )
 
     fin_service.registrar_movimento(
         db,
@@ -298,6 +325,11 @@ def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
     order = compras_repo.get_order_with_receipts(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Ordem de compra não encontrada")
+
+    if order.status == PurchaseOrderStatus.CONCLUIDA:
+        # Parcelamento: estoque + NF já registrados no pagamento da 1ª parcela.
+        # Demais pagamentos não disparam novamente o fluxo de conclusão.
+        return order
 
     if order.status != PurchaseOrderStatus.AGUARDANDO_PAGAMENTO:
         raise HTTPException(

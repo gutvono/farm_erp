@@ -120,33 +120,65 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
             reference_id=sale.id,
         )
 
-    # 5. Create invoice (placeholder — will be implemented in Faturamento module)
-    faturamento_service.criar_fatura(
-        db,
-        sale_id=sale.id,
-        client_id=sale.client_id,
-        items=sale.items,
-        total_amount=Decimal(sale.total_amount),
-        source_module="comercial",
-    )
+    installments = sale.installments or 1
+    if installments <= 1:
+        # 5. Create invoice (flow à vista — unchanged)
+        faturamento_service.criar_fatura(
+            db,
+            sale_id=sale.id,
+            client_id=sale.client_id,
+            items=sale.items,
+            total_amount=Decimal(sale.total_amount),
+            source_module="comercial",
+        )
 
-    # 6. Create account receivable (due in 30 days)
-    fin_service.criar_conta_receber(
-        db,
-        client_id=sale.client_id,
-        description=f"Venda — {client.name}",
-        amount=Decimal(sale.total_amount),
-        due_date=date.today() + timedelta(days=30),
-        source_module="comercial",
-        reference_id=sale.id,
-    )
+        # 6. Create account receivable (due in 30 days)
+        fin_service.criar_conta_receber(
+            db,
+            client_id=sale.client_id,
+            description=f"Venda — {client.name}",
+            amount=Decimal(sale.total_amount),
+            due_date=date.today() + timedelta(days=30),
+            source_module="comercial",
+            reference_id=sale.id,
+        )
+    else:
+        # 5. Create parceled invoices (one per installment)
+        invoices = faturamento_service.criar_faturas_parceladas(
+            db,
+            sale_id=sale.id,
+            client_id=sale.client_id,
+            items=sale.items,
+            total_amount=Decimal(sale.total_amount),
+            installments=installments,
+            first_due_date=sale.first_due_date,
+            installment_interval_days=sale.installment_interval_days or 30,
+        )
 
-    # 7. Register financial movement (entrada/venda)
+        # 6. One receivable per installment, linked to its invoice
+        for invoice in invoices:
+            fin_service.criar_conta_receber(
+                db,
+                client_id=sale.client_id,
+                description=(
+                    f"Venda — {client.name} "
+                    f"(parcela {invoice.installment_number}/{installments})"
+                ),
+                amount=Decimal(str(invoice.total_amount)),
+                due_date=invoice.due_date,
+                source_module="comercial",
+                sale_id=sale.id,
+                invoice_id=invoice.id,
+                installment_number=invoice.installment_number,
+                installment_total=installments,
+            )
+
+    # 7. Register financial movement (entrada/venda, R$0 placeholder)
     fin_service.registrar_movimento(
         db,
         movement_type=MovementType.ENTRADA,
         category=FinancialCategory.VENDA,
-        amount=Decimal(sale.total_amount),
+        amount=Decimal(sale.total_amount) if installments <= 1 else Decimal("0"),
         description=f"Venda — {client.name}",
         source_module="comercial",
         reference_id=sale.id,

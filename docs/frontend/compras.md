@@ -77,3 +77,18 @@ em_andamento ──[Enviar para Aprovação]──▶ aguardando_aprovacao_finan
 
 ## Integração com Estoque
 A página busca `getItens()` ao montar para popular o Select de itens no `OrdemForm`.
+
+## Campos de parcelamento em `PurchaseOrder`
+
+```typescript
+installments: number              // default 1
+first_due_date: string | null     // vencimento da 1ª parcela
+installment_interval_days: number // default 30
+```
+
+`OrdemForm` expõe seção "Condições de Pagamento" idêntica ao `VendaForm`:
+- Select de parcelas (1x–12x)
+- Campos de data e intervalo condicionais (`installments >= 2`)
+- Tabela de preview em tempo real com distribuição de resíduo na última parcela
+
+`createOrdem` aceita esses campos opcionais — enviados apenas quando `installments >= 2`.

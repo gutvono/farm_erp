@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -44,6 +44,9 @@ class Sale(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     sold_at = Column(DateTime(timezone=True), nullable=False)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
+    installments = Column(Integer, nullable=False, default=1)
+    first_due_date = Column(Date, nullable=True)
+    installment_interval_days = Column(Integer, nullable=False, default=30)
 
     client = relationship("Client", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")

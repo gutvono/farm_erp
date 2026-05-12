@@ -77,6 +77,8 @@ export interface AccountsPayable {
   supplier_id: string | null
   purchase_order_id: string | null
   notes: string | null
+  installment_number: number | null
+  installment_total: number | null
   created_at: string
   updated_at: string
 }
@@ -100,6 +102,8 @@ export interface AccountsReceivable {
   sale_id: string | null
   invoice_id: string | null
   notes: string | null
+  installment_number: number | null
+  installment_total: number | null
   created_at: string
   updated_at: string
 }
@@ -230,6 +234,9 @@ export interface PurchaseOrder {
   notes: string | null
   ordered_at: string
   received_at: string | null
+  installments: number
+  first_due_date: string | null
+  installment_interval_days: number
   items: PurchaseOrderItem[]
   created_at: string
   updated_at: string
@@ -291,6 +298,9 @@ export interface Sale {
   notes: string | null
   sold_at: string
   delivered_at: string | null
+  installments: number
+  first_due_date: string | null
+  installment_interval_days: number
   items: SaleItem[]
   created_at: string
   updated_at: string
@@ -319,6 +329,10 @@ export interface Invoice {
   issue_date: string
   due_date: string | null
   notes: string | null
+  invoice_type: string
+  installment_number: number | null
+  installment_total: number | null
+  parent_invoice_id: string | null
   items: InvoiceItem[]
   created_at: string
   updated_at: string

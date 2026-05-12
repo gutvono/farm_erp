@@ -75,7 +75,10 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
       "unit_price": 450.00,
       "description": "opcional"
     }
-  ]
+  ],
+  "installments": 1,
+  "first_due_date": null,
+  "installment_interval_days": 30
 }
 ```
 
@@ -83,6 +86,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `total_amount` calculado automaticamente (soma dos subtotais)
 - `subtotal` por item = `quantity × unit_price`
 - `ordered_at` opcional (default: now)
+- `installments`: 1 a 24 (default 1 — pagamento à vista, fluxo atual inalterado)
+- `first_due_date`: obrigatório quando `installments >= 2`
+- `installment_interval_days`: dias entre parcelas (default 30)
 
 ### PurchaseOrderCancelRequest (body de `/recusar`)
 ```json
@@ -159,20 +165,12 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 - Origem: `em_conferencia`
 - Atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas.
 - Calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
-- Se `receipt_total_amount > 0`, gera **conta a pagar** com vencimento em 30 dias:
-  ```python
-  fin_service.criar_conta_pagar(
-      db,
-      description=f"Ordem de compra #{order.id} — {supplier.name} (itens aceitos)",
-      amount=receipt_total,
-      due_date=date.today() + timedelta(days=30),
-      supplier_id=order.supplier_id,
-      source_module="compras",
-      reference_id=order.id,
-      notes=order.notes,
-  )
-  ```
+- Se `receipt_total_amount > 0`, gera **conta(s) a pagar** dependendo de `installments`:
+  - **`installments <= 1` (à vista, default — fluxo inalterado):** uma única conta a pagar com vencimento `today + 30d`.
+  - **`installments >= 2` (parcelado):** N contas a pagar. `receipt_total_amount` é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number` e `installment_total`.
 - Registra `financial_movement` (R$0, descrição "Conferência finalizada — aguardando pagamento").
+
+> **Atenção (parcelamento):** o gatilho `complete_order_after_payment` é disparado **uma única vez**, no pagamento da primeira parcela. Pagamentos das parcelas seguintes apenas baixam a conta a pagar — o estoque e as NFs já foram registrados.
 
 ### Ao Pagar a Conta a Pagar (gatilho no Financeiro)
 Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment`, que executa em sequência:
@@ -223,6 +221,9 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 | `ordered_at` | TIMESTAMPTZ |
 | `received_at` | TIMESTAMPTZ (nullable — setado ao concluir) |
 | `notes` | TEXT (nullable) |
+| `installments` | INT default 1 |
+| `first_due_date` | DATE (nullable) |
+| `installment_interval_days` | INT default 30 |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `purchase_order_items`

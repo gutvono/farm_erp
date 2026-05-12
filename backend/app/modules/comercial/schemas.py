@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.shared.enums import SaleStatus
 
@@ -92,6 +92,17 @@ class SaleCreate(BaseModel):
     notes: Optional[str] = None
     sold_at: Optional[datetime] = None
     items: list[SaleItemCreate] = Field(min_length=1)
+    installments: int = Field(default=1, ge=1, le=24)
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = Field(default=30, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_installments(self) -> "SaleCreate":
+        if self.installments >= 2 and self.first_due_date is None:
+            raise ValueError(
+                "first_due_date é obrigatório quando installments >= 2"
+            )
+        return self
 
 
 class SaleOut(BaseModel):
@@ -103,6 +114,9 @@ class SaleOut(BaseModel):
     sold_at: datetime
     delivered_at: Optional[datetime] = None
     notes: Optional[str] = None
+    installments: int = 1
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = 30
     items: list[SaleItemOut]
     created_at: datetime
     updated_at: datetime
@@ -120,6 +134,9 @@ class SaleOut(BaseModel):
             sold_at=sale.sold_at,
             delivered_at=sale.delivered_at,
             notes=sale.notes,
+            installments=sale.installments or 1,
+            first_due_date=sale.first_due_date,
+            installment_interval_days=sale.installment_interval_days or 30,
             items=[SaleItemOut.from_model(i) for i in sale.items],
             created_at=sale.created_at,
             updated_at=sale.updated_at,

@@ -104,6 +104,9 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
         sold_at=sold_at,
         notes=data.notes,
         status=SaleStatus.REALIZADA,
+        installments=data.installments,
+        first_due_date=data.first_due_date,
+        installment_interval_days=data.installment_interval_days,
     )
     db.add(sale)
     db.flush()  # get sale.id before creating items

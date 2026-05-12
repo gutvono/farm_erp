@@ -29,13 +29,17 @@ interface RawInvoice {
   id: string
   number: string
   sale_id: string | null
-  client_id: string
+  client_id: string | null
   client_name: string
   status: InvoiceStatus
   total_amount: string | number
   issue_date: string
   due_date: string | null
   notes: string | null
+  invoice_type: string
+  installment_number: number | null
+  installment_total: number | null
+  parent_invoice_id: string | null
   items: RawInvoiceItem[]
   created_at: string
   updated_at: string
@@ -53,6 +57,10 @@ function parseInvoice(raw: RawInvoice): Invoice {
     issue_date: raw.issue_date,
     due_date: raw.due_date,
     notes: raw.notes,
+    invoice_type: raw.invoice_type ?? "venda",
+    installment_number: raw.installment_number ?? null,
+    installment_total: raw.installment_total ?? null,
+    parent_invoice_id: raw.parent_invoice_id ?? null,
     items: (raw.items ?? []).map(parseInvoiceItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,

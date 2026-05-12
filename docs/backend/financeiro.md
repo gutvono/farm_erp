@@ -150,6 +150,19 @@ Se `source_module == "compras"`, `reference_id` é atribuído a `purchase_order_
 Se `source_module == "comercial"`, `reference_id` é atribuído a `sale_id`.
 Se `source_module == "faturamento"`, `reference_id` é atribuído a `invoice_id`.
 
+### Parcelamento (vendas / compras)
+
+`criar_conta_pagar` e `criar_conta_receber` aceitam parâmetros opcionais:
+
+- `installment_number: int` — 1-based
+- `installment_total: int`
+- `sale_id: UUID` (apenas `criar_conta_receber`) — quando o vínculo da venda precisa coexistir com `invoice_id`
+- `invoice_id: UUID` (apenas `criar_conta_receber`)
+
+No fluxo de **venda parcelada** (Comercial chama `criar_faturas_parceladas` + N `criar_conta_receber`), cada conta a receber referencia tanto a venda (`sale_id`) quanto a fatura da parcela correspondente (`invoice_id`).
+
+No fluxo de **compra parcelada** (Compras divide `receipt_total_amount` em N parcelas), cada conta a pagar mantém `purchase_order_id` e recebe `installment_number`/`installment_total`. Ver `docs/backend/compras.md` para detalhes sobre o gatilho `complete_order_after_payment`, que só é executado no pagamento da primeira parcela.
+
 ## Regras de Negócio
 
 ### Saldo
@@ -210,6 +223,8 @@ Se `source_module == "faturamento"`, `reference_id` é atribuído a `invoice_id`
 | `paid_at` | TIMESTAMPTZ (nullable) |
 | `status` | enum (`em_aberto` / `paga` / `cancelada`) |
 | `notes` | TEXT (nullable) |
+| `installment_number` | INT (nullable) — 1-based |
+| `installment_total` | INT (nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `accounts_receivable`
@@ -227,6 +242,8 @@ Se `source_module == "faturamento"`, `reference_id` é atribuído a `invoice_id`
 | `received_at` | TIMESTAMPTZ (nullable) |
 | `status` | enum (`em_aberto` / `quitado` / `parcialmente_pago` / `cancelada`) |
 | `notes` | TEXT (nullable) |
+| `installment_number` | INT (nullable) — 1-based |
+| `installment_total` | INT (nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ## Integrações entre módulos

@@ -73,6 +73,8 @@ def criar_conta_pagar(
     source_module: Optional[str] = None,
     reference_id: Optional[UUID] = None,
     notes: Optional[str] = None,
+    installment_number: Optional[int] = None,
+    installment_total: Optional[int] = None,
 ) -> AccountPayable:
     """Create an account payable. Called by compras/folha."""
     if amount <= 0:
@@ -88,6 +90,8 @@ def criar_conta_pagar(
         supplier_id=supplier_id,
         purchase_order_id=purchase_order_id,
         notes=notes,
+        installment_number=installment_number,
+        installment_total=installment_total,
     )
 
 
@@ -101,12 +105,18 @@ def criar_conta_receber(
     source_module: Optional[str] = None,
     reference_id: Optional[UUID] = None,
     notes: Optional[str] = None,
+    installment_number: Optional[int] = None,
+    installment_total: Optional[int] = None,
+    sale_id: Optional[UUID] = None,
+    invoice_id: Optional[UUID] = None,
 ) -> AccountReceivable:
     """Create an account receivable. Called by comercial/faturamento."""
     if amount <= 0:
         raise HTTPException(status_code=400, detail="Valor deve ser maior que zero")
-    sale_id = reference_id if source_module == "comercial" else None
-    invoice_id = reference_id if source_module == "faturamento" else None
+    if sale_id is None and source_module == "comercial":
+        sale_id = reference_id
+    if invoice_id is None and source_module == "faturamento":
+        invoice_id = reference_id
     number = fin_repo.next_number(db, AccountReceivable, "AR")
     return fin_repo.create_receivable(
         db,
@@ -118,6 +128,8 @@ def criar_conta_receber(
         sale_id=sale_id,
         invoice_id=invoice_id,
         notes=notes,
+        installment_number=installment_number,
+        installment_total=installment_total,
     )
 
 

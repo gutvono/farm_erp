@@ -91,9 +91,9 @@ fin_service.registrar_movimento(
 )
 ```
 
-## Função Pública — `criar_fatura`
+## Função Pública — `criar_fatura` (venda à vista)
 
-Chamada pelo Comercial ao criar uma venda:
+Chamada pelo Comercial quando `installments <= 1`. **Fluxo inalterado** em relação à versão anterior, exceto pela atribuição explícita `invoice_type="venda"`.
 
 ```python
 from app.modules.faturamento import service as fat_service
@@ -110,8 +110,36 @@ fat_service.criar_fatura(
 
 Internamente:
 1. Resolve nomes dos itens via `StockItem` (buscado por `stock_item_id`)
-2. Cria `Invoice` + `InvoiceItem` com `number` auto-gerado e `issue_date = today()`
+2. Cria `Invoice` + `InvoiceItem` com `number` auto-gerado, `issue_date = today()`, `due_date = today + 30d`, `invoice_type="venda"`
 3. Registra movimentação financeira `ENTRADA/VENDA, amount=0` — rastreabilidade de emissão
+
+## Função Pública — `criar_faturas_parceladas` (venda parcelada)
+
+Chamada pelo Comercial quando `installments >= 2`. Gera **uma fatura por parcela**.
+
+```python
+fat_service.criar_faturas_parceladas(
+    db,
+    sale_id=sale.id,
+    client_id=sale.client_id,
+    items=sale.items,
+    total_amount=sale.total_amount,
+    installments=3,
+    first_due_date=date(2026, 6, 1),
+    installment_interval_days=30,
+)
+```
+
+Regras:
+- `total_amount` é dividido igualmente pelo número de parcelas. A **última parcela** absorve o resíduo de centavos para garantir que a soma feche exatamente.
+- Os vencimentos seguem `first_due_date + n * installment_interval_days`.
+- Cada fatura recebe `installment_number` (1-based) e `installment_total`.
+- `parent_invoice_id` aponta para a **primeira** fatura da cadeia (a primeira tem `parent_invoice_id = None`).
+- Todas com `invoice_type="venda"`.
+- Para cada fatura, registra um `financial_movement` `ENTRADA/VENDA, amount=0` para rastreabilidade.
+
+## Helper interno — `_calcular_vencimentos(first_due_date, installments, interval_days)`
+Retorna uma lista de `date` com os vencimentos sucessivos. Usado por `criar_faturas_parceladas` e potencialmente por outros fluxos que sigam o mesmo critério.
 
 ## Fatura Manual vs. Automática
 
@@ -129,6 +157,7 @@ Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de um
 ### `criar_nota_recebimento(db, order_id) → Invoice`
 - Origem: itens da ordem com `quantity_accepted > 0`
 - `client_id`: `NULL` (NF fiscal de recebimento, não vinculada a cliente)
+- `invoice_type`: `"recebimento"`
 - `total_amount`: `Σ (quantity_accepted × unit_price)` (= `receipt_total_amount` da ordem)
 - `notes`: `"[NF-RECEBIMENTO] order_id=<uuid> — <supplier_name> — Nota fiscal de recebimento — Ordem de compra #<order_id>"`
 - Itens: `description = "{stock_item_name} — {quantity_accepted} {unit}"`
@@ -138,10 +167,11 @@ Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de um
 - Origem: itens da ordem com `quantity_rejected > 0`
 - Retorna `None` se não houver itens recusados
 - `client_id`: `NULL`
+- `invoice_type`: `"devolucao"`
 - `total_amount`: `Σ (quantity_rejected × unit_price)`
 - `notes`: `"[NF-DEVOLUCAO] order_id=<uuid> — <supplier_name> — Devolução vinculada à NF recebimento #<INV-XXXX> — Fornecedor notificado"` (referência à NF de recebimento localizada via `ILIKE` sobre o `order_id` no `notes`)
 - Itens: `description = "DEVOLUÇÃO: {stock_item_name} — {quantity_rejected} {unit} — Motivo: {rejection_reason}"`
-- Registra `financial_movement` `SAIDA/AJUSTE, amount=0`.
+- Registra `financial_movement` `SAIDA/COMPRA, amount=0`.
 
 > Prefixos: `_NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"` e `_NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"` no `service.py`. O vínculo recebimento ↔ devolução é feito buscando o prefixo + `order_id=<uuid>` no campo `notes` — não há FK dedicada, intencionalmente, para evitar alterar o schema de `invoices` por causa do fluxo de compras.
 
@@ -159,6 +189,10 @@ Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de um
 | `total_amount` | NUMERIC(12,2) |
 | `status` | enum (`emitida` / `paga` / `cancelada`) |
 | `notes` | TEXT (nullable) |
+| `invoice_type` | VARCHAR(50) default `'venda'` — discriminador: `venda` / `recebimento` / `devolucao` |
+| `installment_number` | INT (nullable) — 1-based |
+| `installment_total` | INT (nullable) |
+| `parent_invoice_id` | UUID FK → invoices ON DELETE SET NULL (aponta para a 1ª fatura da cadeia parcelada) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `invoice_items`

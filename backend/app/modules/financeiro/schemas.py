@@ -75,6 +75,8 @@ class AccountPayableOut(BaseModel):
     paid_at: Optional[datetime] = None
     status: AccountPayableStatus
     notes: Optional[str] = None
+    installment_number: Optional[int] = None
+    installment_total: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
@@ -121,6 +123,8 @@ class AccountReceivableOut(BaseModel):
     received_at: Optional[datetime] = None
     status: AccountReceivableStatus
     notes: Optional[str] = None
+    installment_number: Optional[int] = None
+    installment_total: Optional[int] = None
     created_at: datetime
     updated_at: datetime
 
