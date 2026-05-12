@@ -5,7 +5,7 @@ from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
-from app.shared.enums import PurchaseOrderStatus, sa_enum_values
+from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus, sa_enum_values
 
 
 class Supplier(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -47,10 +47,17 @@ class PurchaseOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     ordered_at = Column(DateTime(timezone=True), nullable=False)
     received_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)
+    financial_approval_note = Column(Text, nullable=True)
+    receipt_total_amount = Column(Numeric(10, 2), nullable=False, default=0)
 
     supplier = relationship("Supplier", back_populates="purchase_orders")
     items = relationship(
         "PurchaseOrderItem",
+        back_populates="purchase_order",
+        cascade="all, delete-orphan",
+    )
+    receipts = relationship(
+        "PurchaseOrderReceipt",
         back_populates="purchase_order",
         cascade="all, delete-orphan",
     )
@@ -77,3 +84,36 @@ class PurchaseOrderItem(UUIDMixin, TimestampMixin, Base):
     subtotal = Column(Numeric(12, 2), nullable=False)
 
     purchase_order = relationship("PurchaseOrder", back_populates="items")
+
+
+class PurchaseOrderReceipt(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "purchase_order_receipts"
+
+    purchase_order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    purchase_order_item_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("purchase_order_items.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    quantity_ordered = Column(Numeric(10, 3), nullable=False)
+    quantity_accepted = Column(Numeric(10, 3), nullable=False, default=0)
+    quantity_rejected = Column(Numeric(10, 3), nullable=False, default=0)
+    rejection_reason = Column(Text, nullable=True)
+    status = Column(
+        SAEnum(
+            PurchaseOrderReceiptStatus,
+            name="purchase_order_receipt_status",
+            values_callable=sa_enum_values,
+        ),
+        nullable=False,
+        default=PurchaseOrderReceiptStatus.PENDENTE,
+    )
+
+    purchase_order = relationship("PurchaseOrder", back_populates="receipts")
+    purchase_order_item = relationship("PurchaseOrderItem")

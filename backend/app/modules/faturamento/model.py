@@ -15,7 +15,7 @@ class Invoice(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     client_id = Column(
         UUID(as_uuid=True),
         ForeignKey("clients.id", ondelete="RESTRICT"),
-        nullable=False,
+        nullable=True,
         index=True,
     )
     sale_id = Column(

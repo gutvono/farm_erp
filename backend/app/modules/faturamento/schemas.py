@@ -44,7 +44,7 @@ class InvoiceCreate(BaseModel):
 class InvoiceOut(BaseModel):
     id: UUID
     number: str
-    client_id: UUID
+    client_id: Optional[UUID] = None
     client_name: str
     sale_id: Optional[UUID] = None
     issue_date: date

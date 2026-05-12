@@ -122,6 +122,29 @@ Internamente:
 | Conta a Receber | Criada pelo Comercial | Criada pelo Faturamento |
 | Itens | Gerados a partir dos `SaleItem` | Informados pelo usuário |
 
+## Funções Públicas — NF de Recebimento e Devolução (Compras)
+
+Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de uma ordem é quitada. Diferentemente da fatura comercial, essas NFs representam o **fluxo fiscal interno** de um recebimento de fornecedor e ficam com `client_id = NULL`. Elas são identificadas no campo `notes` por prefixo + `order_id=<uuid>`.
+
+### `criar_nota_recebimento(db, order_id) → Invoice`
+- Origem: itens da ordem com `quantity_accepted > 0`
+- `client_id`: `NULL` (NF fiscal de recebimento, não vinculada a cliente)
+- `total_amount`: `Σ (quantity_accepted × unit_price)` (= `receipt_total_amount` da ordem)
+- `notes`: `"[NF-RECEBIMENTO] order_id=<uuid> — <supplier_name> — Nota fiscal de recebimento — Ordem de compra #<order_id>"`
+- Itens: `description = "{stock_item_name} — {quantity_accepted} {unit}"`
+- Registra `financial_movement` `ENTRADA/COMPRA, amount=0` para rastreabilidade.
+
+### `criar_nota_devolucao(db, order_id) → Optional[Invoice]`
+- Origem: itens da ordem com `quantity_rejected > 0`
+- Retorna `None` se não houver itens recusados
+- `client_id`: `NULL`
+- `total_amount`: `Σ (quantity_rejected × unit_price)`
+- `notes`: `"[NF-DEVOLUCAO] order_id=<uuid> — <supplier_name> — Devolução vinculada à NF recebimento #<INV-XXXX> — Fornecedor notificado"` (referência à NF de recebimento localizada via `ILIKE` sobre o `order_id` no `notes`)
+- Itens: `description = "DEVOLUÇÃO: {stock_item_name} — {quantity_rejected} {unit} — Motivo: {rejection_reason}"`
+- Registra `financial_movement` `SAIDA/AJUSTE, amount=0`.
+
+> Prefixos: `_NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"` e `_NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"` no `service.py`. O vínculo recebimento ↔ devolução é feito buscando o prefixo + `order_id=<uuid>` no campo `notes` — não há FK dedicada, intencionalmente, para evitar alterar o schema de `invoices` por causa do fluxo de compras.
+
 ## Database Schema
 
 ### `invoices`
@@ -129,7 +152,7 @@ Internamente:
 |--------|------|
 | `id` | UUID PK |
 | `number` | VARCHAR(32) unique (INV-0001) |
-| `client_id` | UUID FK → clients |
+| `client_id` | UUID FK → clients (nullable — `NULL` em NFs de recebimento/devolução geradas por Compras) |
 | `sale_id` | UUID FK → sales (nullable) |
 | `issue_date` | DATE |
 | `due_date` | DATE (nullable) |
@@ -151,4 +174,4 @@ Internamente:
 
 ## Nota sobre Client
 
-`Invoice` não possui relationship `client` no model. O `client_name` é resolvido via query manual em `service._get_client_name()` a cada serialização.
+`Invoice` não possui relationship `client` no model. O `client_name` é resolvido via query manual em `service._get_client_name()` a cada serialização. Quando `client_id IS NULL` (NF de recebimento/devolução), a função retorna `""` para preservar a forma do payload.

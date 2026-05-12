@@ -3,7 +3,9 @@ import {
   ApiResponse,
   PurchaseOrder,
   PurchaseOrderItem,
+  PurchaseOrderReceiptItem,
   PurchaseOrderStatus,
+  PurchaseOrderWithReceipts,
   Supplier,
 } from "@/types/index"
 
@@ -61,18 +63,58 @@ function parseOrderItem(raw: RawOrderItem): PurchaseOrderItem {
   }
 }
 
+interface RawReceiptItem {
+  id: string
+  purchase_order_id: string
+  purchase_order_item_id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity_ordered: string | number
+  quantity_accepted: string | number
+  quantity_rejected: string | number
+  unit_price: string | number
+  rejection_reason: string | null
+  status: "pendente" | "conferido"
+  created_at: string
+  updated_at: string
+}
+
+function parseReceiptItem(raw: RawReceiptItem): PurchaseOrderReceiptItem {
+  return {
+    id: raw.id,
+    purchase_order_id: raw.purchase_order_id,
+    purchase_order_item_id: raw.purchase_order_item_id,
+    stock_item_id: raw.stock_item_id,
+    stock_item_name: raw.stock_item_name,
+    quantity_ordered: toNumber(raw.quantity_ordered),
+    quantity_accepted: toNumber(raw.quantity_accepted),
+    quantity_rejected: toNumber(raw.quantity_rejected),
+    unit_price: toNumber(raw.unit_price),
+    rejection_reason: raw.rejection_reason,
+    status: raw.status,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
+}
+
 interface RawOrder {
   id: string
   supplier_id: string
   supplier_name: string
   status: PurchaseOrderStatus
   total_amount: string | number
+  receipt_total_amount: string | number
+  financial_approval_note: string | null
   notes: string | null
   ordered_at: string
   received_at: string | null
   items: RawOrderItem[]
   created_at: string
   updated_at: string
+}
+
+interface RawOrderWithReceipts extends RawOrder {
+  receipts: RawReceiptItem[]
 }
 
 function parseOrder(raw: RawOrder): PurchaseOrder {
@@ -82,12 +124,21 @@ function parseOrder(raw: RawOrder): PurchaseOrder {
     supplier_name: raw.supplier_name,
     status: raw.status,
     total_amount: toNumber(raw.total_amount),
+    receipt_total_amount: toNumber(raw.receipt_total_amount),
+    financial_approval_note: raw.financial_approval_note,
     notes: raw.notes,
     ordered_at: raw.ordered_at,
     received_at: raw.received_at,
     items: (raw.items ?? []).map(parseOrderItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
+  }
+}
+
+function parseOrderWithReceipts(raw: RawOrderWithReceipts): PurchaseOrderWithReceipts {
+  return {
+    ...parseOrder(raw),
+    receipts: (raw.receipts ?? []).map(parseReceiptItem),
   }
 }
 
@@ -174,4 +225,68 @@ export async function updateOrdemStatus(
 
 export async function deleteOrdem(id: string): Promise<void> {
   await apiFetch(`/api/compras/ordens/${id}`, { method: "DELETE" })
+}
+
+// ── Fluxo de aprovação / conferência ─────────────────────────────────────────
+
+export async function enviarParaAprovacao(id: string): Promise<PurchaseOrder> {
+  const response = await apiFetch<ApiResponse<RawOrder>>(
+    `/api/compras/ordens/${id}/enviar-aprovacao`,
+    { method: "POST" }
+  )
+  return parseOrder(response.data)
+}
+
+export async function aprovarOrdem(id: string): Promise<PurchaseOrder> {
+  const response = await apiFetch<ApiResponse<RawOrder>>(
+    `/api/compras/ordens/${id}/aprovar`,
+    { method: "POST" }
+  )
+  return parseOrder(response.data)
+}
+
+export async function recusarOrdem(id: string, note: string): Promise<PurchaseOrder> {
+  const response = await apiFetch<ApiResponse<RawOrder>>(
+    `/api/compras/ordens/${id}/recusar`,
+    { method: "POST", body: JSON.stringify({ note }) }
+  )
+  return parseOrder(response.data)
+}
+
+export async function iniciarConferencia(id: string): Promise<PurchaseOrderWithReceipts> {
+  const response = await apiFetch<ApiResponse<RawOrderWithReceipts>>(
+    `/api/compras/ordens/${id}/iniciar-conferencia`,
+    { method: "POST" }
+  )
+  return parseOrderWithReceipts(response.data)
+}
+
+export async function finalizarConferencia(
+  id: string,
+  items: {
+    purchase_order_item_id: string
+    quantity_accepted: number
+    quantity_rejected: number
+    rejection_reason?: string
+  }[]
+): Promise<PurchaseOrderWithReceipts> {
+  const response = await apiFetch<ApiResponse<RawOrderWithReceipts>>(
+    `/api/compras/ordens/${id}/finalizar-conferencia`,
+    { method: "POST", body: JSON.stringify({ items }) }
+  )
+  return parseOrderWithReceipts(response.data)
+}
+
+// ── Recebimentos ──────────────────────────────────────────────────────────────
+
+export async function getRecebimentos(): Promise<PurchaseOrderWithReceipts[]> {
+  const response = await apiFetch<ApiResponse<RawOrderWithReceipts[]>>("/api/compras/recebimentos")
+  return response.data.map(parseOrderWithReceipts)
+}
+
+export async function getRecebimento(id: string): Promise<PurchaseOrderWithReceipts> {
+  const response = await apiFetch<ApiResponse<RawOrderWithReceipts>>(
+    `/api/compras/recebimentos/${id}`
+  )
+  return parseOrderWithReceipts(response.data)
 }

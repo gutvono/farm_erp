@@ -28,7 +28,20 @@ Página única com 3 abas (Tabs shadcn): **Itens**, **Movimentações** e **Inve
 | — | `sku` (obrigatório e único) |
 | `unit` livre | enum: `saca` / `litro` / `kg` / `unidade` |
 
+## Arquivos adicionados
+
+| Arquivo | Tipo | Descrição |
+|---------|------|-----------|
+| `components/modules/estoque/ConferenciaRecebimento.tsx` | Componente | Formulário inline de conferência item a item com validação Zod |
+
 ## Abas
+
+### 4. Recebimentos (nova)
+- Lista ordens de compra com status `aprovada` ou `em_conferencia` via `getRecebimentos()`
+- Card por ordem: fornecedor, data, valor, badge de status
+- Botão "Iniciar Conferência" (status `aprovada`) → chama `iniciarConferencia()` → recarrega
+- Botão "Conferir itens" (status `em_conferencia`) → expande inline `ConferenciaRecebimento`
+- Badge contador na aba (número de ordens pendentes)
 
 ### 1. Itens
 - Contador de itens totais e críticos (abaixo do mínimo em vermelho)
@@ -107,6 +120,20 @@ Página única com 3 abas (Tabs shadcn): **Itens**, **Movimentações** e **Inve
 3. Os dados são armazenados em `historyMovements` (estado local da page)
 4. O `Sheet` abre com `MovimentacoesTable` recebendo `hideItemFilter=true`
 5. Os filtros de tipo e módulo continuam disponíveis dentro do Sheet
+
+### `ConferenciaRecebimento`
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `order` | `PurchaseOrderWithReceipts` | Ordem em conferência com receipts |
+| `onFinalized` | `() => void` | Chamado após finalizar — recarrega itens, movimentações e recebimentos |
+
+**Comportamento:**
+- Formulário com React Hook Form + Zod (`z.number().min(0)` + `valueAsNumber: true`)
+- Linha por receipt item: `quantity_accepted`, `quantity_rejected`, `rejection_reason`
+- Validação: `accepted + rejected ≤ ordered`; motivo obrigatório se `rejected > 0`
+- Exibe total a pagar (itens aceitos × preço unitário)
+- AlertDialog de confirmação antes de chamar `finalizarConferencia()`
+- Toast de sucesso com valor da conta a pagar + toast de aviso sobre devoluções se houver
 
 ## Dependências adicionais
 

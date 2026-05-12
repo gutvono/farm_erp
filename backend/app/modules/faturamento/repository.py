@@ -29,7 +29,7 @@ def next_number(db: Session) -> str:
 def create_invoice(
     db: Session,
     *,
-    client_id: UUID,
+    client_id: Optional[UUID],
     items: list,  # list of dicts with description, quantity, unit_price, subtotal
     total_amount: Decimal,
     sale_id: Optional[UUID] = None,

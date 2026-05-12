@@ -67,8 +67,17 @@ class SaleStatus(str, enum.Enum):
 
 class PurchaseOrderStatus(str, enum.Enum):
     EM_ANDAMENTO = "em_andamento"
+    AGUARDANDO_APROVACAO_FINANCEIRO = "aguardando_aprovacao_financeiro"
+    APROVADA = "aprovada"
+    EM_CONFERENCIA = "em_conferencia"
+    AGUARDANDO_PAGAMENTO = "aguardando_pagamento"
     CONCLUIDA = "concluida"
     CANCELADA = "cancelada"
+
+
+class PurchaseOrderReceiptStatus(str, enum.Enum):
+    PENDENTE = "pendente"
+    CONFERIDO = "conferido"
 
 
 class InvoiceStatus(str, enum.Enum):

@@ -210,7 +210,14 @@ export interface PurchaseOrderItem {
   description: string | null
 }
 
-export type PurchaseOrderStatus = "em_andamento" | "concluida" | "cancelada"
+export type PurchaseOrderStatus =
+  | "em_andamento"
+  | "aguardando_aprovacao_financeiro"
+  | "aprovada"
+  | "em_conferencia"
+  | "aguardando_pagamento"
+  | "concluida"
+  | "cancelada"
 
 export interface PurchaseOrder {
   id: string
@@ -218,12 +225,34 @@ export interface PurchaseOrder {
   supplier_name: string
   status: PurchaseOrderStatus
   total_amount: number
+  receipt_total_amount: number
+  financial_approval_note: string | null
   notes: string | null
   ordered_at: string
   received_at: string | null
   items: PurchaseOrderItem[]
   created_at: string
   updated_at: string
+}
+
+export interface PurchaseOrderReceiptItem {
+  id: string
+  purchase_order_id: string
+  purchase_order_item_id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity_ordered: number
+  quantity_accepted: number
+  quantity_rejected: number
+  unit_price: number
+  rejection_reason: string | null
+  status: "pendente" | "conferido"
+  created_at: string
+  updated_at: string
+}
+
+export interface PurchaseOrderWithReceipts extends PurchaseOrder {
+  receipts: PurchaseOrderReceiptItem[]
 }
 
 // ── COMERCIAL ─────────────────────────────────────────────────────────────────
@@ -283,7 +312,7 @@ export interface Invoice {
   id: string
   number: string
   sale_id: string | null
-  client_id: string
+  client_id: string | null
   client_name: string
   status: InvoiceStatus
   total_amount: number

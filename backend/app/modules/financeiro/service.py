@@ -274,6 +274,14 @@ def pay_payable(
         reference_id=payable.id,
         occurred_at=payable.paid_at,
     )
+
+    # Integração com Compras: ao pagar conta de uma ordem aguardando_pagamento,
+    # dispara o fluxo de conclusão (estoque + NF de recebimento/devolução).
+    if payable.purchase_order_id is not None:
+        from app.modules.compras import service as compras_service
+
+        compras_service.complete_order_after_payment(db, payable.purchase_order_id)
+
     return payable
 
 

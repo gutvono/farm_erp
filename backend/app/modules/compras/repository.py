@@ -5,10 +5,15 @@ from uuid import UUID
 
 from sqlalchemy.orm import Session
 
-from app.modules.compras.model import PurchaseOrder, PurchaseOrderItem, Supplier
+from app.modules.compras.model import (
+    PurchaseOrder,
+    PurchaseOrderItem,
+    PurchaseOrderReceipt,
+    Supplier,
+)
 from app.modules.compras.schemas import PurchaseOrderCreate, SupplierCreate, SupplierUpdate
 from app.modules.estoque.model import StockItem
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus
 
 
 # ---------------------------------------------------------------------------
@@ -199,3 +204,171 @@ def _load_relations(db: Session, order: PurchaseOrder) -> None:
     for item in order.items:
         # Attach a transient stock_item attribute so PurchaseOrderItemOut.from_model() works
         item.__dict__["stock_item"] = stock_map.get(item.stock_item_id)
+
+
+# ---------------------------------------------------------------------------
+# Approval / Receipt flow
+# ---------------------------------------------------------------------------
+
+
+def _set_status(
+    db: Session,
+    order_id: UUID,
+    status: PurchaseOrderStatus,
+    *,
+    extra_fields: Optional[dict] = None,
+) -> Optional[PurchaseOrder]:
+    order = get_order(db, order_id)
+    if not order:
+        return None
+    order.status = status
+    if extra_fields:
+        for key, value in extra_fields.items():
+            setattr(order, key, value)
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    _load_relations(db, order)
+    return order
+
+
+def submit_for_approval(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
+    return _set_status(
+        db, order_id, PurchaseOrderStatus.AGUARDANDO_APROVACAO_FINANCEIRO
+    )
+
+
+def approve_order(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
+    return _set_status(db, order_id, PurchaseOrderStatus.APROVADA)
+
+
+def cancel_order_financial(
+    db: Session, order_id: UUID, note: str
+) -> Optional[PurchaseOrder]:
+    return _set_status(
+        db,
+        order_id,
+        PurchaseOrderStatus.CANCELADA,
+        extra_fields={"financial_approval_note": note},
+    )
+
+
+def start_receipt(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
+    order = get_order(db, order_id)
+    if not order:
+        return None
+    order.status = PurchaseOrderStatus.EM_CONFERENCIA
+    db.add(order)
+    db.flush()
+
+    for item in order.items:
+        receipt = PurchaseOrderReceipt(
+            purchase_order_id=order.id,
+            purchase_order_item_id=item.id,
+            quantity_ordered=item.quantity,
+            quantity_accepted=Decimal("0"),
+            quantity_rejected=Decimal("0"),
+            status=PurchaseOrderReceiptStatus.PENDENTE,
+        )
+        db.add(receipt)
+
+    db.commit()
+    db.refresh(order)
+    _load_order_with_receipts(db, order)
+    return order
+
+
+def finalize_receipt(
+    db: Session,
+    order_id: UUID,
+    items: list,
+) -> Optional[PurchaseOrder]:
+    """
+    items: list of objects with purchase_order_item_id, quantity_accepted,
+    quantity_rejected, rejection_reason.
+    """
+    order = get_order(db, order_id)
+    if not order:
+        return None
+
+    receipts = (
+        db.query(PurchaseOrderReceipt)
+        .filter(PurchaseOrderReceipt.purchase_order_id == order.id)
+        .all()
+    )
+    receipts_by_item: dict = {r.purchase_order_item_id: r for r in receipts}
+
+    order_items_by_id: dict = {oi.id: oi for oi in order.items}
+
+    receipt_total = Decimal("0")
+    for payload in items:
+        receipt = receipts_by_item.get(payload.purchase_order_item_id)
+        if not receipt:
+            continue
+        receipt.quantity_accepted = Decimal(str(payload.quantity_accepted))
+        receipt.quantity_rejected = Decimal(str(payload.quantity_rejected))
+        receipt.rejection_reason = payload.rejection_reason
+        receipt.status = PurchaseOrderReceiptStatus.CONFERIDO
+        db.add(receipt)
+
+        order_item = order_items_by_id.get(receipt.purchase_order_item_id)
+        if order_item:
+            receipt_total += receipt.quantity_accepted * Decimal(str(order_item.unit_price))
+
+    order.status = PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
+    order.receipt_total_amount = receipt_total
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    _load_order_with_receipts(db, order)
+    return order
+
+
+def complete_order(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
+    return _set_status(
+        db,
+        order_id,
+        PurchaseOrderStatus.CONCLUIDA,
+        extra_fields={"received_at": datetime.now(timezone.utc)},
+    )
+
+
+def get_order_with_receipts(
+    db: Session, order_id: UUID
+) -> Optional[PurchaseOrder]:
+    order = get_order(db, order_id)
+    if not order:
+        return None
+    _load_order_with_receipts(db, order)
+    return order
+
+
+def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
+    orders = (
+        db.query(PurchaseOrder)
+        .filter(
+            PurchaseOrder.deleted_at.is_(None),
+            PurchaseOrder.status.in_(
+                [
+                    PurchaseOrderStatus.APROVADA,
+                    PurchaseOrderStatus.EM_CONFERENCIA,
+                ]
+            ),
+        )
+        .order_by(PurchaseOrder.ordered_at.desc())
+        .all()
+    )
+    for order in orders:
+        _load_order_with_receipts(db, order)
+    return orders
+
+
+def _load_order_with_receipts(db: Session, order: PurchaseOrder) -> None:
+    _load_relations(db, order)
+    # Force load receipts and attach stock_item lookup to each receipt's item
+    receipts = list(order.receipts)
+    item_by_id = {item.id: item for item in order.items}
+    for receipt in receipts:
+        order_item = item_by_id.get(receipt.purchase_order_item_id)
+        if order_item is not None:
+            receipt.__dict__["purchase_order_item"] = order_item

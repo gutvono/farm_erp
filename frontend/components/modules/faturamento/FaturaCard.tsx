@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -47,6 +47,19 @@ const STATUS_COLORS: Record<InvoiceStatus, string> = {
   cancelada: "bg-slate-100 text-slate-600",
 }
 
+function detectNfType(notes: string | null): "recebimento" | "devolucao" | null {
+  if (!notes) return null
+  if (notes.includes("[NF-RECEBIMENTO]")) return "recebimento"
+  if (notes.includes("[NF-DEVOLUCAO]")) return "devolucao"
+  return null
+}
+
+function extractOrderIdFromNotes(notes: string | null): string | null {
+  if (!notes) return null
+  const match = notes.match(/order_id=([0-9a-f-]{36})/i)
+  return match ? match[1] : null
+}
+
 interface FaturaCardProps {
   invoice: Invoice
   onChanged: () => void
@@ -58,6 +71,9 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
   const [pendingStatus, setPendingStatus] = useState<InvoiceStatus | null>(null)
 
   const isFinal = invoice.status === "paga" || invoice.status === "cancelada"
+  const nfType = detectNfType(invoice.notes)
+  const orderId = extractOrderIdFromNotes(invoice.notes)
+  const fornecedorNotificado = invoice.notes?.includes("Fornecedor notificado") ?? false
 
   async function confirmStatusChange() {
     if (!pendingStatus) return
@@ -89,13 +105,47 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 <Badge className={STATUS_COLORS[invoice.status]}>
                   {STATUS_LABELS[invoice.status]}
                 </Badge>
-                {invoice.sale_id && (
+
+                {/* NF type badges */}
+                {nfType === "recebimento" && (
+                  <Badge className="bg-blue-50 text-blue-700 border border-blue-200">
+                    Recebimento
+                  </Badge>
+                )}
+                {nfType === "devolucao" && (
+                  <>
+                    <Badge className="bg-red-50 text-red-700 border border-red-200">
+                      Devolução
+                    </Badge>
+                    {orderId && (
+                      <Badge
+                        variant="outline"
+                        className="text-xs cursor-default"
+                        title={`Ordem de compra: ${orderId}`}
+                      >
+                        Vinculada
+                      </Badge>
+                    )}
+                  </>
+                )}
+
+                {/* Auto-generated from sale */}
+                {invoice.sale_id && !nfType && (
                   <Badge variant="outline" className="text-xs">
                     Gerada automaticamente
                   </Badge>
                 )}
               </div>
-              <p className="text-sm text-slate-600 mt-0.5">{invoice.client_name}</p>
+
+              {/* Client name (empty for NF fiscal without client) */}
+              {invoice.client_name ? (
+                <p className="text-sm text-slate-600 mt-0.5">{invoice.client_name}</p>
+              ) : nfType === "recebimento" ? (
+                <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de recebimento</p>
+              ) : nfType === "devolucao" ? (
+                <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de devolução</p>
+              ) : null}
+
               <p className="text-sm text-slate-500">
                 Emissão: {formatDate(invoice.issue_date)}
                 {invoice.due_date && ` · Vencimento: ${formatDate(invoice.due_date)}`}
@@ -104,8 +154,13 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                   {formatCurrency(invoice.total_amount)}
                 </span>
               </p>
-              {invoice.notes && (
-                <p className="text-sm text-slate-500 mt-1 italic">{invoice.notes}</p>
+
+              {/* Supplier notified indicator */}
+              {fornecedorNotificado && (
+                <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
+                  <CheckCircle2 className="h-3 w-3" />
+                  Fornecedor notificado
+                </p>
               )}
             </div>
 

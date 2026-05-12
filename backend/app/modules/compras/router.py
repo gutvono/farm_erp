@@ -9,9 +9,12 @@ from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
 from app.modules.compras import service as compras_service
 from app.modules.compras.schemas import (
+    PurchaseOrderCancelRequest,
     PurchaseOrderCreate,
     PurchaseOrderOut,
+    PurchaseOrderReceiptFinalize,
     PurchaseOrderStatusUpdate,
+    PurchaseOrderWithReceipts,
     SupplierCreate,
     SupplierOut,
     SupplierUpdate,
@@ -158,3 +161,100 @@ def delete_order(
 ) -> SuccessResponse:
     compras_service.soft_delete_order(db, order_id)
     return success("Ordem removida com sucesso")
+
+
+# ---------------------------------------------------------------------------
+# Approval / Receipt flow
+# ---------------------------------------------------------------------------
+
+
+@router.post("/ordens/{order_id}/enviar-aprovacao", response_model=SuccessResponse)
+def submit_for_approval(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.submit_for_approval(db, order_id)
+    return success(
+        "Ordem enviada para aprovação financeira",
+        PurchaseOrderOut.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.post("/ordens/{order_id}/aprovar", response_model=SuccessResponse)
+def approve_order(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.approve_order(db, order_id)
+    return success(
+        "Ordem aprovada pelo financeiro",
+        PurchaseOrderOut.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.post("/ordens/{order_id}/recusar", response_model=SuccessResponse)
+def reject_order(
+    order_id: UUID,
+    body: PurchaseOrderCancelRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.cancel_order_financial(db, order_id, body.note)
+    return success(
+        "Ordem recusada pelo financeiro",
+        PurchaseOrderOut.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.post("/ordens/{order_id}/iniciar-conferencia", response_model=SuccessResponse)
+def start_receipt(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.start_receipt(db, order_id)
+    return success(
+        "Conferência iniciada",
+        PurchaseOrderWithReceipts.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.post("/ordens/{order_id}/finalizar-conferencia", response_model=SuccessResponse)
+def finalize_receipt(
+    order_id: UUID,
+    body: PurchaseOrderReceiptFinalize,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.finalize_receipt(db, order_id, body.items)
+    return success(
+        "Conferência finalizada — aguardando pagamento",
+        PurchaseOrderWithReceipts.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.get("/recebimentos", response_model=SuccessResponse)
+def list_receipts(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    orders = compras_service.list_orders_for_receipt(db)
+    data = [
+        PurchaseOrderWithReceipts.from_model(o).model_dump(mode="json") for o in orders
+    ]
+    return success("Recebimentos listados com sucesso", data)
+
+
+@router.get("/recebimentos/{order_id}", response_model=SuccessResponse)
+def get_receipt(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.get_order_with_receipts(db, order_id)
+    return success(
+        "Recebimento obtido com sucesso",
+        PurchaseOrderWithReceipts.from_model(order).model_dump(mode="json"),
+    )

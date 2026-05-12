@@ -27,6 +27,10 @@ import { PurchaseOrder, PurchaseOrderStatus, StockItem, Supplier } from "@/types
 const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "Todos os status" },
   { value: "em_andamento", label: "Em andamento" },
+  { value: "aguardando_aprovacao_financeiro", label: "Aguardando aprovação" },
+  { value: "aprovada", label: "Aprovada" },
+  { value: "em_conferencia", label: "Em conferência" },
+  { value: "aguardando_pagamento", label: "Aguardando pagamento" },
   { value: "concluida", label: "Concluída" },
   { value: "cancelada", label: "Cancelada" },
 ]

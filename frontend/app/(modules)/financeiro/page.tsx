@@ -4,6 +4,7 @@ import { useCallback, useEffect, useState } from "react"
 import { Plus } from "lucide-react"
 import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import {
   Card,
@@ -32,6 +33,24 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { CashFlowChart } from "@/components/modules/dashboard/CashFlowChart"
 import { SaldoCard } from "@/components/modules/financeiro/SaldoCard"
 import { ContaRow } from "@/components/modules/financeiro/ContaRow"
@@ -47,6 +66,7 @@ import {
   getMovimentacoes,
   getSaldo,
 } from "@/services/financeiro"
+import { getOrdens, aprovarOrdem, recusarOrdem } from "@/services/compras"
 import {
   AccountsPayable,
   AccountsReceivable,
@@ -55,6 +75,7 @@ import {
   DefaulterItem,
   FinancialMovement,
   PayableStatus,
+  PurchaseOrder,
   ReceivableStatus,
 } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -96,6 +117,15 @@ export default function FinanceiroPage() {
 
   const [movements, setMovements] = useState<FinancialMovement[]>([])
   const [movementsLoading, setMovementsLoading] = useState(false)
+
+  // Aprovações
+  const [pendingOrders, setPendingOrders] = useState<PurchaseOrder[]>([])
+  const [pendingLoading, setPendingLoading] = useState(false)
+  const [approveTarget, setApproveTarget] = useState<PurchaseOrder | null>(null)
+  const [approving, setApproving] = useState(false)
+  const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null)
+  const [rejectNote, setRejectNote] = useState("")
+  const [rejecting, setRejecting] = useState(false)
 
   const loadOverview = useCallback(async () => {
     setBalanceLoading(true)
@@ -167,18 +197,28 @@ export default function FinanceiroPage() {
     }
   }, [])
 
+  const loadPendingOrders = useCallback(async () => {
+    setPendingLoading(true)
+    try {
+      const data = await getOrdens("aguardando_aprovacao_financeiro")
+      setPendingOrders(data)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erro ao carregar aprovações pendentes"
+      toast.error(message)
+    } finally {
+      setPendingLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadOverview()
     loadMovements()
   }, [loadOverview, loadMovements])
 
-  useEffect(() => {
-    loadPayables()
-  }, [loadPayables])
-
-  useEffect(() => {
-    loadReceivables()
-  }, [loadReceivables])
+  useEffect(() => { loadPayables() }, [loadPayables])
+  useEffect(() => { loadReceivables() }, [loadReceivables])
+  useEffect(() => { loadPendingOrders() }, [loadPendingOrders])
 
   function handlePayableClick(conta: AccountsPayable) {
     setSelectedPayable(conta)
@@ -198,6 +238,37 @@ export default function FinanceiroPage() {
     await Promise.all([loadReceivables(), loadOverview(), loadMovements()])
   }
 
+  async function handleConfirmApprove() {
+    if (!approveTarget) return
+    setApproving(true)
+    try {
+      await aprovarOrdem(approveTarget.id)
+      toast.success(`Ordem de ${approveTarget.supplier_name} aprovada`)
+      setApproveTarget(null)
+      await loadPendingOrders()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao aprovar ordem")
+    } finally {
+      setApproving(false)
+    }
+  }
+
+  async function handleConfirmReject() {
+    if (!rejectTarget || !rejectNote.trim()) return
+    setRejecting(true)
+    try {
+      await recusarOrdem(rejectTarget.id, rejectNote.trim())
+      toast.success(`Ordem de ${rejectTarget.supplier_name} recusada`)
+      setRejectTarget(null)
+      setRejectNote("")
+      await loadPendingOrders()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao recusar ordem")
+    } finally {
+      setRejecting(false)
+    }
+  }
+
   return (
     <RootLayout title="Financeiro">
       <div className="space-y-6">
@@ -211,6 +282,14 @@ export default function FinanceiroPage() {
         <Tabs defaultValue="overview">
           <TabsList>
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
+            <TabsTrigger value="approvals" className="relative">
+              Aprovações
+              {pendingOrders.length > 0 && (
+                <span className="ml-1.5 rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
+                  {pendingOrders.length}
+                </span>
+              )}
+            </TabsTrigger>
             <TabsTrigger value="payables">Contas a Pagar</TabsTrigger>
             <TabsTrigger value="receivables">Contas a Receber</TabsTrigger>
             <TabsTrigger value="movements">Movimentações</TabsTrigger>
@@ -281,6 +360,84 @@ export default function FinanceiroPage() {
                 )}
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ── Aba Aprovações ── */}
+          <TabsContent value="approvals" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                Ordens de compra aguardando aprovação financeira
+              </p>
+            </div>
+
+            {pendingLoading ? (
+              <p className="text-sm text-slate-500">Carregando...</p>
+            ) : pendingOrders.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                Nenhuma ordem aguardando aprovação
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {pendingOrders.map((order) => (
+                  <Card key={order.id} className="border-yellow-200">
+                    <CardHeader className="pb-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 flex-wrap">
+                            <span className="font-semibold text-slate-800">
+                              {order.supplier_name}
+                            </span>
+                            <Badge className="bg-yellow-100 text-yellow-800">
+                              Aguardando aprovação
+                            </Badge>
+                          </div>
+                          <p className="text-sm text-slate-500 mt-0.5">
+                            {formatDate(order.ordered_at)} ·{" "}
+                            {order.items.length} item{order.items.length !== 1 ? "s" : ""} ·{" "}
+                            <span className="font-medium text-slate-700">
+                              {formatCurrency(order.total_amount)}
+                            </span>
+                          </p>
+                          {order.notes && (
+                            <p className="text-sm text-slate-500 mt-1 italic">{order.notes}</p>
+                          )}
+                          {/* Items preview */}
+                          <div className="mt-2 space-y-0.5">
+                            {order.items.map((item) => (
+                              <p key={item.id} className="text-xs text-slate-500">
+                                {item.stock_item_name} × {item.quantity} —{" "}
+                                {formatCurrency(item.subtotal)}
+                              </p>
+                            ))}
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2 flex-shrink-0">
+                          <Button
+                            size="sm"
+                            className="bg-green-600 hover:bg-green-700"
+                            onClick={() => setApproveTarget(order)}
+                          >
+                            Aprovar
+                          </Button>
+                          <Button
+                            size="sm"
+                            variant="outline"
+                            className="border-red-300 text-red-600 hover:bg-red-50"
+                            onClick={() => {
+                              setRejectNote("")
+                              setRejectTarget(order)
+                            }}
+                          >
+                            Recusar
+                          </Button>
+                        </div>
+                      </div>
+                    </CardHeader>
+                  </Card>
+                ))}
+              </div>
+            )}
           </TabsContent>
 
           <TabsContent value="payables" className="space-y-4">
@@ -405,6 +562,72 @@ export default function FinanceiroPage() {
           </TabsContent>
         </Tabs>
       </div>
+
+      {/* AlertDialog: aprovar ordem */}
+      <AlertDialog
+        open={approveTarget !== null}
+        onOpenChange={(open) => !open && setApproveTarget(null)}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Aprovar ordem de compra?</AlertDialogTitle>
+            <AlertDialogDescription>
+              A ordem de <strong>{approveTarget?.supplier_name}</strong> (
+              {formatCurrency(approveTarget?.total_amount ?? 0)}) será aprovada e liberada para
+              conferência de recebimento.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleConfirmApprove}
+              disabled={approving}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {approving ? "Aprovando..." : "Confirmar aprovação"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Dialog: recusar ordem */}
+      <Dialog
+        open={rejectTarget !== null}
+        onOpenChange={(open) => !open && setRejectTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Recusar ordem de compra</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600">
+              Fornecedor: <strong>{rejectTarget?.supplier_name}</strong> ·{" "}
+              {formatCurrency(rejectTarget?.total_amount ?? 0)}
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="reject-note">Motivo da recusa *</Label>
+              <Input
+                id="reject-note"
+                value={rejectNote}
+                onChange={(e) => setRejectNote(e.target.value)}
+                placeholder="Descreva o motivo..."
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRejectTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                className="bg-red-600 hover:bg-red-700"
+                disabled={!rejectNote.trim() || rejecting}
+                onClick={handleConfirmReject}
+              >
+                {rejecting ? "Recusando..." : "Confirmar recusa"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </RootLayout>
   )
 }

@@ -46,6 +46,13 @@ Amounts retornam como string no payload JSON (Pydantic + Decimal). O service con
 
 ## Abas
 
+### 2. Aprovações (`approvals`) — nova
+- Lista ordens de compra com status `aguardando_aprovacao_financeiro` via `getOrdens("aguardando_aprovacao_financeiro")` do service de Compras
+- Card por ordem: fornecedor, data, valor, lista de itens
+- Badge contador na aba (número de ordens pendentes em amarelo)
+- Botão **Aprovar** → AlertDialog de confirmação → `aprovarOrdem(id)` → toast + recarrega lista
+- Botão **Recusar** → Dialog com Input de motivo (obrigatório) → `recusarOrdem(id, note)` → toast + recarrega lista
+
 ### 1. Visão Geral (`overview`)
 - `SaldoCard` com saldo, total de entradas e total de saídas; botão "Atualizar" recarrega a aba
 - `CashFlowChart` (reutilizado do dashboard) alimentado por `getFluxoCaixaChartData(6)`, que adapta `{ period, entradas, saidas }` para `{ month, income, expenses }`
