@@ -100,6 +100,9 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
         total_amount=total_amount,
         ordered_at=ordered_at,
         notes=data.notes,
+        installments=data.installments,
+        first_due_date=data.first_due_date,
+        installment_interval_days=data.installment_interval_days,
     )
     db.add(order)
     db.flush()  # get order.id before creating items

@@ -112,6 +112,9 @@ Vendas realizadas. Segue fluxo `realizada → entregue → cancelada`.
 | `total_amount` | `NUMERIC(12,2)` | Soma dos itens |
 | `sold_at` | `TIMESTAMPTZ` | Data da venda |
 | `delivered_at` | `TIMESTAMPTZ` NULL | Data de entrega |
+| `installments` | `INTEGER` default 1 | Número de parcelas |
+| `first_due_date` | `DATE` NULL | Vencimento da primeira parcela |
+| `installment_interval_days` | `INTEGER` default 30 | Intervalo entre parcelas (dias) |
 
 #### `sale_items`
 Itens de uma venda.
@@ -143,6 +146,9 @@ Ordens de compra. Fluxo expandido:
 | `receipt_total_amount` | `NUMERIC(10,2)` | Valor total dos itens aceitos na conferência |
 | `financial_approval_note` | `TEXT` NULL | Motivo de recusa pelo financeiro |
 | `ordered_at`, `received_at` | `TIMESTAMPTZ` | Datas |
+| `installments` | `INTEGER` default 1 | Número de parcelas |
+| `first_due_date` | `DATE` NULL | Vencimento da primeira parcela |
+| `installment_interval_days` | `INTEGER` default 30 | Intervalo entre parcelas (dias) |
 
 **Novos valores do enum `purchase_order_status` (migration 0004):**
 - `aguardando_aprovacao_financeiro` — aguardando análise do setor financeiro
@@ -204,9 +210,14 @@ Faturas emitidas (automáticas ou avulsas). Fluxo `emitida → paga → cancelad
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `number` | `VARCHAR(32)` UNIQUE | Número sequencial |
-| `client_id`, `sale_id` | FK | Cliente e venda opcional |
+| `client_id` | FK `clients.id` NULL | Cliente (NULL em NFs de recebimento/devolução) |
+| `sale_id` | FK `sales.id` NULL | Venda de origem |
 | `issue_date`, `due_date` | `DATE` | Datas |
 | `total_amount` | `NUMERIC(12,2)` | Total |
+| `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `devolucao`, etc. |
+| `installment_number` | `INTEGER` NULL | Número desta parcela (ex.: 2) |
+| `installment_total` | `INTEGER` NULL | Total de parcelas (ex.: 3) |
+| `parent_invoice_id` | FK `invoices.id` NULL | Fatura-pai em parcelamentos |
 
 #### `invoice_items`
 Itens da fatura (CASCADE).
@@ -230,9 +241,19 @@ Ledger imutável de todas as movimentações financeiras. Saldo da conta corrent
 #### `accounts_payable`
 Contas a pagar. Status: `em_aberto → paga → cancelada`.
 
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `installment_number` | `INTEGER` NULL | Número desta parcela |
+| `installment_total` | `INTEGER` NULL | Total de parcelas |
+
 #### `accounts_receivable`
 Contas a receber. Status: `em_aberto → quitado | parcialmente_pago → cancelada`.
 O cancelamento por inadimplência marca `clients.is_delinquent = TRUE`.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `installment_number` | `INTEGER` NULL | Número desta parcela |
+| `installment_total` | `INTEGER` NULL | Total de parcelas |
 
 ---
 

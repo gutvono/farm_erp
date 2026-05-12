@@ -37,29 +37,17 @@ def _get_client_name(db: Session, client_id: Optional[UUID]) -> str:
 # ---------------------------------------------------------------------------
 
 
-def criar_fatura(
-    db: Session,
-    *,
-    sale_id: Optional[UUID] = None,
-    client_id: UUID,
-    items: list,
-    total_amount: Decimal,
-    source_module: str = "comercial",
-) -> Invoice:
-    """
-    Create an invoice from a sale. Called by Comercial upon sale creation.
-    items are SaleItem ORM objects with stock_item_id, quantity, unit_price, subtotal.
-    """
+def _build_sale_invoice_items(db: Session, items: list) -> list[dict]:
+    """Build invoice item dicts from SaleItem ORM objects, resolving stock names."""
     from app.modules.estoque.model import StockItem
 
-    # Resolve stock_item names for invoice item descriptions
     stock_ids = [item.stock_item_id for item in items]
     stock_map: dict = {}
     if stock_ids:
         rows = db.query(StockItem).filter(StockItem.id.in_(stock_ids)).all()
         stock_map = {s.id: s for s in rows}
 
-    item_data_list = []
+    item_data_list: list[dict] = []
     for item in items:
         stock_item = stock_map.get(item.stock_item_id)
         description = stock_item.name if stock_item else f"Item {item.stock_item_id}"
@@ -73,6 +61,33 @@ def criar_fatura(
                 "subtotal": qty * price,
             }
         )
+    return item_data_list
+
+
+def _calcular_vencimentos(
+    first_due_date: date, installments: int, interval_days: int
+) -> list[date]:
+    """Generate due dates for each installment based on the first date + interval."""
+    return [
+        first_due_date + timedelta(days=interval_days * idx)
+        for idx in range(installments)
+    ]
+
+
+def criar_fatura(
+    db: Session,
+    *,
+    sale_id: Optional[UUID] = None,
+    client_id: UUID,
+    items: list,
+    total_amount: Decimal,
+    source_module: str = "comercial",
+) -> Invoice:
+    """
+    Create an invoice from a sale. Called by Comercial upon sale creation.
+    items are SaleItem ORM objects with stock_item_id, quantity, unit_price, subtotal.
+    """
+    item_data_list = _build_sale_invoice_items(db, items)
 
     invoice = fat_repo.create_invoice(
         db,
@@ -81,6 +96,7 @@ def criar_fatura(
         total_amount=Decimal(str(total_amount)),
         sale_id=sale_id,
         due_date=date.today() + timedelta(days=30),
+        invoice_type="venda",
     )
 
     # Register internal financial movement (R$0.00 — fatura emitida)
@@ -96,6 +112,68 @@ def criar_fatura(
     )
 
     return invoice
+
+
+def criar_faturas_parceladas(
+    db: Session,
+    *,
+    sale_id: UUID,
+    client_id: UUID,
+    items: list,
+    total_amount: Decimal,
+    installments: int,
+    first_due_date: date,
+    installment_interval_days: int,
+) -> list[Invoice]:
+    """
+    Create one invoice per installment, splitting total_amount equally.
+    Last installment absorbs centavo residual. parent_invoice_id of all
+    subsequent invoices points to the first one in the chain.
+    """
+    from app.modules.financeiro import service as fin_service
+
+    total = Decimal(str(total_amount))
+    base_share = (total / Decimal(installments)).quantize(Decimal("0.01"))
+    last_share = total - (base_share * (installments - 1))
+    due_dates = _calcular_vencimentos(
+        first_due_date, installments, installment_interval_days
+    )
+    item_data_list = _build_sale_invoice_items(db, items)
+
+    created: list[Invoice] = []
+    parent_id: Optional[UUID] = None
+    for idx in range(installments):
+        amount = last_share if idx == installments - 1 else base_share
+        invoice = fat_repo.create_invoice(
+            db,
+            client_id=client_id,
+            items=item_data_list,
+            total_amount=amount,
+            sale_id=sale_id,
+            due_date=due_dates[idx],
+            invoice_type="venda",
+            installment_number=idx + 1,
+            installment_total=installments,
+            parent_invoice_id=parent_id,
+        )
+        if idx == 0:
+            parent_id = invoice.id
+        created.append(invoice)
+
+        fin_service.registrar_movimento(
+            db,
+            movement_type=MovementType.ENTRADA,
+            category=FinancialCategory.VENDA,
+            amount=Decimal("0"),
+            description=(
+                f"Fatura emitida: {invoice.number} "
+                f"(parcela {idx + 1}/{installments})"
+            ),
+            source_module="faturamento",
+            reference_id=invoice.id,
+        )
+
+    return created
 
 
 # ---------------------------------------------------------------------------
@@ -139,6 +217,7 @@ def create_manual_invoice(db: Session, data: InvoiceCreate) -> Invoice:
         sale_id=None,
         due_date=due_date,
         notes=data.notes,
+        invoice_type="venda",
     )
 
     # Create account receivable
@@ -331,6 +410,7 @@ def criar_nota_recebimento(db: Session, order_id: UUID) -> Invoice:
         sale_id=None,
         due_date=date.today(),
         notes=notes,
+        invoice_type="recebimento",
     )
 
     fin_service.registrar_movimento(
@@ -424,6 +504,7 @@ def criar_nota_devolucao(db: Session, order_id: UUID) -> Optional[Invoice]:
         sale_id=None,
         due_date=date.today(),
         notes=notes,
+        invoice_type="devolucao",
     )
 
     fin_service.registrar_movimento(

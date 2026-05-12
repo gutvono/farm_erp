@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle2, ChevronDown, ChevronUp } from "lucide-react"
+import { CheckCircle2, ChevronDown, ChevronUp, FileDown } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,10 +54,76 @@ function detectNfType(notes: string | null): "recebimento" | "devolucao" | null 
   return null
 }
 
+function getNfType(invoice: Invoice): "recebimento" | "devolucao" | null {
+  if (invoice.invoice_type === "recebimento") return "recebimento"
+  if (invoice.invoice_type === "devolucao") return "devolucao"
+  return detectNfType(invoice.notes)
+}
+
 function extractOrderIdFromNotes(notes: string | null): string | null {
   if (!notes) return null
   const match = notes.match(/order_id=([0-9a-f-]{36})/i)
   return match ? match[1] : null
+}
+
+async function generatePdf(invoice: Invoice, nfType: "recebimento" | "devolucao") {
+  const { jsPDF } = await import("jspdf")
+  const doc = new jsPDF()
+
+  const title =
+    nfType === "recebimento" ? "NOTA FISCAL DE RECEBIMENTO" : "NOTA FISCAL DE DEVOLUÇÃO"
+  const orderId = extractOrderIdFromNotes(invoice.notes)
+
+  doc.setFontSize(16)
+  doc.setFont("helvetica", "bold")
+  doc.text(title, 105, 20, { align: "center" })
+
+  doc.setFontSize(11)
+  doc.setFont("helvetica", "normal")
+  doc.text(`Número: ${invoice.number}`, 15, 36)
+  doc.text(`Emissão: ${formatDate(invoice.issue_date)}`, 15, 44)
+  if (orderId) {
+    doc.text(`Ordem de Compra: ${orderId}`, 15, 52)
+  }
+
+  let y = orderId ? 64 : 56
+
+  doc.setFontSize(10)
+  doc.setFont("helvetica", "bold")
+  doc.text("Descrição", 15, y)
+  doc.text("Qtd", 110, y, { align: "right" })
+  doc.text("Preço Unit.", 148, y, { align: "right" })
+  doc.text("Subtotal", 195, y, { align: "right" })
+  y += 2
+  doc.line(15, y, 195, y)
+  y += 6
+
+  doc.setFont("helvetica", "normal")
+  for (const item of invoice.items) {
+    const lines = doc.splitTextToSize(item.description, 90) as string[]
+    doc.text(lines, 15, y)
+    doc.text(String(item.quantity), 110, y, { align: "right" })
+    doc.text(formatCurrency(item.unit_price), 148, y, { align: "right" })
+    doc.text(formatCurrency(item.subtotal), 195, y, { align: "right" })
+    y += lines.length * 6 + 2
+  }
+
+  y += 2
+  doc.line(15, y, 195, y)
+  y += 6
+  doc.setFont("helvetica", "bold")
+  doc.text("Total:", 148, y, { align: "right" })
+  doc.text(formatCurrency(invoice.total_amount), 195, y, { align: "right" })
+
+  if (invoice.notes) {
+    y += 12
+    doc.setFontSize(9)
+    doc.setFont("helvetica", "italic")
+    const noteLines = doc.splitTextToSize(invoice.notes, 180) as string[]
+    doc.text(noteLines, 15, y)
+  }
+
+  doc.save(`${invoice.number}.pdf`)
 }
 
 interface FaturaCardProps {
@@ -68,12 +134,21 @@ interface FaturaCardProps {
 export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [updating, setUpdating] = useState(false)
+  const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<InvoiceStatus | null>(null)
 
   const isFinal = invoice.status === "paga" || invoice.status === "cancelada"
-  const nfType = detectNfType(invoice.notes)
+  const nfType = getNfType(invoice)
+  const isNfFiscal = nfType !== null
   const orderId = extractOrderIdFromNotes(invoice.notes)
   const fornecedorNotificado = invoice.notes?.includes("Fornecedor notificado") ?? false
+
+  const isParcelada =
+    invoice.installment_number !== null && invoice.installment_total !== null
+
+  const headerNumber = isParcelada
+    ? `${invoice.number} — Parcela ${invoice.installment_number}/${invoice.installment_total}`
+    : invoice.number
 
   async function confirmStatusChange() {
     if (!pendingStatus) return
@@ -94,6 +169,18 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
     }
   }
 
+  async function handleDownloadPdf() {
+    if (!nfType) return
+    setGeneratingPdf(true)
+    try {
+      await generatePdf(invoice, nfType)
+    } catch {
+      toast.error("Erro ao gerar PDF")
+    } finally {
+      setGeneratingPdf(false)
+    }
+  }
+
   return (
     <>
       <Card className="border-slate-200">
@@ -101,12 +188,11 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
           <div className="flex items-start justify-between gap-3">
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-2 flex-wrap">
-                <span className="font-semibold text-slate-800">{invoice.number}</span>
+                <span className="font-semibold text-slate-800">{headerNumber}</span>
                 <Badge className={STATUS_COLORS[invoice.status]}>
                   {STATUS_LABELS[invoice.status]}
                 </Badge>
 
-                {/* NF type badges */}
                 {nfType === "recebimento" && (
                   <Badge className="bg-blue-50 text-blue-700 border border-blue-200">
                     Recebimento
@@ -129,15 +215,13 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                   </>
                 )}
 
-                {/* Auto-generated from sale */}
-                {invoice.sale_id && !nfType && (
+                {invoice.sale_id && !isNfFiscal && (
                   <Badge variant="outline" className="text-xs">
-                    Gerada automaticamente
+                    {isParcelada ? "Parcelada" : "Gerada automaticamente"}
                   </Badge>
                 )}
               </div>
 
-              {/* Client name (empty for NF fiscal without client) */}
               {invoice.client_name ? (
                 <p className="text-sm text-slate-600 mt-0.5">{invoice.client_name}</p>
               ) : nfType === "recebimento" ? (
@@ -155,7 +239,6 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 </span>
               </p>
 
-              {/* Supplier notified indicator */}
               {fornecedorNotificado && (
                 <p className="text-xs text-green-700 mt-1 flex items-center gap-1">
                   <CheckCircle2 className="h-3 w-3" />
@@ -165,22 +248,34 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              <Select
-                value={invoice.status}
-                disabled={isFinal || updating}
-                onValueChange={(v) => setPendingStatus(v as InvoiceStatus)}
-              >
-                <SelectTrigger className="w-36">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="emitida" disabled>
-                    Emitida
-                  </SelectItem>
-                  <SelectItem value="paga">Paga</SelectItem>
-                  <SelectItem value="cancelada">Cancelada</SelectItem>
-                </SelectContent>
-              </Select>
+              {isNfFiscal ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={handleDownloadPdf}
+                  disabled={generatingPdf}
+                >
+                  <FileDown className="h-4 w-4 mr-1" />
+                  {generatingPdf ? "Gerando..." : "PDF"}
+                </Button>
+              ) : (
+                <Select
+                  value={invoice.status}
+                  disabled={isFinal || updating}
+                  onValueChange={(v) => setPendingStatus(v as InvoiceStatus)}
+                >
+                  <SelectTrigger className="w-36">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="emitida" disabled>
+                      Emitida
+                    </SelectItem>
+                    <SelectItem value="paga">Paga</SelectItem>
+                    <SelectItem value="cancelada">Cancelada</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
 
               <Button variant="ghost" size="icon" onClick={() => setExpanded((v) => !v)}>
                 {expanded ? (
@@ -231,7 +326,6 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
         )}
       </Card>
 
-      {/* AlertDialog: marcar como paga */}
       <AlertDialog
         open={pendingStatus === "paga"}
         onOpenChange={(open) => !open && setPendingStatus(null)}
@@ -253,7 +347,6 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* AlertDialog: cancelar fatura */}
       <AlertDialog
         open={pendingStatus === "cancelada"}
         onOpenChange={(open) => !open && setPendingStatus(null)}

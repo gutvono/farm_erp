@@ -128,6 +128,8 @@ def create_payable(
     supplier_id: Optional[UUID] = None,
     purchase_order_id: Optional[UUID] = None,
     notes: Optional[str] = None,
+    installment_number: Optional[int] = None,
+    installment_total: Optional[int] = None,
 ) -> AccountPayable:
     payable = AccountPayable(
         number=number,
@@ -137,6 +139,8 @@ def create_payable(
         supplier_id=supplier_id,
         purchase_order_id=purchase_order_id,
         notes=notes,
+        installment_number=installment_number,
+        installment_total=installment_total,
     )
     db.add(payable)
     db.commit()
@@ -197,6 +201,8 @@ def create_receivable(
     sale_id: Optional[UUID] = None,
     invoice_id: Optional[UUID] = None,
     notes: Optional[str] = None,
+    installment_number: Optional[int] = None,
+    installment_total: Optional[int] = None,
 ) -> AccountReceivable:
     receivable = AccountReceivable(
         number=number,
@@ -207,6 +213,8 @@ def create_receivable(
         sale_id=sale_id,
         invoice_id=invoice_id,
         notes=notes,
+        installment_number=installment_number,
+        installment_total=installment_total,
     )
     db.add(receivable)
     db.commit()

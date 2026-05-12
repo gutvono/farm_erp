@@ -79,18 +79,44 @@ emitida → cancelada (irreversível)
 
 ## Identificação de NFs de Compras
 
-`FaturaCard` detecta o tipo de nota pelo campo `notes`:
+`FaturaCard` detecta o tipo de nota priorizando `invoice.invoice_type` (`"recebimento"` ou `"devolucao"`) e com fallback para `detectNfType(notes)` (para registros anteriores à migration).
 
-| Padrão em `notes` | Badge exibido |
-|-------------------|---------------|
-| `[NF-RECEBIMENTO]` | Badge azul "Recebimento" |
-| `[NF-DEVOLUCAO]` | Badge vermelho "Devolução" + badge "Vinculada" com title = order_id |
-| `Fornecedor notificado` | Ícone de check verde + texto "Fornecedor notificado" |
+| Tipo | Badge exibido | Controle de status |
+|------|---------------|--------------------|
+| `recebimento` | Badge azul "Recebimento" | Botão PDF (jsPDF) |
+| `devolucao` | Badge vermelho "Devolução" + badge "Vinculada" | Botão PDF (jsPDF) |
+| `venda` | Badge "Gerada automaticamente" ou "Parcelada" | Select de status |
 
-Quando `client_id` é `null` (NF de recebimento/devolução sem cliente), o card exibe texto em itálico "Nota fiscal de recebimento" ou "Nota fiscal de devolução" no lugar do nome do cliente.
+- `Fornecedor notificado` em `notes` → ícone de check verde
+- Quando `client_id` é `null`: texto itálico "Nota fiscal de recebimento/devolução"
+- `order_id` extraído de `notes` via regex e exibido no title do badge "Vinculada"
 
-O `order_id` é extraído do notes via regex `order_id=([0-9a-f-]{36})` e exibido no title do badge "Vinculada".
+## Faturas Parceladas
 
-## Tipo Invoice — alterações
+- Header exibe `INV-XXXX — Parcela X/Y` quando `installment_number` e `installment_total` presentes
+- Badge "Parcelada" em vez de "Gerada automaticamente" para vendas parceladas
 
-- `client_id` agora é `string | null` (NFs de compras não têm cliente)
+## Geração de PDF (NFs de Compras)
+
+PDF gerado com `jspdf ^4.2.1` via import dinâmico (SSR-safe):
+
+```typescript
+const { jsPDF } = await import("jspdf")
+const doc = new jsPDF()
+// ... doc.text(), doc.setFont(), doc.setFontSize()
+doc.save(`${invoice.number}.pdf`)
+```
+
+Conteúdo: título (NF-RECEBIMENTO / NF-DEVOLUCAO), número, data de emissão, order_id, tabela de itens, total, notas.
+
+## Tipo Invoice — novos campos
+
+```typescript
+interface Invoice {
+  client_id: string | null       // null = NF sem cliente (compras)
+  invoice_type: string           // "venda" | "recebimento" | "devolucao"
+  installment_number: number | null
+  installment_total: number | null
+  parent_invoice_id: string | null
+}
+```

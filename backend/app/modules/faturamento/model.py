@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, ForeignKey, Numeric, String, Text
+from sqlalchemy import Column, Date, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -38,6 +38,15 @@ class Invoice(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     notes = Column(Text, nullable=True)
+    invoice_type = Column(String(50), nullable=False, default="venda")
+    installment_number = Column(Integer, nullable=True)
+    installment_total = Column(Integer, nullable=True)
+    parent_invoice_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("invoices.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
 
     items = relationship(
         "InvoiceItem",

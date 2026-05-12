@@ -1,9 +1,9 @@
-from datetime import datetime
+from datetime import date, datetime
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus
 
@@ -91,6 +91,17 @@ class PurchaseOrderCreate(BaseModel):
     notes: Optional[str] = None
     items: list[PurchaseOrderItemCreate] = Field(min_length=1)
     ordered_at: Optional[datetime] = None
+    installments: int = Field(default=1, ge=1, le=24)
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = Field(default=30, ge=1)
+
+    @model_validator(mode="after")
+    def _validate_installments(self) -> "PurchaseOrderCreate":
+        if self.installments >= 2 and self.first_due_date is None:
+            raise ValueError(
+                "first_due_date é obrigatório quando installments >= 2"
+            )
+        return self
 
 
 class PurchaseOrderOut(BaseModel):
@@ -104,6 +115,9 @@ class PurchaseOrderOut(BaseModel):
     ordered_at: datetime
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
+    installments: int = 1
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = 30
     items: list[PurchaseOrderItemOut]
     created_at: datetime
     updated_at: datetime
@@ -123,6 +137,9 @@ class PurchaseOrderOut(BaseModel):
             ordered_at=order.ordered_at,
             received_at=order.received_at,
             notes=order.notes,
+            installments=order.installments or 1,
+            first_due_date=order.first_due_date,
+            installment_interval_days=order.installment_interval_days or 30,
             items=[PurchaseOrderItemOut.from_model(i) for i in order.items],
             created_at=order.created_at,
             updated_at=order.updated_at,
@@ -202,6 +219,9 @@ class PurchaseOrderWithReceipts(BaseModel):
     ordered_at: datetime
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
+    installments: int = 1
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = 30
     items: list[PurchaseOrderItemOut]
     receipts: list[PurchaseOrderReceiptItemOut]
     created_at: datetime
@@ -222,6 +242,9 @@ class PurchaseOrderWithReceipts(BaseModel):
             ordered_at=order.ordered_at,
             received_at=order.received_at,
             notes=order.notes,
+            installments=order.installments or 1,
+            first_due_date=order.first_due_date,
+            installment_interval_days=order.installment_interval_days or 30,
             items=[PurchaseOrderItemOut.from_model(i) for i in order.items],
             receipts=[PurchaseOrderReceiptItemOut.from_model(r) for r in order.receipts],
             created_at=order.created_at,

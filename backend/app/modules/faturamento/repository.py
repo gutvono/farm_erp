@@ -35,6 +35,10 @@ def create_invoice(
     sale_id: Optional[UUID] = None,
     due_date=None,
     notes: Optional[str] = None,
+    invoice_type: str = "venda",
+    installment_number: Optional[int] = None,
+    installment_total: Optional[int] = None,
+    parent_invoice_id: Optional[UUID] = None,
 ) -> Invoice:
     from datetime import date
 
@@ -47,6 +51,10 @@ def create_invoice(
         total_amount=total_amount,
         notes=notes,
         status=InvoiceStatus.EMITIDA,
+        invoice_type=invoice_type,
+        installment_number=installment_number,
+        installment_total=installment_total,
+        parent_invoice_id=parent_invoice_id,
     )
     db.add(invoice)
     db.flush()

@@ -108,6 +108,9 @@ interface RawOrder {
   notes: string | null
   ordered_at: string
   received_at: string | null
+  installments: number
+  first_due_date: string | null
+  installment_interval_days: number
   items: RawOrderItem[]
   created_at: string
   updated_at: string
@@ -129,6 +132,9 @@ function parseOrder(raw: RawOrder): PurchaseOrder {
     notes: raw.notes,
     ordered_at: raw.ordered_at,
     received_at: raw.received_at,
+    installments: raw.installments ?? 1,
+    first_due_date: raw.first_due_date ?? null,
+    installment_interval_days: raw.installment_interval_days ?? 30,
     items: (raw.items ?? []).map(parseOrderItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -198,6 +204,9 @@ export async function getOrdens(status?: string): Promise<PurchaseOrder[]> {
 export async function createOrdem(data: {
   supplier_id: string
   notes?: string
+  installments?: number
+  first_due_date?: string
+  installment_interval_days?: number
   items: { stock_item_id: string; quantity: number; unit_price: number; description?: string }[]
 }): Promise<PurchaseOrder> {
   const response = await apiFetch<ApiResponse<RawOrder>>("/api/compras/ordens", {

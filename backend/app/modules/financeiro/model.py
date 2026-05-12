@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -74,6 +74,8 @@ class AccountPayable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     notes = Column(Text, nullable=True)
+    installment_number = Column(Integer, nullable=True)
+    installment_total = Column(Integer, nullable=True)
 
 
 class AccountReceivable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -114,3 +116,5 @@ class AccountReceivable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     notes = Column(Text, nullable=True)
+    installment_number = Column(Integer, nullable=True)
+    installment_total = Column(Integer, nullable=True)

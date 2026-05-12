@@ -72,6 +72,9 @@ interface RawSale {
   notes: string | null
   sold_at: string
   delivered_at: string | null
+  installments: number
+  first_due_date: string | null
+  installment_interval_days: number
   items: RawSaleItem[]
   created_at: string
   updated_at: string
@@ -87,6 +90,9 @@ function parseSale(raw: RawSale): Sale {
     notes: raw.notes,
     sold_at: raw.sold_at,
     delivered_at: raw.delivered_at,
+    installments: raw.installments ?? 1,
+    first_due_date: raw.first_due_date ?? null,
+    installment_interval_days: raw.installment_interval_days ?? 30,
     items: (raw.items ?? []).map(parseSaleItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -167,6 +173,9 @@ export async function getVendas(status?: string): Promise<Sale[]> {
 export async function createVenda(data: {
   client_id: string
   notes?: string
+  installments?: number
+  first_due_date?: string
+  installment_interval_days?: number
   items: { stock_item_id: string; quantity: number; unit_price: number }[]
 }): Promise<Sale> {
   const response = await apiFetch<ApiResponse<RawSale>>("/api/comercial/vendas", {

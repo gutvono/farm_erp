@@ -52,6 +52,10 @@ class InvoiceOut(BaseModel):
     total_amount: Decimal
     status: InvoiceStatus
     notes: Optional[str] = None
+    invoice_type: str = "venda"
+    installment_number: Optional[int] = None
+    installment_total: Optional[int] = None
+    parent_invoice_id: Optional[UUID] = None
     items: list[InvoiceItemOut]
     created_at: datetime
     updated_at: datetime
@@ -71,6 +75,10 @@ class InvoiceOut(BaseModel):
             total_amount=invoice.total_amount,
             status=invoice.status,
             notes=invoice.notes,
+            invoice_type=invoice.invoice_type or "venda",
+            installment_number=invoice.installment_number,
+            installment_total=invoice.installment_total,
+            parent_invoice_id=invoice.parent_invoice_id,
             items=[InvoiceItemOut.model_validate(i) for i in invoice.items],
             created_at=invoice.created_at,
             updated_at=invoice.updated_at,

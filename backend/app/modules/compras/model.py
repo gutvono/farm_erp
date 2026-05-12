@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -49,6 +49,9 @@ class PurchaseOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     notes = Column(Text, nullable=True)
     financial_approval_note = Column(Text, nullable=True)
     receipt_total_amount = Column(Numeric(10, 2), nullable=False, default=0)
+    installments = Column(Integer, nullable=False, default=1)
+    first_due_date = Column(Date, nullable=True)
+    installment_interval_days = Column(Integer, nullable=False, default=30)
 
     supplier = relationship("Supplier", back_populates="purchase_orders")
     items = relationship(

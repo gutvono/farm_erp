@@ -67,7 +67,10 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
       "unit_price": 900.00,
       "description": "opcional"
     }
-  ]
+  ],
+  "installments": 1,
+  "first_due_date": null,
+  "installment_interval_days": 30
 }
 ```
 
@@ -76,6 +79,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `subtotal` por item = `quantity × unit_price`
 - `sold_at` opcional (default: now)
 - Status inicial sempre `realizada`
+- `installments`: 1 a 24 (default 1 — pagamento à vista, fluxo atual inalterado)
+- `first_due_date`: obrigatório quando `installments >= 2`
+- `installment_interval_days`: dias entre parcelas (default 30)
 
 ### SaleStatusUpdate
 ```json
@@ -124,36 +130,17 @@ Executado em sequência no `service.create_sale()`:
    )
    ```
 
-4. **Fatura** (placeholder — Faturamento não implementado):
-   ```python
-   faturamento_service.criar_fatura(db, sale_id=sale.id, client_id=..., ...)
-   ```
+4. **Fatura(s)** — depende de `installments`:
+   - **`installments <= 1` (à vista, default — fluxo inalterado):** uma única fatura via `faturamento_service.criar_fatura(...)` com `invoice_type="venda"`, `due_date = today + 30d`.
+   - **`installments >= 2` (parcelado):** N faturas via `faturamento_service.criar_faturas_parceladas(...)`, uma por parcela. `total_amount` é dividido igualmente; a última parcela absorve o resíduo de centavos. Cada fatura recebe `installment_number`, `installment_total` e `parent_invoice_id` apontando para a primeira (a primeira tem `parent_invoice_id = None`). Vencimentos = `first_due_date + n * installment_interval_days`.
 
-5. **Conta a Receber** (vencimento em 30 dias):
-   ```python
-   fin_service.criar_conta_receber(
-       db,
-       client_id=sale.client_id,
-       description=f"Venda — {client.name}",
-       amount=sale.total_amount,
-       due_date=date.today() + timedelta(days=30),
-       source_module="comercial",
-       reference_id=sale.id,
-   )
-   ```
+5. **Conta(s) a Receber**:
+   - **À vista:** uma conta com `due_date = today + 30d`.
+   - **Parcelado:** uma conta por parcela, cada uma vinculada à sua fatura (`invoice_id`), com `installment_number`, `installment_total` e `due_date` espelhando o vencimento da fatura.
 
 6. **Movimentação Financeira** (entrada/venda):
-   ```python
-   fin_service.registrar_movimento(
-       db,
-       movement_type=MovementType.ENTRADA,
-       category=FinancialCategory.VENDA,
-       amount=sale.total_amount,
-       description=f"Venda — {client.name}",
-       source_module="comercial",
-       reference_id=sale.id,
-   )
-   ```
+   - **À vista:** valor cheio (`sale.total_amount`).
+   - **Parcelado:** uma única movimentação placeholder de R$0 (rastreabilidade).
 
 ### Inadimplência de Clientes
 - Controlada pelo campo `is_delinquent` (Boolean) em `Client`
@@ -186,6 +173,9 @@ Executado em sequência no `service.create_sale()`:
 | `sold_at` | TIMESTAMPTZ |
 | `delivered_at` | TIMESTAMPTZ (nullable) |
 | `notes` | TEXT (nullable) |
+| `installments` | INT default 1 |
+| `first_due_date` | DATE (nullable) |
+| `installment_interval_days` | INT default 30 |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `sale_items`
