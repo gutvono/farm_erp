@@ -1,7 +1,7 @@
 "use client"
 
 import { useState } from "react"
-import { useForm, useFieldArray } from "react-hook-form"
+import { useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -87,9 +87,6 @@ export function ConferenciaRecebimento({ order, onFinalized }: ConferenciaRecebi
     resolver: zodResolver(schema),
     defaultValues: { items: defaultItems },
   })
-
-  const { fields } = useFieldArray({ control: undefined as never, name: "items" })
-  void fields
 
   const watchedItems = watch("items")
 
