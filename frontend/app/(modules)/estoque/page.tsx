@@ -1,9 +1,10 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, Plus, RefreshCw } from "lucide-react"
+import { AlertTriangle, ChevronDown, ChevronUp, PackageCheck, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import {
@@ -25,17 +26,21 @@ import { StockItemForm } from "@/components/modules/estoque/StockItemForm"
 import { MovimentacaoForm } from "@/components/modules/estoque/MovimentacaoForm"
 import { MovimentacoesTable } from "@/components/modules/estoque/MovimentacoesTable"
 import { InventarioModal } from "@/components/modules/estoque/InventarioModal"
+import { ConferenciaRecebimento } from "@/components/modules/estoque/ConferenciaRecebimento"
 import {
   getItens,
   getMovimentacoes,
   getInventario,
 } from "@/services/estoque"
+import { getRecebimentos, iniciarConferencia } from "@/services/compras"
 import {
   Inventory,
+  PurchaseOrderWithReceipts,
   StockCategory,
   StockItem,
   StockMovement,
 } from "@/types/index"
+import { formatCurrency, formatDate } from "@/lib/utils"
 
 const CATEGORIES: { value: string; label: string }[] = [
   { value: "all", label: "Todas as categorias" },
@@ -45,6 +50,16 @@ const CATEGORIES: { value: string; label: string }[] = [
   { value: "veiculo", label: "Veículo" },
   { value: "outro", label: "Outro" },
 ]
+
+const STATUS_BADGE: Record<string, string> = {
+  aprovada: "bg-emerald-100 text-emerald-700",
+  em_conferencia: "bg-orange-100 text-orange-800",
+}
+
+const STATUS_LABEL: Record<string, string> = {
+  aprovada: "Aprovada",
+  em_conferencia: "Em conferência",
+}
 
 export default function EstoquePage() {
   const [items, setItems] = useState<StockItem[]>([])
@@ -68,6 +83,12 @@ export default function EstoquePage() {
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null)
   const [historyMovements, setHistoryMovements] = useState<StockMovement[]>([])
   const [historyLoading, setHistoryLoading] = useState(false)
+
+  // Recebimentos
+  const [recebimentos, setRecebimentos] = useState<PurchaseOrderWithReceipts[]>([])
+  const [recebimentosLoading, setRecebimentosLoading] = useState(false)
+  const [expandedConferencia, setExpandedConferencia] = useState<string | null>(null)
+  const [startingConferencia, setStartingConferencia] = useState<string | null>(null)
 
   const loadItems = useCallback(async () => {
     setItemsLoading(true)
@@ -96,13 +117,21 @@ export default function EstoquePage() {
     }
   }, [])
 
-  useEffect(() => {
-    loadItems()
-  }, [loadItems])
+  const loadRecebimentos = useCallback(async () => {
+    setRecebimentosLoading(true)
+    try {
+      const data = await getRecebimentos()
+      setRecebimentos(data)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao carregar recebimentos")
+    } finally {
+      setRecebimentosLoading(false)
+    }
+  }, [])
 
-  useEffect(() => {
-    loadMovements()
-  }, [loadMovements])
+  useEffect(() => { loadItems() }, [loadItems])
+  useEffect(() => { loadMovements() }, [loadMovements])
+  useEffect(() => { loadRecebimentos() }, [loadRecebimentos])
 
   async function handleOpenInventory() {
     setInventoryOpen(true)
@@ -145,6 +174,25 @@ export default function EstoquePage() {
     setItemFormOpen(true)
   }
 
+  async function handleIniciarConferencia(orderId: string) {
+    setStartingConferencia(orderId)
+    try {
+      await iniciarConferencia(orderId)
+      toast.success("Conferência iniciada")
+      await loadRecebimentos()
+      setExpandedConferencia(orderId)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao iniciar conferência")
+    } finally {
+      setStartingConferencia(null)
+    }
+  }
+
+  async function handleConferenciaFinalizada() {
+    setExpandedConferencia(null)
+    await Promise.all([loadRecebimentos(), loadItems(), loadMovements()])
+  }
+
   const criticalCount = items.filter((i) => i.is_below_minimum).length
 
   return (
@@ -162,6 +210,14 @@ export default function EstoquePage() {
             <TabsTrigger value="items">Itens</TabsTrigger>
             <TabsTrigger value="movements">Movimentações</TabsTrigger>
             <TabsTrigger value="inventory">Inventário</TabsTrigger>
+            <TabsTrigger value="recebimentos" className="relative">
+              Recebimentos
+              {recebimentos.length > 0 && (
+                <span className="ml-1.5 rounded-full bg-orange-500 text-white text-xs px-1.5 py-0.5 leading-none">
+                  {recebimentos.length}
+                </span>
+              )}
+            </TabsTrigger>
           </TabsList>
 
           {/* ── Aba Itens ── */}
@@ -262,6 +318,108 @@ export default function EstoquePage() {
                 </Button>
               </CardContent>
             </Card>
+          </TabsContent>
+
+          {/* ── Aba Recebimentos ── */}
+          <TabsContent value="recebimentos" className="space-y-4">
+            <div className="flex items-center justify-between">
+              <p className="text-sm text-slate-500">
+                Ordens aprovadas aguardando conferência de recebimento
+              </p>
+              <Button variant="outline" size="sm" onClick={loadRecebimentos}>
+                <RefreshCw className="h-4 w-4 mr-1" />
+                Atualizar
+              </Button>
+            </div>
+
+            {recebimentosLoading ? (
+              <div className="py-12 text-center text-slate-400">Carregando recebimentos...</div>
+            ) : recebimentos.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                <PackageCheck className="h-10 w-10 mx-auto mb-2 text-slate-300" />
+                Nenhuma ordem aguardando conferência
+              </div>
+            ) : (
+              <div className="space-y-4">
+                {recebimentos.map((order) => {
+                  const isExpanded = expandedConferencia === order.id
+                  return (
+                    <Card key={order.id} className="border-slate-200">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <span className="font-semibold text-slate-800">
+                                {order.supplier_name}
+                              </span>
+                              <Badge className={STATUS_BADGE[order.status] ?? ""}>
+                                {STATUS_LABEL[order.status] ?? order.status}
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-slate-500 mt-0.5">
+                              {formatDate(order.ordered_at)} ·{" "}
+                              {order.items.length} item{order.items.length !== 1 ? "s" : ""} ·{" "}
+                              <span className="font-medium text-slate-700">
+                                {formatCurrency(order.total_amount)}
+                              </span>
+                            </p>
+                            {order.notes && (
+                              <p className="text-sm text-slate-500 mt-1 italic">{order.notes}</p>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            {order.status === "aprovada" && (
+                              <Button
+                                size="sm"
+                                onClick={() => handleIniciarConferencia(order.id)}
+                                disabled={startingConferencia === order.id}
+                              >
+                                {startingConferencia === order.id
+                                  ? "Iniciando..."
+                                  : "Iniciar Conferência"}
+                              </Button>
+                            )}
+                            {order.status === "em_conferencia" && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() =>
+                                  setExpandedConferencia(isExpanded ? null : order.id)
+                                }
+                              >
+                                {isExpanded ? (
+                                  <>
+                                    <ChevronUp className="h-4 w-4 mr-1" />
+                                    Fechar
+                                  </>
+                                ) : (
+                                  <>
+                                    <ChevronDown className="h-4 w-4 mr-1" />
+                                    Conferir itens
+                                  </>
+                                )}
+                              </Button>
+                            )}
+                          </div>
+                        </div>
+                      </CardHeader>
+
+                      {isExpanded && order.status === "em_conferencia" && (
+                        <CardContent className="pt-0 border-t">
+                          <div className="pt-4">
+                            <ConferenciaRecebimento
+                              order={order}
+                              onFinalized={handleConferenciaFinalizada}
+                            />
+                          </div>
+                        </CardContent>
+                      )}
+                    </Card>
+                  )
+                })}
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

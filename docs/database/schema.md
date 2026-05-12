@@ -49,7 +49,7 @@ nome do enum.
 | `users`, `clients`, `suppliers`, `employees` | ✅ | entidades cadastrais |
 | `stock_items`, `plots` | ✅ | cadastros base |
 | `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods` | ✅ | operações de negócio |
-| `sale_items`, `purchase_order_items`, `invoice_items`, `production_inputs`, `payroll_entries` | ❌ | itens filhos (cascateados pelo pai) |
+| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `payroll_entries` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
 | `notifications` | ❌ | efêmeras por design |
 
@@ -132,17 +132,39 @@ Itens de uma venda.
 Fornecedores de insumos, café verde e equipamentos.
 
 #### `purchase_orders`
-Ordens de compra. Fluxo `em_andamento → concluida → cancelada`.
+Ordens de compra. Fluxo expandido:
+`em_andamento → aguardando_aprovacao_financeiro → aprovada → em_conferencia → aguardando_pagamento → concluida → cancelada`
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `supplier_id` | FK `suppliers.id` | Fornecedor |
 | `status` | ENUM `purchase_order_status` | Estado da ordem |
-| `total_amount` | `NUMERIC(12,2)` | Valor total |
+| `total_amount` | `NUMERIC(12,2)` | Valor total dos itens pedidos |
+| `receipt_total_amount` | `NUMERIC(10,2)` | Valor total dos itens aceitos na conferência |
+| `financial_approval_note` | `TEXT` NULL | Motivo de recusa pelo financeiro |
 | `ordered_at`, `received_at` | `TIMESTAMPTZ` | Datas |
+
+**Novos valores do enum `purchase_order_status` (migration 0004):**
+- `aguardando_aprovacao_financeiro` — aguardando análise do setor financeiro
+- `aprovada` — aprovada pelo financeiro
+- `em_conferencia` — recebimento físico em conferência
+- `aguardando_pagamento` — conferência concluída, aguardando pagamento
 
 #### `purchase_order_items`
 Itens da ordem (CASCADE no pai).
+
+#### `purchase_order_receipts`
+Conferência de recebimento por item da ordem. Criada durante a etapa `em_conferencia`.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `purchase_order_id` | FK `purchase_orders.id` (CASCADE) | Ordem pai |
+| `purchase_order_item_id` | FK `purchase_order_items.id` (CASCADE) | Item conferido |
+| `quantity_ordered` | `NUMERIC(10,3)` | Quantidade pedida (cópia do item) |
+| `quantity_accepted` | `NUMERIC(10,3)` default 0 | Quantidade aceita na conferência |
+| `quantity_rejected` | `NUMERIC(10,3)` default 0 | Quantidade recusada |
+| `rejection_reason` | `TEXT` NULL | Motivo da recusa |
+| `status` | ENUM `purchase_order_receipt_status` | `pendente` \| `conferido` |
 
 ---
 
@@ -287,7 +309,8 @@ clients ──────┬───── sales ──── sale_items ─�
                          ▲                         │
                          └── sale_id (nullable) ──▶sales
 
-suppliers ────┬──── purchase_orders ── purchase_order_items ──▶ stock_items
+suppliers ────┬──── purchase_orders ──┬── purchase_order_items ──▶ stock_items
+              │                       └── purchase_order_receipts ──▶ purchase_order_items
               └──── accounts_payable
 
 stock_items ──── stock_movements (ledger)

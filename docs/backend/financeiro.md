@@ -40,7 +40,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/financeiro/contas-pagar` | Cria nova conta |
 | `GET` | `/api/financeiro/contas-pagar/{id}` | Detalhe |
 | `PUT` | `/api/financeiro/contas-pagar/{id}` | Atualiza conta em aberto |
-| `PUT` | `/api/financeiro/contas-pagar/{id}/pagar` | Marca como paga + gera movimento de saída |
+| `PUT` | `/api/financeiro/contas-pagar/{id}/pagar` | Marca como paga + gera movimento de saída. **Se a conta tem `purchase_order_id`, dispara o fluxo de conclusão em Compras** (entrada de estoque dos aceitos, NF-RECEBIMENTO, NF-DEVOLUCAO se houver, transição para `concluida`) |
 | `PUT` | `/api/financeiro/contas-pagar/{id}/cancelar` | Cancela conta (sem movimento) |
 
 ### Contas a Receber
@@ -234,7 +234,8 @@ Se `source_module == "faturamento"`, `reference_id` é atribuído a `invoice_id`
 | Origem | Ação | Chamada |
 |--------|------|---------|
 | Comercial | Venda realizada | `criar_conta_receber(source_module="comercial", reference_id=sale.id)` + `registrar_movimento(VENDA)` opcional |
-| Compras | Compra concluída | `criar_conta_pagar(source_module="compras", reference_id=po.id)` |
+| Compras | Conferência finalizada | `criar_conta_pagar(source_module="compras", reference_id=po.id)` (amount = `receipt_total_amount`) |
+| Financeiro → Compras | Pagamento da conta a pagar | Em `pay_payable`, se `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment(db, payable.purchase_order_id)`, que faz entrada de estoque dos itens aceitos, gera NF-RECEBIMENTO via `faturamento.criar_nota_recebimento`, gera NF-DEVOLUCAO se houver itens recusados via `faturamento.criar_nota_devolucao`, e move a ordem para `concluida`. Import é lazy para evitar ciclo. |
 | Folha | Folha fechada | `criar_conta_pagar(source_module="folha", reference_id=payroll_entry.id)` por funcionário |
 | PCP | Produção concluída | `registrar_movimento(SAIDA/PRODUCAO)` (insumos) + `registrar_movimento(ENTRADA/PRODUCAO, amount=0)` (produto) |
 | Estoque | Movimentação interna | `registrar_movimento(SAIDA/OUTRO, amount=0)` |

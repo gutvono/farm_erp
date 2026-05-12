@@ -24,7 +24,9 @@ def _get_invoice_or_404(db: Session, invoice_id: UUID) -> Invoice:
     return invoice
 
 
-def _get_client_name(db: Session, client_id: UUID) -> str:
+def _get_client_name(db: Session, client_id: Optional[UUID]) -> str:
+    if client_id is None:
+        return ""
     from app.modules.comercial.model import Client
     client = db.query(Client).filter(Client.id == client_id).first()
     return client.name if client else ""
@@ -243,3 +245,195 @@ def soft_delete_invoice(db: Session, invoice_id: UUID) -> Invoice:
 
     result = fat_repo.soft_delete_invoice(db, invoice_id)
     return result
+
+
+# ---------------------------------------------------------------------------
+# Public functions — fiscal notes for purchase orders
+# ---------------------------------------------------------------------------
+
+
+_NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"
+_NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"
+
+
+def _build_purchase_notes(prefix: str, order_id: UUID, supplier_name: str, extra: str = "") -> str:
+    base = f"{prefix} order_id={order_id} — {supplier_name}"
+    if extra:
+        base = f"{base} — {extra}"
+    return base
+
+
+def criar_nota_recebimento(db: Session, order_id: UUID) -> Invoice:
+    """
+    Cria nota fiscal de recebimento a partir de uma ordem de compra.
+    Considera apenas itens com quantity_accepted > 0.
+    """
+    from app.modules.compras.model import PurchaseOrder, PurchaseOrderItem, Supplier
+    from app.modules.estoque.model import StockItem
+    from app.modules.financeiro import service as fin_service
+
+    order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordem de compra não encontrada")
+
+    supplier = db.query(Supplier).filter(Supplier.id == order.supplier_id).first()
+    supplier_name = supplier.name if supplier else ""
+
+    items_by_id = {item.id: item for item in order.items}
+    stock_ids = [item.stock_item_id for item in order.items]
+    stock_map: dict = {}
+    if stock_ids:
+        rows = db.query(StockItem).filter(StockItem.id.in_(stock_ids)).all()
+        stock_map = {s.id: s for s in rows}
+
+    invoice_items: list = []
+    total_amount = Decimal("0")
+    for receipt in order.receipts:
+        if Decimal(receipt.quantity_accepted) <= 0:
+            continue
+        order_item = items_by_id.get(receipt.purchase_order_item_id)
+        if not order_item:
+            continue
+        stock_item = stock_map.get(order_item.stock_item_id)
+        name = stock_item.name if stock_item else f"Item {order_item.stock_item_id}"
+        unit = stock_item.unit.value if stock_item and stock_item.unit else "un"
+        qty = Decimal(str(receipt.quantity_accepted))
+        price = Decimal(str(order_item.unit_price))
+        subtotal = qty * price
+        total_amount += subtotal
+        invoice_items.append(
+            {
+                "description": f"{name} — {qty} {unit}",
+                "quantity": qty,
+                "unit_price": price,
+                "subtotal": subtotal,
+            }
+        )
+
+    if not invoice_items:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum item aceito na conferência para gerar nota de recebimento",
+        )
+
+    notes = _build_purchase_notes(
+        _NF_RECEBIMENTO_PREFIX,
+        order.id,
+        supplier_name,
+        f"Nota fiscal de recebimento — Ordem de compra #{order.id}",
+    )
+
+    invoice = fat_repo.create_invoice(
+        db,
+        client_id=None,
+        items=invoice_items,
+        total_amount=total_amount,
+        sale_id=None,
+        due_date=date.today(),
+        notes=notes,
+    )
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.ENTRADA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description=f"NF de recebimento emitida: {invoice.number} — ordem #{order.id}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+    return invoice
+
+
+def criar_nota_devolucao(db: Session, order_id: UUID) -> Optional[Invoice]:
+    """
+    Cria nota fiscal de devolução vinculada à NF de recebimento da ordem.
+    Considera apenas itens com quantity_rejected > 0.
+    Retorna None se não houver itens rejeitados.
+    """
+    from app.modules.compras.model import PurchaseOrder, Supplier
+    from app.modules.estoque.model import StockItem
+    from app.modules.financeiro import service as fin_service
+
+    order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordem de compra não encontrada")
+
+    supplier = db.query(Supplier).filter(Supplier.id == order.supplier_id).first()
+    supplier_name = supplier.name if supplier else ""
+
+    # Locate the NF de recebimento (search via notes prefix containing order_id)
+    recebimento = (
+        db.query(Invoice)
+        .filter(
+            Invoice.deleted_at.is_(None),
+            Invoice.notes.ilike(f"%{_NF_RECEBIMENTO_PREFIX}%order_id={order.id}%"),
+        )
+        .first()
+    )
+
+    items_by_id = {item.id: item for item in order.items}
+    stock_ids = [item.stock_item_id for item in order.items]
+    stock_map: dict = {}
+    if stock_ids:
+        rows = db.query(StockItem).filter(StockItem.id.in_(stock_ids)).all()
+        stock_map = {s.id: s for s in rows}
+
+    invoice_items: list = []
+    total_amount = Decimal("0")
+    for receipt in order.receipts:
+        if Decimal(receipt.quantity_rejected) <= 0:
+            continue
+        order_item = items_by_id.get(receipt.purchase_order_item_id)
+        if not order_item:
+            continue
+        stock_item = stock_map.get(order_item.stock_item_id)
+        name = stock_item.name if stock_item else f"Item {order_item.stock_item_id}"
+        unit = stock_item.unit.value if stock_item and stock_item.unit else "un"
+        qty = Decimal(str(receipt.quantity_rejected))
+        price = Decimal(str(order_item.unit_price))
+        subtotal = qty * price
+        total_amount += subtotal
+        reason = receipt.rejection_reason or "Não informado"
+        invoice_items.append(
+            {
+                "description": f"DEVOLUÇÃO: {name} — {qty} {unit} — Motivo: {reason}",
+                "quantity": qty,
+                "unit_price": price,
+                "subtotal": subtotal,
+            }
+        )
+
+    if not invoice_items:
+        return None
+
+    linked = f"NF recebimento #{recebimento.number}" if recebimento else "sem NF recebimento prévia"
+    notes = _build_purchase_notes(
+        _NF_DEVOLUCAO_PREFIX,
+        order.id,
+        supplier_name,
+        f"Devolução vinculada à {linked} — Fornecedor notificado",
+    )
+
+    invoice = fat_repo.create_invoice(
+        db,
+        client_id=None,
+        items=invoice_items,
+        total_amount=total_amount,
+        sale_id=None,
+        due_date=date.today(),
+        notes=notes,
+    )
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description=f"NF de devolução emitida: {invoice.number} — ordem #{order.id}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+    return invoice

@@ -76,3 +76,21 @@ emitida → cancelada (irreversível)
 - Atualização de status com AlertDialog de confirmação por transição
 - Toast informativo na transição para "paga"
 - Loading states em todas as ações assíncronas
+
+## Identificação de NFs de Compras
+
+`FaturaCard` detecta o tipo de nota pelo campo `notes`:
+
+| Padrão em `notes` | Badge exibido |
+|-------------------|---------------|
+| `[NF-RECEBIMENTO]` | Badge azul "Recebimento" |
+| `[NF-DEVOLUCAO]` | Badge vermelho "Devolução" + badge "Vinculada" com title = order_id |
+| `Fornecedor notificado` | Ícone de check verde + texto "Fornecedor notificado" |
+
+Quando `client_id` é `null` (NF de recebimento/devolução sem cliente), o card exibe texto em itálico "Nota fiscal de recebimento" ou "Nota fiscal de devolução" no lugar do nome do cliente.
+
+O `order_id` é extraído do notes via regex `order_id=([0-9a-f-]{36})` e exibido no title do badge "Vinculada".
+
+## Tipo Invoice — alterações
+
+- `client_id` agora é `string | null` (NFs de compras não têm cliente)

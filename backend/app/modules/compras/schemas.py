@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus
 
 
 # ---------------------------------------------------------------------------
@@ -99,6 +99,8 @@ class PurchaseOrderOut(BaseModel):
     supplier_name: str
     status: PurchaseOrderStatus
     total_amount: Decimal
+    receipt_total_amount: Decimal = Decimal("0")
+    financial_approval_note: Optional[str] = None
     ordered_at: datetime
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
@@ -116,6 +118,8 @@ class PurchaseOrderOut(BaseModel):
             supplier_name=order.supplier.name if order.supplier else "",
             status=order.status,
             total_amount=order.total_amount,
+            receipt_total_amount=order.receipt_total_amount or Decimal("0"),
+            financial_approval_note=order.financial_approval_note,
             ordered_at=order.ordered_at,
             received_at=order.received_at,
             notes=order.notes,
@@ -127,3 +131,99 @@ class PurchaseOrderOut(BaseModel):
 
 class PurchaseOrderStatusUpdate(BaseModel):
     status: PurchaseOrderStatus
+
+
+# ---------------------------------------------------------------------------
+# Approval / Receipt flow
+# ---------------------------------------------------------------------------
+
+
+class PurchaseOrderCancelRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class PurchaseOrderReceiptItem(BaseModel):
+    purchase_order_item_id: UUID
+    quantity_accepted: Decimal = Field(ge=0)
+    quantity_rejected: Decimal = Field(ge=0)
+    rejection_reason: Optional[str] = Field(default=None, max_length=2000)
+
+
+class PurchaseOrderReceiptFinalize(BaseModel):
+    items: list[PurchaseOrderReceiptItem] = Field(min_length=1)
+
+
+class PurchaseOrderReceiptItemOut(BaseModel):
+    id: UUID
+    purchase_order_id: UUID
+    purchase_order_item_id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    quantity_ordered: Decimal
+    quantity_accepted: Decimal
+    quantity_rejected: Decimal
+    unit_price: Decimal
+    rejection_reason: Optional[str] = None
+    status: PurchaseOrderReceiptStatus
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @classmethod
+    def from_model(cls, receipt) -> "PurchaseOrderReceiptItemOut":
+        order_item = receipt.purchase_order_item
+        stock_item = getattr(order_item, "stock_item", None) if order_item else None
+        return cls(
+            id=receipt.id,
+            purchase_order_id=receipt.purchase_order_id,
+            purchase_order_item_id=receipt.purchase_order_item_id,
+            stock_item_id=order_item.stock_item_id if order_item else None,
+            stock_item_name=stock_item.name if stock_item else "",
+            quantity_ordered=receipt.quantity_ordered,
+            quantity_accepted=receipt.quantity_accepted,
+            quantity_rejected=receipt.quantity_rejected,
+            unit_price=order_item.unit_price if order_item else Decimal("0"),
+            rejection_reason=receipt.rejection_reason,
+            status=receipt.status,
+            created_at=receipt.created_at,
+            updated_at=receipt.updated_at,
+        )
+
+
+class PurchaseOrderWithReceipts(BaseModel):
+    id: UUID
+    supplier_id: UUID
+    supplier_name: str
+    status: PurchaseOrderStatus
+    total_amount: Decimal
+    receipt_total_amount: Decimal
+    financial_approval_note: Optional[str] = None
+    ordered_at: datetime
+    received_at: Optional[datetime] = None
+    notes: Optional[str] = None
+    items: list[PurchaseOrderItemOut]
+    receipts: list[PurchaseOrderReceiptItemOut]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @classmethod
+    def from_model(cls, order) -> "PurchaseOrderWithReceipts":
+        return cls(
+            id=order.id,
+            supplier_id=order.supplier_id,
+            supplier_name=order.supplier.name if order.supplier else "",
+            status=order.status,
+            total_amount=order.total_amount,
+            receipt_total_amount=order.receipt_total_amount,
+            financial_approval_note=order.financial_approval_note,
+            ordered_at=order.ordered_at,
+            received_at=order.received_at,
+            notes=order.notes,
+            items=[PurchaseOrderItemOut.from_model(i) for i in order.items],
+            receipts=[PurchaseOrderReceiptItemOut.from_model(r) for r in order.receipts],
+            created_at=order.created_at,
+            updated_at=order.updated_at,
+        )

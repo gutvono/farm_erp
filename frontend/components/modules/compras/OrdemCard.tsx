@@ -1,18 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp, Trash2 } from "lucide-react"
+import { ChevronDown, ChevronUp, Lock, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Table,
   TableBody,
@@ -31,19 +24,27 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { updateOrdemStatus, deleteOrdem } from "@/services/compras"
+import { enviarParaAprovacao, deleteOrdem } from "@/services/compras"
 import { PurchaseOrder, PurchaseOrderStatus } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
 const STATUS_LABELS: Record<PurchaseOrderStatus, string> = {
   em_andamento: "Em andamento",
+  aguardando_aprovacao_financeiro: "Aguardando aprovação",
+  aprovada: "Aprovada",
+  em_conferencia: "Em conferência",
+  aguardando_pagamento: "Aguardando pagamento",
   concluida: "Concluída",
   cancelada: "Cancelada",
 }
 
 const STATUS_COLORS: Record<PurchaseOrderStatus, string> = {
   em_andamento: "bg-blue-100 text-blue-800",
-  concluida: "bg-green-100 text-green-800",
+  aguardando_aprovacao_financeiro: "bg-yellow-100 text-yellow-800",
+  aprovada: "bg-emerald-100 text-emerald-700",
+  em_conferencia: "bg-orange-100 text-orange-800",
+  aguardando_pagamento: "bg-purple-100 text-purple-800",
+  concluida: "bg-green-700 text-white",
   cancelada: "bg-slate-100 text-slate-600",
 }
 
@@ -54,29 +55,22 @@ interface OrdemCardProps {
 
 export function OrdemCard({ order, onChanged }: OrdemCardProps) {
   const [expanded, setExpanded] = useState(false)
-  const [updatingStatus, setUpdatingStatus] = useState(false)
-  const [pendingStatus, setPendingStatus] = useState<PurchaseOrderStatus | null>(null)
+  const [sendingApproval, setSendingApproval] = useState(false)
+  const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
 
-  const isFinal = order.status === "concluida" || order.status === "cancelada"
-
-  async function confirmStatusChange() {
-    if (!pendingStatus) return
-    setUpdatingStatus(true)
+  async function confirmSendApproval() {
+    setSendingApproval(true)
     try {
-      await updateOrdemStatus(order.id, pendingStatus)
-      toast.success(
-        pendingStatus === "concluida"
-          ? "Ordem concluída — estoque atualizado e conta a pagar lançada"
-          : "Ordem cancelada"
-      )
+      await enviarParaAprovacao(order.id)
+      toast.success("Ordem enviada para aprovação financeira")
       onChanged()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao atualizar status")
+      toast.error(err instanceof Error ? err.message : "Erro ao enviar para aprovação")
     } finally {
-      setUpdatingStatus(false)
-      setPendingStatus(null)
+      setSendingApproval(false)
+      setApprovalDialogOpen(false)
     }
   }
 
@@ -93,6 +87,10 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
       setDeleteOpen(false)
     }
   }
+
+  const showReceiptTotal =
+    order.status === "aguardando_pagamento" ||
+    order.status === "concluida"
 
   return (
     <>
@@ -112,41 +110,62 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                 <span className="font-medium text-slate-700">
                   {formatCurrency(order.total_amount)}
                 </span>
+                {showReceiptTotal && order.receipt_total_amount > 0 && (
+                  <span className="ml-1 text-purple-700 font-medium">
+                    · aceito: {formatCurrency(order.receipt_total_amount)}
+                  </span>
+                )}
               </p>
               {order.notes && (
                 <p className="text-sm text-slate-500 mt-1 italic">{order.notes}</p>
               )}
+              {order.financial_approval_note && order.status === "cancelada" && (
+                <p className="text-sm text-red-600 mt-1">
+                  Recusado: {order.financial_approval_note}
+                </p>
+              )}
+
+              {/* Bloqueio aguardando aprovação */}
+              {order.status === "aguardando_aprovacao_financeiro" && (
+                <p className="text-xs text-slate-500 mt-1 flex items-center gap-1">
+                  <Lock className="h-3 w-3" />
+                  Bloqueada para edição — para alterar, cancele e crie uma nova
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
-              {/* Status select */}
-              <Select
-                value={order.status}
-                disabled={isFinal || updatingStatus}
-                onValueChange={(v) => setPendingStatus(v as PurchaseOrderStatus)}
-              >
-                <SelectTrigger className="w-40">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="em_andamento" disabled>
-                    Em andamento
-                  </SelectItem>
-                  <SelectItem value="concluida">Concluída</SelectItem>
-                  <SelectItem value="cancelada">Cancelada</SelectItem>
-                </SelectContent>
-              </Select>
-
-              {/* Delete (only em_andamento) */}
+              {/* em_andamento: Enviar + Excluir */}
               {order.status === "em_andamento" && (
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  disabled={deleting}
-                  onClick={() => setDeleteOpen(true)}
+                <>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() => setApprovalDialogOpen(true)}
+                    disabled={sendingApproval}
+                  >
+                    <Send className="h-3.5 w-3.5 mr-1" />
+                    Enviar para Aprovação
+                  </Button>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    disabled={deleting}
+                    onClick={() => setDeleteOpen(true)}
+                  >
+                    <Trash2 className="h-4 w-4 text-red-500" />
+                  </Button>
+                </>
+              )}
+
+              {/* aguardando_aprovacao_financeiro: cadeado */}
+              {order.status === "aguardando_aprovacao_financeiro" && (
+                <div
+                  className="p-2 text-yellow-600"
+                  title="Aguardando aprovação do financeiro"
                 >
-                  <Trash2 className="h-4 w-4 text-red-500" />
-                </Button>
+                  <Lock className="h-4 w-4" />
+                </div>
               )}
 
               <Button variant="ghost" size="icon" onClick={() => setExpanded((v) => !v)}>
@@ -184,61 +203,42 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                 ))}
                 <TableRow>
                   <TableCell colSpan={3} className="text-right font-semibold">
-                    Total
+                    Total pedido
                   </TableCell>
                   <TableCell className="text-right font-bold text-slate-900">
                     {formatCurrency(order.total_amount)}
                   </TableCell>
                 </TableRow>
+                {showReceiptTotal && (
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-right font-semibold text-purple-700">
+                      Total aceito
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-purple-700">
+                      {formatCurrency(order.receipt_total_amount)}
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
         )}
       </Card>
 
-      {/* AlertDialog: concluir */}
-      <AlertDialog
-        open={pendingStatus === "concluida"}
-        onOpenChange={(open) => !open && setPendingStatus(null)}
-      >
+      {/* AlertDialog: enviar para aprovação */}
+      <AlertDialog open={approvalDialogOpen} onOpenChange={setApprovalDialogOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar recebimento?</AlertDialogTitle>
+            <AlertDialogTitle>Enviar para aprovação financeira?</AlertDialogTitle>
             <AlertDialogDescription>
-              Ao concluir a ordem, os itens darão entrada no estoque e uma conta a pagar será
-              lançada no financeiro. Esta ação não pode ser desfeita.
+              Após enviada, a ordem ficará bloqueada para edição. Para alterações, cancele e crie
+              uma nova ordem.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingStatus(null)}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={confirmStatusChange} disabled={updatingStatus}>
-              {updatingStatus ? "Processando..." : "Confirmar recebimento"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-
-      {/* AlertDialog: cancelar */}
-      <AlertDialog
-        open={pendingStatus === "cancelada"}
-        onOpenChange={(open) => !open && setPendingStatus(null)}
-      >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar ordem de compra?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A ordem será cancelada. Nenhum efeito no estoque ou financeiro. Esta ação não pode
-              ser desfeita.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingStatus(null)}>Voltar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={confirmStatusChange}
-              disabled={updatingStatus}
-              className="bg-red-600 hover:bg-red-700"
-            >
-              {updatingStatus ? "Cancelando..." : "Cancelar ordem"}
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmSendApproval} disabled={sendingApproval}>
+              {sendingApproval ? "Enviando..." : "Enviar para aprovação"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
