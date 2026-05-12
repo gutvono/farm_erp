@@ -36,13 +36,12 @@ const schema = z
   .object({
     supplier_id: z.string().min(1, "Selecione um fornecedor"),
     notes: z.string().optional(),
-    installments: z.number().int().min(1).max(12).default(1),
+    installments: z.number().int().min(1).max(12),
     first_due_date: z.string().optional(),
     installment_interval_days: z
       .number({ error: "Informe o intervalo" })
       .int()
-      .min(1)
-      .default(30),
+      .min(1),
     items: z.array(itemSchema).min(1, "Adicione pelo menos 1 item"),
   })
   .superRefine((data, ctx) => {
