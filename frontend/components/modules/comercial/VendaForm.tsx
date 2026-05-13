@@ -23,7 +23,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createVenda } from "@/services/comercial"
-import { Client, StockItem } from "@/types/index"
+import { Client, PaymentMethod, StockItem } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
 
 const itemSchema = z.object({
@@ -36,6 +36,7 @@ const schema = z
   .object({
     client_id: z.string().min(1, "Selecione um cliente"),
     notes: z.string().optional(),
+    payment_method: z.enum(["a_vista", "parcelado", "pix", "boleto"] as const),
     installments: z.number().int().min(1).max(12),
     first_due_date: z.string().optional(),
     installment_interval_days: z
@@ -45,7 +46,7 @@ const schema = z
     items: z.array(itemSchema).min(1, "Adicione pelo menos 1 item"),
   })
   .superRefine((data, ctx) => {
-    if (data.installments >= 2 && !data.first_due_date) {
+    if (data.payment_method === "parcelado" && data.installments >= 2 && !data.first_due_date) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         message: "Informe o vencimento da 1ª parcela",
@@ -101,7 +102,8 @@ export function VendaForm({
     defaultValues: {
       client_id: "",
       notes: "",
-      installments: 1,
+      payment_method: "a_vista",
+      installments: 2,
       first_due_date: "",
       installment_interval_days: 30,
       items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
@@ -112,9 +114,12 @@ export function VendaForm({
 
   const watchedItems = watch("items")
   const clientId = watch("client_id")
+  const paymentMethod = watch("payment_method")
   const installments = watch("installments")
   const firstDueDate = watch("first_due_date")
   const intervalDays = watch("installment_interval_days")
+
+  const isParcelado = paymentMethod === "parcelado"
 
   const selectedClient = clients.find((c) => c.id === clientId)
 
@@ -126,7 +131,7 @@ export function VendaForm({
 
   const installmentPreview: { label: string; due: string; amount: number }[] =
     (() => {
-      if (installments < 2 || !firstDueDate) return []
+      if (!isParcelado || installments < 2 || !firstDueDate) return []
       const base = Math.round((totalAmount / installments) * 100) / 100
       const dates = calcInstallmentDates(firstDueDate, installments, intervalDays || 30)
       return dates.map((dt, i) => {
@@ -147,7 +152,8 @@ export function VendaForm({
       reset({
         client_id: "",
         notes: "",
-        installments: 1,
+        payment_method: "a_vista",
+        installments: 2,
         first_due_date: "",
         installment_interval_days: 30,
         items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
@@ -161,10 +167,11 @@ export function VendaForm({
       await createVenda({
         client_id: data.client_id,
         notes: data.notes || undefined,
-        installments: data.installments,
-        first_due_date: data.installments >= 2 ? data.first_due_date : undefined,
+        payment_method: data.payment_method as PaymentMethod,
+        installments: isParcelado ? data.installments : undefined,
+        first_due_date: isParcelado && data.installments >= 2 ? data.first_due_date : undefined,
         installment_interval_days:
-          data.installments >= 2 ? data.installment_interval_days : undefined,
+          isParcelado && data.installments >= 2 ? data.installment_interval_days : undefined,
         items: data.items.map((item) => ({
           stock_item_id: item.stock_item_id,
           quantity: item.quantity,
@@ -229,28 +236,50 @@ export function VendaForm({
           {/* Condições de Pagamento */}
           <div className="space-y-3 rounded-md border p-4">
             <Label className="text-sm font-semibold">Condições de Pagamento</Label>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label className="text-xs">Parcelas</Label>
-                <Select
-                  value={String(installments)}
-                  onValueChange={(v) => setValue("installments", parseInt(v, 10))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n === 1 ? "À vista" : `${n}x`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
 
-              {installments >= 2 && (
-                <>
+            <div className="space-y-1">
+              <Label className="text-xs">Forma de Pagamento</Label>
+              <Select
+                value={paymentMethod}
+                onValueChange={(v) => {
+                  setValue("payment_method", v as FormData["payment_method"])
+                  if (v !== "parcelado") setValue("installments", 2)
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="a_vista">À Vista</SelectItem>
+                  <SelectItem value="parcelado">Parcelado</SelectItem>
+                  <SelectItem value="pix">PIX</SelectItem>
+                  <SelectItem value="boleto">Boleto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {isParcelado && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-4">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Parcelas</Label>
+                    <Select
+                      value={String(installments)}
+                      onValueChange={(v) => setValue("installments", parseInt(v, 10))}
+                    >
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 11 }, (_, i) => i + 2).map((n) => (
+                          <SelectItem key={n} value={String(n)}>
+                            {n}x
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
                   <div className="space-y-1">
                     <Label className="text-xs">Vencimento 1ª Parcela</Label>
                     <Input type="date" {...register("first_due_date")} />
@@ -258,6 +287,7 @@ export function VendaForm({
                       <p className="text-xs text-red-500">{errors.first_due_date.message}</p>
                     )}
                   </div>
+
                   <div className="space-y-1">
                     <Label className="text-xs">Intervalo (dias)</Label>
                     <Input
@@ -271,30 +301,32 @@ export function VendaForm({
                       </p>
                     )}
                   </div>
-                </>
-              )}
-            </div>
+                </div>
 
-            {installmentPreview.length > 0 && (
-              <div className="overflow-hidden rounded border">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
-                      <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {installmentPreview.map((row, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="px-3 py-1.5">{row.label}</td>
-                        <td className="px-3 py-1.5">{row.due}</td>
-                        <td className="px-3 py-1.5 text-right">{formatCurrency(row.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
+                {installmentPreview.length > 0 && (
+                  <div className="overflow-hidden rounded border">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-100">
+                        <tr>
+                          <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
+                          <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
+                          <th className="px-3 py-1.5 text-right font-medium">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {installmentPreview.map((row, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="px-3 py-1.5">{row.label}</td>
+                            <td className="px-3 py-1.5">{row.due}</td>
+                            <td className="px-3 py-1.5 text-right">
+                              {formatCurrency(row.amount)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
               </div>
             )}
           </div>

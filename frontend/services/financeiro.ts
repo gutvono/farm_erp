@@ -4,17 +4,18 @@ import {
   AccountsReceivable,
   ApiResponse,
   Balance,
+  BoletoPaymentInfo,
   CashFlowPoint,
   CashFlowResult,
   DefaulterItem,
   FinancialMovement,
   MovementType,
   PayableStatus,
+  PaymentMethod,
+  PixPaymentInfo,
   ReceivableStatus,
 } from "@/types/index"
 
-// Backend returns Decimal fields as strings in JSON (Pydantic default).
-// Parse them to numbers at the service boundary.
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
   if (typeof value === "string") return Number(value)
@@ -60,6 +61,7 @@ interface RawPayable {
   notes: string | null
   installment_number: number | null
   installment_total: number | null
+  payment_method: PaymentMethod | null
   created_at: string
   updated_at: string
 }
@@ -78,6 +80,7 @@ function parsePayable(raw: RawPayable): AccountsPayable {
     notes: raw.notes,
     installment_number: raw.installment_number,
     installment_total: raw.installment_total,
+    payment_method: raw.payment_method ?? null,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -98,6 +101,7 @@ interface RawReceivable {
   notes: string | null
   installment_number: number | null
   installment_total: number | null
+  payment_method: PaymentMethod | null
   created_at: string
   updated_at: string
 }
@@ -118,6 +122,7 @@ function parseReceivable(raw: RawReceivable): AccountsReceivable {
     notes: raw.notes,
     installment_number: raw.installment_number,
     installment_total: raw.installment_total,
+    payment_method: raw.payment_method ?? null,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -151,6 +156,22 @@ interface RawDefaulter {
   amount: string | number
   amount_received: string | number
   due_date: string
+}
+
+interface RawPixInfo {
+  pix_key: string
+  pix_code: string
+  amount: string | number
+  description: string
+}
+
+interface RawBoletoInfo {
+  boleto_number: string
+  barcode: string
+  due_date: string
+  amount: string | number
+  beneficiary: string
+  payer: string
 }
 
 export async function getSaldo(): Promise<Balance> {
@@ -213,6 +234,31 @@ export async function cancelarConta(id: string): Promise<AccountsPayable> {
   return parsePayable(response.data)
 }
 
+export async function atualizarMetodoPagamentoPagar(
+  id: string,
+  payment_method: PaymentMethod
+): Promise<AccountsPayable> {
+  const response = await apiFetch<ApiResponse<RawPayable>>(
+    `/api/financeiro/contas-pagar/${id}/metodo-pagamento`,
+    { method: "PATCH", body: JSON.stringify({ payment_method }) }
+  )
+  return parsePayable(response.data)
+}
+
+export async function getPixPagar(id: string): Promise<PixPaymentInfo> {
+  const response = await apiFetch<ApiResponse<RawPixInfo>>(
+    `/api/financeiro/contas-pagar/${id}/pix`
+  )
+  return { ...response.data, amount: toNumber(response.data.amount) }
+}
+
+export async function getBoletoPagar(id: string): Promise<BoletoPaymentInfo> {
+  const response = await apiFetch<ApiResponse<RawBoletoInfo>>(
+    `/api/financeiro/contas-pagar/${id}/boleto`
+  )
+  return { ...response.data, amount: toNumber(response.data.amount) }
+}
+
 export async function getContasReceber(
   status?: ReceivableStatus
 ): Promise<AccountsReceivable[]> {
@@ -271,6 +317,31 @@ export async function reverterInadimplencia(
   return parseReceivable(response.data)
 }
 
+export async function atualizarMetodoPagamentoReceber(
+  id: string,
+  payment_method: PaymentMethod
+): Promise<AccountsReceivable> {
+  const response = await apiFetch<ApiResponse<RawReceivable>>(
+    `/api/financeiro/contas-receber/${id}/metodo-pagamento`,
+    { method: "PATCH", body: JSON.stringify({ payment_method }) }
+  )
+  return parseReceivable(response.data)
+}
+
+export async function getPixReceber(id: string): Promise<PixPaymentInfo> {
+  const response = await apiFetch<ApiResponse<RawPixInfo>>(
+    `/api/financeiro/contas-receber/${id}/pix`
+  )
+  return { ...response.data, amount: toNumber(response.data.amount) }
+}
+
+export async function getBoletoReceber(id: string): Promise<BoletoPaymentInfo> {
+  const response = await apiFetch<ApiResponse<RawBoletoInfo>>(
+    `/api/financeiro/contas-receber/${id}/boleto`
+  )
+  return { ...response.data, amount: toNumber(response.data.amount) }
+}
+
 export async function getFluxoCaixa(months = 6): Promise<CashFlowResult> {
   const response = await apiFetch<ApiResponse<RawCashFlow>>(
     "/api/financeiro/fluxo-caixa",
@@ -290,8 +361,6 @@ export async function getFluxoCaixa(months = 6): Promise<CashFlowResult> {
   }
 }
 
-// Adapts the financeiro cash-flow response to the CashFlowPoint shape
-// expected by the shared CashFlowChart component.
 export async function getFluxoCaixaChartData(months = 6): Promise<CashFlowPoint[]> {
   const flow = await getFluxoCaixa(months)
   return flow.items.map((item) => ({

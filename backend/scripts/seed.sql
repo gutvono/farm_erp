@@ -93,8 +93,8 @@ ON CONFLICT (id) DO NOTHING;
 -- 7. PURCHASE ORDER (1 concluída)
 -- Ordem 88...8801: 500kg fertilizante + 200kg adubo = R$ 7.600
 -- -----------------------------------------------------------------------------
-INSERT INTO purchase_orders (id, supplier_id, status, total_amount, ordered_at, received_at, notes) VALUES
-('88888888-8888-8888-8888-888888888001', '33333333-3333-3333-3333-333333333001', 'concluida', 7600.00, '2026-02-01 09:00:00-03', '2026-02-05 14:00:00-03', 'Reabastecimento de fertilizante e adubo')
+INSERT INTO purchase_orders (id, supplier_id, status, total_amount, ordered_at, received_at, notes, order_type) VALUES
+('88888888-8888-8888-8888-888888888001', '33333333-3333-3333-3333-333333333001', 'concluida', 7600.00, '2026-02-01 09:00:00-03', '2026-02-05 14:00:00-03', 'Reabastecimento de fertilizante e adubo', 'produto')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO purchase_order_items (id, purchase_order_id, stock_item_id, description, quantity, unit_price, subtotal) VALUES

@@ -9,6 +9,7 @@ from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
 from app.modules.compras import service as compras_service
 from app.modules.compras.schemas import (
+    ApproveOrderRequest,
     PurchaseOrderCancelRequest,
     PurchaseOrderCreate,
     PurchaseOrderOut,
@@ -184,12 +185,33 @@ def submit_for_approval(
 @router.post("/ordens/{order_id}/aprovar", response_model=SuccessResponse)
 def approve_order(
     order_id: UUID,
+    body: ApproveOrderRequest,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    order = compras_service.approve_order(db, order_id)
+    order = compras_service.approve_order(
+        db,
+        order_id,
+        payment_method=body.payment_method,
+        installments=body.installments,
+        first_due_date=body.first_due_date,
+        installment_interval_days=body.installment_interval_days,
+    )
     return success(
         "Ordem aprovada pelo financeiro",
+        PurchaseOrderOut.from_model(order).model_dump(mode="json"),
+    )
+
+
+@router.post("/ordens/{order_id}/concluir-servico", response_model=SuccessResponse)
+def complete_service_order(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = compras_service.complete_service_order(db, order_id)
+    return success(
+        "Serviço concluído — aguardando pagamento",
         PurchaseOrderOut.from_model(order).model_dump(mode="json"),
     )
 

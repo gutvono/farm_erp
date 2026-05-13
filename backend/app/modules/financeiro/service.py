@@ -1,3 +1,4 @@
+import random
 from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
@@ -7,6 +8,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.modules.comercial.model import Client
+from app.modules.compras.model import Supplier
 from app.modules.financeiro import repository as fin_repo
 from app.modules.financeiro.model import (
     AccountPayable,
@@ -19,16 +21,19 @@ from app.modules.financeiro.schemas import (
     AccountReceivableCreate,
     AccountReceivableUpdate,
     BalanceOut,
+    BoletoPaymentInfo,
     CashFlowItem,
     CashFlowOut,
     DefaulterItem,
     FinancialMovementCreate,
+    PixPaymentInfo,
 )
 from app.shared.enums import (
     AccountPayableStatus,
     AccountReceivableStatus,
     FinancialCategory,
     MovementType,
+    PaymentMethod,
 )
 
 
@@ -75,6 +80,7 @@ def criar_conta_pagar(
     notes: Optional[str] = None,
     installment_number: Optional[int] = None,
     installment_total: Optional[int] = None,
+    payment_method: Optional[str] = None,
 ) -> AccountPayable:
     """Create an account payable. Called by compras/folha."""
     if amount <= 0:
@@ -92,6 +98,7 @@ def criar_conta_pagar(
         notes=notes,
         installment_number=installment_number,
         installment_total=installment_total,
+        payment_method=payment_method,
     )
 
 
@@ -109,6 +116,7 @@ def criar_conta_receber(
     installment_total: Optional[int] = None,
     sale_id: Optional[UUID] = None,
     invoice_id: Optional[UUID] = None,
+    payment_method: Optional[str] = None,
 ) -> AccountReceivable:
     """Create an account receivable. Called by comercial/faturamento."""
     if amount <= 0:
@@ -130,6 +138,7 @@ def criar_conta_receber(
         notes=notes,
         installment_number=installment_number,
         installment_total=installment_total,
+        payment_method=payment_method,
     )
 
 
@@ -227,6 +236,7 @@ def create_payable(db: Session, body: AccountPayableCreate) -> AccountPayable:
         source_module="compras" if body.purchase_order_id else None,
         reference_id=body.purchase_order_id,
         notes=body.notes,
+        payment_method=body.payment_method.value if body.payment_method else None,
     )
 
 
@@ -333,6 +343,7 @@ def create_receivable(db: Session, body: AccountReceivableCreate) -> AccountRece
         source_module=source_module,
         reference_id=reference_id,
         notes=body.notes,
+        payment_method=body.payment_method.value if body.payment_method else None,
     )
 
 
@@ -464,6 +475,167 @@ def revert_defaulter(db: Session, receivable_id: UUID) -> AccountReceivable:
             fin_repo.save(db, client)
 
     return receivable
+
+
+def update_payable_payment_method(
+    db: Session, payable_id: UUID, payment_method: PaymentMethod
+) -> AccountPayable:
+    payable = get_payable(db, payable_id)
+    if payable.status != AccountPayableStatus.EM_ABERTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Somente contas em aberto podem ter o método de pagamento alterado",
+        )
+    payable.payment_method = payment_method.value
+    fin_repo.save(db, payable)
+    return payable
+
+
+def update_receivable_payment_method(
+    db: Session, receivable_id: UUID, payment_method: PaymentMethod
+) -> AccountReceivable:
+    receivable = get_receivable(db, receivable_id)
+    if receivable.status != AccountReceivableStatus.EM_ABERTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Somente contas em aberto podem ter o método de pagamento alterado",
+        )
+    receivable.payment_method = payment_method.value
+    fin_repo.save(db, receivable)
+    return receivable
+
+
+# ---------------------------------------------------------------------------
+# Payment method info (PIX / Boleto)
+# ---------------------------------------------------------------------------
+
+
+_PIX_KEY = "fazenda.cafe@pix.com.br"
+_BENEFICIARY = "Fazenda Café Arábica Ltda. — CNPJ: 00.000.000/0001-00"
+
+
+def _pix_amount_str(amount: Decimal) -> str:
+    return f"{Decimal(amount):.2f}"
+
+
+def _seeded_rng(reference_id: UUID) -> random.Random:
+    return random.Random(int(reference_id.int & 0xFFFFFFFFFFFFFFFF))
+
+
+def gerar_info_pix(conta) -> PixPaymentInfo:
+    """Gera dados simulados de PIX para uma conta (pagar ou receber)."""
+    amount = Decimal(conta.amount or 0)
+    rng = _seeded_rng(conta.id)
+    txid = f"{rng.getrandbits(64):016X}{rng.getrandbits(64):016X}".lower()[:32]
+    valor_fmt = _pix_amount_str(amount)
+    pix_payload_core = (
+        f"00020126580014BR.GOV.BCB.PIX0136{txid}"
+        f"5204000053039865802BR5925FAZENDA CAFE ARABICA LTDA6009SAO PAULO"
+    )
+    additional = f"0503***{valor_fmt}"
+    extra = f"62{len(additional):02d}{additional}"
+    crc = f"{rng.getrandbits(16):04X}"
+    pix_code = f"{pix_payload_core}{extra}6304{crc}"
+    return PixPaymentInfo(
+        pix_key=_PIX_KEY,
+        pix_code=pix_code,
+        amount=amount,
+        description=conta.description or "",
+    )
+
+
+def gerar_info_boleto(conta, *, payer_name: str) -> BoletoPaymentInfo:
+    """Gera dados simulados de boleto. Determinístico para a mesma conta."""
+    amount = Decimal(conta.amount or 0)
+    rng = _seeded_rng(conta.id)
+    g1 = f"{rng.randrange(10**5):05d}"
+    g2 = f"{rng.randrange(10**5):05d}"
+    g3 = f"{rng.randrange(10**6):06d}"
+    g4 = f"{rng.randrange(10**6):06d}"
+    g5 = f"{rng.randrange(10**6):06d}"
+    g6 = f"{rng.randrange(10**6):06d}"
+    digit = f"{rng.randrange(10)}"
+    due = conta.due_date
+    due_str = due.strftime("%d/%m/%Y") if due else ""
+    amount_int = int((amount * 100).to_integral_value())
+    amount_compact = f"{amount_int:010d}"
+    boleto_number = (
+        f"34191.{g1} {g2}.{g3} {g4}.{g5} {digit} "
+        f"{due_str.replace('/', '')} {amount_compact}"
+    )
+    barcode = f"34191{g1}{g2}{g3}{g4}{g5}{g6}{digit}{amount_compact}"
+    return BoletoPaymentInfo(
+        boleto_number=boleto_number,
+        barcode=barcode,
+        due_date=due_str,
+        amount=amount,
+        beneficiary=_BENEFICIARY,
+        payer=payer_name or "",
+    )
+
+
+def get_payable_pix(db: Session, payable_id: UUID) -> PixPaymentInfo:
+    payable = get_payable(db, payable_id)
+    payment_method = _normalize_method(payable.payment_method)
+    if payment_method != PaymentMethod.PIX.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Conta a pagar não está configurada para pagamento via PIX",
+        )
+    return gerar_info_pix(payable)
+
+
+def get_payable_boleto(db: Session, payable_id: UUID) -> BoletoPaymentInfo:
+    payable = get_payable(db, payable_id)
+    payment_method = _normalize_method(payable.payment_method)
+    if payment_method != PaymentMethod.BOLETO.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Conta a pagar não está configurada para pagamento via boleto",
+        )
+    payer_name = ""
+    if payable.supplier_id:
+        supplier = (
+            db.query(Supplier)
+            .filter(Supplier.id == payable.supplier_id)
+            .first()
+        )
+        payer_name = supplier.name if supplier else ""
+    return gerar_info_boleto(payable, payer_name=payer_name)
+
+
+def get_receivable_pix(db: Session, receivable_id: UUID) -> PixPaymentInfo:
+    receivable = get_receivable(db, receivable_id)
+    payment_method = _normalize_method(receivable.payment_method)
+    if payment_method != PaymentMethod.PIX.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Conta a receber não está configurada para pagamento via PIX",
+        )
+    return gerar_info_pix(receivable)
+
+
+def get_receivable_boleto(db: Session, receivable_id: UUID) -> BoletoPaymentInfo:
+    receivable = get_receivable(db, receivable_id)
+    payment_method = _normalize_method(receivable.payment_method)
+    if payment_method != PaymentMethod.BOLETO.value:
+        raise HTTPException(
+            status_code=400,
+            detail="Conta a receber não está configurada para pagamento via boleto",
+        )
+    client = (
+        db.query(Client)
+        .filter(Client.id == receivable.client_id)
+        .first()
+    )
+    payer_name = client.name if client else ""
+    return gerar_info_boleto(receivable, payer_name=payer_name)
+
+
+def _normalize_method(value) -> Optional[str]:
+    if value is None:
+        return None
+    return value.value if hasattr(value, "value") else value
 
 
 def list_defaulters(db: Session) -> list[DefaulterItem]:

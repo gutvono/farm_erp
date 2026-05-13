@@ -34,16 +34,6 @@ import {
   TableRow,
 } from "@/components/ui/table"
 import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
-import {
   Dialog,
   DialogContent,
   DialogHeader,
@@ -123,6 +113,10 @@ export default function FinanceiroPage() {
   const [pendingLoading, setPendingLoading] = useState(false)
   const [approveTarget, setApproveTarget] = useState<PurchaseOrder | null>(null)
   const [approving, setApproving] = useState(false)
+  const [approvePaymentMethod, setApprovePaymentMethod] = useState<string>("a_vista")
+  const [approveInstallments, setApproveInstallments] = useState(2)
+  const [approveFirstDueDate, setApproveFirstDueDate] = useState("")
+  const [approveIntervalDays, setApproveIntervalDays] = useState(30)
   const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null)
   const [rejectNote, setRejectNote] = useState("")
   const [rejecting, setRejecting] = useState(false)
@@ -238,11 +232,36 @@ export default function FinanceiroPage() {
     await Promise.all([loadReceivables(), loadOverview(), loadMovements()])
   }
 
+  function calcApproveInstallmentPreview() {
+    if (approvePaymentMethod !== "parcelado" || approveInstallments < 2 || !approveFirstDueDate)
+      return []
+    const total = approveTarget?.total_amount ?? 0
+    const base = Math.round((total / approveInstallments) * 100) / 100
+    const [y, m, d] = approveFirstDueDate.split("-").map(Number)
+    return Array.from({ length: approveInstallments }, (_, i) => {
+      const dt = new Date(y, m - 1, d)
+      dt.setDate(dt.getDate() + i * approveIntervalDays)
+      const amount =
+        i === approveInstallments - 1
+          ? Math.round((total - base * (approveInstallments - 1)) * 100) / 100
+          : base
+      return { label: `${i + 1}/${approveInstallments}`, due: dt.toLocaleDateString("pt-BR"), amount }
+    })
+  }
+
   async function handleConfirmApprove() {
     if (!approveTarget) return
     setApproving(true)
     try {
-      await aprovarOrdem(approveTarget.id)
+      const data: Parameters<typeof aprovarOrdem>[1] = {
+        payment_method: approvePaymentMethod as Parameters<typeof aprovarOrdem>[1]["payment_method"],
+      }
+      if (approvePaymentMethod === "parcelado") {
+        data.installments = approveInstallments
+        data.first_due_date = approveFirstDueDate
+        data.installment_interval_days = approveIntervalDays
+      }
+      await aprovarOrdem(approveTarget.id, data)
       toast.success(`Ordem de ${approveTarget.supplier_name} aprovada`)
       setApproveTarget(null)
       await loadPendingOrders()
@@ -393,7 +412,7 @@ export default function FinanceiroPage() {
                           </div>
                           <p className="text-sm text-slate-500 mt-0.5">
                             {formatDate(order.ordered_at)} ·{" "}
-                            {order.items.length} item{order.items.length !== 1 ? "s" : ""} ·{" "}
+                            {order.order_type === "servico" ? "Serviço" : `${order.items.length} item${order.items.length !== 1 ? "s" : ""}`} ·{" "}
                             <span className="font-medium text-slate-700">
                               {formatCurrency(order.total_amount)}
                             </span>
@@ -401,15 +420,19 @@ export default function FinanceiroPage() {
                           {order.notes && (
                             <p className="text-sm text-slate-500 mt-1 italic">{order.notes}</p>
                           )}
-                          {/* Items preview */}
-                          <div className="mt-2 space-y-0.5">
-                            {order.items.map((item) => (
-                              <p key={item.id} className="text-xs text-slate-500">
-                                {item.stock_item_name} × {item.quantity} —{" "}
-                                {formatCurrency(item.subtotal)}
-                              </p>
-                            ))}
-                          </div>
+                          {order.order_type === "servico" && order.service_description && (
+                            <p className="text-xs text-slate-500 mt-1">{order.service_description}</p>
+                          )}
+                          {order.order_type !== "servico" && (
+                            <div className="mt-2 space-y-0.5">
+                              {order.items.map((item) => (
+                                <p key={item.id} className="text-xs text-slate-500">
+                                  {item.stock_item_name} × {item.quantity} —{" "}
+                                  {formatCurrency(item.subtotal)}
+                                </p>
+                              ))}
+                            </div>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-2 flex-shrink-0">
@@ -563,32 +586,118 @@ export default function FinanceiroPage() {
         </Tabs>
       </div>
 
-      {/* AlertDialog: aprovar ordem */}
-      <AlertDialog
+      {/* Dialog: aprovar ordem (coleta condições de pagamento) */}
+      <Dialog
         open={approveTarget !== null}
-        onOpenChange={(open) => !open && setApproveTarget(null)}
+        onOpenChange={(open) => {
+          if (!open) {
+            setApproveTarget(null)
+            setApprovePaymentMethod("a_vista")
+            setApproveInstallments(2)
+            setApproveFirstDueDate("")
+            setApproveIntervalDays(30)
+          }
+        }}
       >
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Aprovar ordem de compra?</AlertDialogTitle>
-            <AlertDialogDescription>
-              A ordem de <strong>{approveTarget?.supplier_name}</strong> (
-              {formatCurrency(approveTarget?.total_amount ?? 0)}) será aprovada e liberada para
-              conferência de recebimento.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleConfirmApprove}
-              disabled={approving}
-              className="bg-green-600 hover:bg-green-700"
-            >
-              {approving ? "Aprovando..." : "Confirmar aprovação"}
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Aprovar Ordem de Compra</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <p className="text-sm text-slate-600">
+              Fornecedor: <strong>{approveTarget?.supplier_name}</strong> ·{" "}
+              {formatCurrency(approveTarget?.total_amount ?? 0)}
+            </p>
+
+            <div className="space-y-1">
+              <Label>Forma de Pagamento *</Label>
+              <Select value={approvePaymentMethod} onValueChange={(v) => { setApprovePaymentMethod(v); setApproveInstallments(2) }}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="a_vista">À Vista</SelectItem>
+                  <SelectItem value="parcelado">Parcelado</SelectItem>
+                  <SelectItem value="pix">PIX</SelectItem>
+                  <SelectItem value="boleto">Boleto</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+
+            {approvePaymentMethod === "parcelado" && (
+              <div className="space-y-3">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="space-y-1">
+                    <Label className="text-xs">Parcelas</Label>
+                    <Select value={String(approveInstallments)} onValueChange={(v) => setApproveInstallments(parseInt(v, 10))}>
+                      <SelectTrigger>
+                        <SelectValue />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {Array.from({ length: 23 }, (_, i) => i + 2).map((n) => (
+                          <SelectItem key={n} value={String(n)}>{n}x</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">1ª Parcela</Label>
+                    <Input
+                      type="date"
+                      value={approveFirstDueDate}
+                      onChange={(e) => setApproveFirstDueDate(e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1">
+                    <Label className="text-xs">Intervalo (dias)</Label>
+                    <Input
+                      type="number"
+                      min={1}
+                      value={approveIntervalDays}
+                      onChange={(e) => setApproveIntervalDays(parseInt(e.target.value, 10) || 30)}
+                    />
+                  </div>
+                </div>
+                {calcApproveInstallmentPreview().length > 0 && (
+                  <div className="overflow-hidden rounded border">
+                    <table className="w-full text-xs">
+                      <thead className="bg-slate-100">
+                        <tr>
+                          <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
+                          <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
+                          <th className="px-3 py-1.5 text-right font-medium">Valor</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {calcApproveInstallmentPreview().map((row, i) => (
+                          <tr key={i} className="border-t">
+                            <td className="px-3 py-1.5">{row.label}</td>
+                            <td className="px-3 py-1.5">{row.due}</td>
+                            <td className="px-3 py-1.5 text-right">{formatCurrency(row.amount)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </div>
+            )}
+
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setApproveTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleConfirmApprove}
+                disabled={approving || (approvePaymentMethod === "parcelado" && !approveFirstDueDate)}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {approving ? "Aprovando..." : "Confirmar aprovação"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       {/* Dialog: recusar ordem */}
       <Dialog

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.shared.enums import SaleStatus
+from app.shared.enums import PaymentMethod, SaleStatus
 
 
 # ---------------------------------------------------------------------------
@@ -95,12 +95,17 @@ class SaleCreate(BaseModel):
     installments: int = Field(default=1, ge=1, le=24)
     first_due_date: Optional[date] = None
     installment_interval_days: int = Field(default=30, ge=1)
+    payment_method: PaymentMethod = PaymentMethod.A_VISTA
 
     @model_validator(mode="after")
     def _validate_installments(self) -> "SaleCreate":
         if self.installments >= 2 and self.first_due_date is None:
             raise ValueError(
                 "first_due_date é obrigatório quando installments >= 2"
+            )
+        if self.payment_method == PaymentMethod.PARCELADO and self.installments < 2:
+            raise ValueError(
+                "Pagamento parcelado exige installments >= 2"
             )
         return self
 
@@ -117,6 +122,7 @@ class SaleOut(BaseModel):
     installments: int = 1
     first_due_date: Optional[date] = None
     installment_interval_days: int = 30
+    payment_method: str = PaymentMethod.A_VISTA.value
     items: list[SaleItemOut]
     created_at: datetime
     updated_at: datetime
@@ -125,6 +131,13 @@ class SaleOut(BaseModel):
 
     @classmethod
     def from_model(cls, sale) -> "SaleOut":
+        payment_method = sale.payment_method
+        if payment_method is None:
+            payment_method_value = PaymentMethod.A_VISTA.value
+        elif hasattr(payment_method, "value"):
+            payment_method_value = payment_method.value
+        else:
+            payment_method_value = payment_method
         return cls(
             id=sale.id,
             client_id=sale.client_id,
@@ -137,6 +150,7 @@ class SaleOut(BaseModel):
             installments=sale.installments or 1,
             first_due_date=sale.first_due_date,
             installment_interval_days=sale.installment_interval_days or 30,
+            payment_method=payment_method_value,
             items=[SaleItemOut.from_model(i) for i in sale.items],
             created_at=sale.created_at,
             updated_at=sale.updated_at,

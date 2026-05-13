@@ -70,7 +70,8 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   ],
   "installments": 1,
   "first_due_date": null,
-  "installment_interval_days": 30
+  "installment_interval_days": 30,
+  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto"
 }
 ```
 
@@ -82,6 +83,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `installments`: 1 a 24 (default 1 — pagamento à vista, fluxo atual inalterado)
 - `first_due_date`: obrigatório quando `installments >= 2`
 - `installment_interval_days`: dias entre parcelas (default 30)
+- `payment_method`: default `a_vista`. Quando `"parcelado"`, exige `installments >= 2`. O valor escolhido é propagado para a(s) `accounts_receivable` gerada(s)
 
 ### SaleStatusUpdate
 ```json
@@ -89,7 +91,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```
 
 ### SaleOut — campos principais
-- Inclui `client_name` e `items` com `stock_item_name` e `subtotal`
+- Inclui `client_name`, `items` (com `stock_item_name` e `subtotal`) e `payment_method`
 
 ## Regras de Negócio
 
@@ -176,6 +178,7 @@ Executado em sequência no `service.create_sale()`:
 | `installments` | INT default 1 |
 | `first_due_date` | DATE (nullable) |
 | `installment_interval_days` | INT default 30 |
+| `payment_method` | enum `payment_method` (`a_vista` / `parcelado` / `pix` / `boleto`, default `a_vista`) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `sale_items`

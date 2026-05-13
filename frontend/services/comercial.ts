@@ -2,6 +2,7 @@ import { apiFetch } from "@/lib/api"
 import {
   ApiResponse,
   Client,
+  PaymentMethod,
   Sale,
   SaleItem,
   SaleStatus,
@@ -75,6 +76,7 @@ interface RawSale {
   installments: number
   first_due_date: string | null
   installment_interval_days: number
+  payment_method: PaymentMethod | null
   items: RawSaleItem[]
   created_at: string
   updated_at: string
@@ -93,6 +95,7 @@ function parseSale(raw: RawSale): Sale {
     installments: raw.installments ?? 1,
     first_due_date: raw.first_due_date ?? null,
     installment_interval_days: raw.installment_interval_days ?? 30,
+    payment_method: raw.payment_method ?? null,
     items: (raw.items ?? []).map(parseSaleItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -173,6 +176,7 @@ export async function getVendas(status?: string): Promise<Sale[]> {
 export async function createVenda(data: {
   client_id: string
   notes?: string
+  payment_method?: PaymentMethod
   installments?: number
   first_due_date?: string
   installment_interval_days?: number

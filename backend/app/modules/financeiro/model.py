@@ -10,6 +10,7 @@ from app.shared.enums import (
     AccountReceivableStatus,
     FinancialCategory,
     MovementType,
+    PaymentMethod,
     sa_enum_values,
 )
 
@@ -76,6 +77,10 @@ class AccountPayable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     notes = Column(Text, nullable=True)
     installment_number = Column(Integer, nullable=True)
     installment_total = Column(Integer, nullable=True)
+    payment_method = Column(
+        SAEnum(PaymentMethod, name="payment_method", values_callable=sa_enum_values),
+        nullable=True,
+    )
 
 
 class AccountReceivable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -118,3 +123,7 @@ class AccountReceivable(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     notes = Column(Text, nullable=True)
     installment_number = Column(Integer, nullable=True)
     installment_total = Column(Integer, nullable=True)
+    payment_method = Column(
+        SAEnum(PaymentMethod, name="payment_method", values_callable=sa_enum_values),
+        nullable=True,
+    )

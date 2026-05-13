@@ -103,9 +103,15 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                 <Badge className={STATUS_COLORS[order.status]}>
                   {STATUS_LABELS[order.status]}
                 </Badge>
+                {order.order_type === "servico" && (
+                  <Badge className="bg-indigo-100 text-indigo-700">Serviço</Badge>
+                )}
               </div>
               <p className="text-sm text-slate-500 mt-0.5">
-                {formatDate(order.ordered_at)} · {order.items.length} item{order.items.length !== 1 ? "s" : ""}
+                {formatDate(order.ordered_at)}
+                {order.order_type === "produto" && (
+                  <> · {order.items.length} item{order.items.length !== 1 ? "s" : ""}</>
+                )}
                 {" · "}
                 <span className="font-medium text-slate-700">
                   {formatCurrency(order.total_amount)}
@@ -181,46 +187,65 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
 
         {expanded && (
           <CardContent className="pt-0">
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Item</TableHead>
-                  <TableHead className="text-right">Quantidade</TableHead>
-                  <TableHead className="text-right">Preço Unit.</TableHead>
-                  <TableHead className="text-right">Subtotal</TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {order.items.map((item) => (
-                  <TableRow key={item.id}>
-                    <TableCell>{item.stock_item_name}</TableCell>
-                    <TableCell className="text-right">{item.quantity}</TableCell>
-                    <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
-                    <TableCell className="text-right font-medium">
-                      {formatCurrency(item.subtotal)}
-                    </TableCell>
-                  </TableRow>
-                ))}
-                <TableRow>
-                  <TableCell colSpan={3} className="text-right font-semibold">
-                    Total pedido
-                  </TableCell>
-                  <TableCell className="text-right font-bold text-slate-900">
-                    {formatCurrency(order.total_amount)}
-                  </TableCell>
-                </TableRow>
-                {showReceiptTotal && (
-                  <TableRow>
-                    <TableCell colSpan={3} className="text-right font-semibold text-purple-700">
-                      Total aceito
-                    </TableCell>
-                    <TableCell className="text-right font-bold text-purple-700">
-                      {formatCurrency(order.receipt_total_amount)}
-                    </TableCell>
-                  </TableRow>
+            {order.order_type === "servico" ? (
+              <div className="space-y-2 py-2">
+                {order.service_description && (
+                  <div>
+                    <p className="text-xs text-slate-500 mb-1">Descrição do serviço</p>
+                    <p className="text-sm text-slate-700">{order.service_description}</p>
+                  </div>
                 )}
-              </TableBody>
-            </Table>
+                <div className="flex justify-end pt-2 border-t">
+                  <span className="text-sm font-semibold text-slate-700">
+                    Valor:{" "}
+                    <span className="text-base font-bold text-slate-900">
+                      {formatCurrency(order.total_amount)}
+                    </span>
+                  </span>
+                </div>
+              </div>
+            ) : (
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Item</TableHead>
+                    <TableHead className="text-right">Quantidade</TableHead>
+                    <TableHead className="text-right">Preço Unit.</TableHead>
+                    <TableHead className="text-right">Subtotal</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {order.items.map((item) => (
+                    <TableRow key={item.id}>
+                      <TableCell>{item.stock_item_name}</TableCell>
+                      <TableCell className="text-right">{item.quantity}</TableCell>
+                      <TableCell className="text-right">{formatCurrency(item.unit_price)}</TableCell>
+                      <TableCell className="text-right font-medium">
+                        {formatCurrency(item.subtotal)}
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                  <TableRow>
+                    <TableCell colSpan={3} className="text-right font-semibold">
+                      Total pedido
+                    </TableCell>
+                    <TableCell className="text-right font-bold text-slate-900">
+                      {formatCurrency(order.total_amount)}
+                    </TableCell>
+                  </TableRow>
+                  {showReceiptTotal && (
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right font-semibold text-purple-700">
+                        Total aceito
+                      </TableCell>
+                      <TableCell className="text-right font-bold text-purple-700">
+                        {formatCurrency(order.receipt_total_amount)}
+                      </TableCell>
+                    </TableRow>
+                  )}
+                </TableBody>
+              </Table>
+            )}
           </CardContent>
         )}
       </Card>

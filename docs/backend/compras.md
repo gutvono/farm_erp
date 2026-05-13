@@ -32,6 +32,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/compras/ordens` | Cria ordem com itens (status inicial: `em_andamento`) |
 | `GET` | `/api/compras/ordens/{id}` | Detalhe da ordem com itens |
 | `PATCH` | `/api/compras/ordens/{id}/status` | **Legacy** — restrito a cancelamento. Use os endpoints dedicados do fluxo para as demais transições |
+| `POST` | `/api/compras/ordens/{id}/concluir-servico` | Apenas ordens de serviço (`order_type="servico"`) em status `aprovada`: muda para `aguardando_pagamento` e gera a conta a pagar com o `payment_method` da ordem |
 | `DELETE` | `/api/compras/ordens/{id}` | Soft delete (somente se `em_andamento`) |
 
 ### Fluxo de Aprovação e Conferência
@@ -39,7 +40,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `POST` | `/api/compras/ordens/{id}/enviar-aprovacao` | `em_andamento` → `aguardando_aprovacao_financeiro` |
-| `POST` | `/api/compras/ordens/{id}/aprovar` | `aguardando_aprovacao_financeiro` → `aprovada` |
+| `POST` | `/api/compras/ordens/{id}/aprovar` | `aguardando_aprovacao_financeiro` → `aprovada` (body define `payment_method` + parcelamento) |
 | `POST` | `/api/compras/ordens/{id}/recusar` | `aguardando_aprovacao_financeiro` → `cancelada` (body: `{ "note": "..." }`, salvo em `financial_approval_note`) |
 | `POST` | `/api/compras/ordens/{id}/iniciar-conferencia` | `aprovada` → `em_conferencia` (cria 1 `purchase_order_receipt` por item, status `pendente`) |
 | `POST` | `/api/compras/ordens/{id}/finalizar-conferencia` | `em_conferencia` → `aguardando_pagamento` (registra qtd aceita/recusada por item, calcula `receipt_total_amount`, gera a conta a pagar) |
@@ -63,11 +64,14 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```
 
 ### PurchaseOrderCreate
+
+**Ordem de produto (default)**
 ```json
 {
   "supplier_id": "uuid",
   "notes": "opcional",
   "ordered_at": "2026-04-15T10:00:00Z",
+  "order_type": "produto",
   "items": [
     {
       "stock_item_id": "uuid",
@@ -75,20 +79,41 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
       "unit_price": 450.00,
       "description": "opcional"
     }
-  ],
+  ]
+}
+```
+
+**Ordem de serviço**
+```json
+{
+  "supplier_id": "uuid",
+  "ordered_at": "2026-04-15T10:00:00Z",
+  "order_type": "servico",
+  "service_description": "Manutenção do trator XYZ",
+  "total_amount": 1500.00,
+  "items": []
+}
+```
+
+- `order_type`: `"produto"` (default) ou `"servico"`
+- Ordens de produto exigem **mínimo 1 item**; `total_amount` calculado automaticamente como soma dos subtotais (`subtotal = quantity × unit_price`)
+- Ordens de serviço exigem `service_description` (obrigatório) e `total_amount` > 0; `items` pode ser lista vazia
+- `ordered_at` opcional (default: now)
+- **Parcelamento (`installments`, `first_due_date`, `installment_interval_days`) não fica mais na criação** — o financeiro define no momento da aprovação
+
+### ApproveOrderRequest (body de `/aprovar`)
+```json
+{
+  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto",
   "installments": 1,
   "first_due_date": null,
   "installment_interval_days": 30
 }
 ```
 
-- Mínimo de 1 item
-- `total_amount` calculado automaticamente (soma dos subtotais)
-- `subtotal` por item = `quantity × unit_price`
-- `ordered_at` opcional (default: now)
-- `installments`: 1 a 24 (default 1 — pagamento à vista, fluxo atual inalterado)
-- `first_due_date`: obrigatório quando `installments >= 2`
-- `installment_interval_days`: dias entre parcelas (default 30)
+- `payment_method` (`PaymentMethod`) é obrigatório
+- Quando `payment_method == "parcelado"`: `installments >= 2` e `first_due_date` obrigatórios
+- O método de pagamento e os parâmetros de parcelamento são persistidos na ordem e propagados para a(s) `accounts_payable` gerada(s)
 
 ### PurchaseOrderCancelRequest (body de `/recusar`)
 ```json
@@ -118,8 +143,8 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `rejection_reason` é **obrigatório** quando `quantity_rejected > 0`
 
 ### PurchaseOrderOut / PurchaseOrderWithReceipts
-- `PurchaseOrderOut`: inclui `supplier_name`, `items` (com `stock_item_name` e `subtotal`), `receipt_total_amount`, `financial_approval_note`
-- `PurchaseOrderWithReceipts`: adiciona a lista `receipts` (com `quantity_ordered`, `quantity_accepted`, `quantity_rejected`, `rejection_reason`, `status`, `unit_price`)
+- `PurchaseOrderOut`: inclui `supplier_name`, `items` (com `stock_item_name` e `subtotal`), `receipt_total_amount`, `financial_approval_note`, `order_type`, `service_description`, `payment_method`
+- `PurchaseOrderWithReceipts`: mesmos campos + lista `receipts` (com `quantity_ordered`, `quantity_accepted`, `quantity_rejected`, `rejection_reason`, `status`, `unit_price`)
 
 ## Regras de Negócio
 
@@ -154,7 +179,15 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 
 ### Ao Aprovar (`/aprovar`)
 - Origem: `aguardando_aprovacao_financeiro`
+- Persiste `payment_method`, `installments`, `first_due_date` e `installment_interval_days` na ordem (definidos pelo financeiro).
+- Validação: se `payment_method == "parcelado"`, exige `installments >= 2` e `first_due_date`.
 - Registra `financial_movement` (R$0, categoria `compra`, descrição "Ordem de compra aprovada pelo financeiro").
+
+### Concluir Serviço (`/concluir-servico`)
+- Apenas ordens com `order_type == "servico"` e status `aprovada`.
+- Transição: `aprovada` → `aguardando_pagamento`.
+- Gera conta a pagar com `amount = order.total_amount`, propagando `payment_method` e regras de parcelamento da ordem.
+- Registra `financial_movement` (R$0, descrição "Serviço concluído — aguardando pagamento").
 
 ### Ao Recusar (`/recusar`)
 - Origem: `aguardando_aprovacao_financeiro`
@@ -163,17 +196,17 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 
 ### Ao Finalizar a Conferência (`/finalizar-conferencia`)
 - Origem: `em_conferencia`
-- Atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas.
-- Calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
-- Se `receipt_total_amount > 0`, gera **conta(s) a pagar** dependendo de `installments`:
-  - **`installments <= 1` (à vista, default — fluxo inalterado):** uma única conta a pagar com vencimento `today + 30d`.
-  - **`installments >= 2` (parcelado):** N contas a pagar. `receipt_total_amount` é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number` e `installment_total`.
+- **Ordens de serviço** (`order_type == "servico"`) pulam a conferência item a item: vão direto para `aguardando_pagamento` e geram a conta a pagar com `order.total_amount` e o `payment_method` da ordem. (O endpoint dedicado é `/concluir-servico`; finalize_receipt mantém o mesmo comportamento como fallback caso uma ordem de serviço esteja em `em_conferencia`.)
+- **Ordens de produto:** atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas e calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
+- Quando há valor a pagar, gera **conta(s) a pagar** dependendo do `payment_method` armazenado na aprovação:
+  - **Não parcelado (`a_vista`/`pix`/`boleto`):** uma única conta a pagar. Vencimento = `first_due_date` da ordem se definido, caso contrário `today + 30d`. `payment_method` é propagado para a conta.
+  - **Parcelado (`payment_method == "parcelado"`, `installments >= 2`):** N contas a pagar. O valor é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number`, `installment_total` e `payment_method = "parcelado"`.
 - Registra `financial_movement` (R$0, descrição "Conferência finalizada — aguardando pagamento").
 
 > **Atenção (parcelamento):** o gatilho `complete_order_after_payment` é disparado **uma única vez**, no pagamento da primeira parcela. Pagamentos das parcelas seguintes apenas baixam a conta a pagar — o estoque e as NFs já foram registrados.
 
 ### Ao Pagar a Conta a Pagar (gatilho no Financeiro)
-Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment`, que executa em sequência:
+Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment`. Para ordens de serviço, o fluxo apenas transiciona a ordem para `concluida` (sem entrada no estoque, sem NFs). Para ordens de produto, executa em sequência:
 
 1. **Entrada no Estoque** — apenas para receipts com `quantity_accepted > 0`:
    ```python
@@ -221,9 +254,12 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 | `ordered_at` | TIMESTAMPTZ |
 | `received_at` | TIMESTAMPTZ (nullable — setado ao concluir) |
 | `notes` | TEXT (nullable) |
-| `installments` | INT default 1 |
-| `first_due_date` | DATE (nullable) |
-| `installment_interval_days` | INT default 30 |
+| `installments` | INT default 1 (definido na aprovação) |
+| `first_due_date` | DATE (nullable, definido na aprovação) |
+| `installment_interval_days` | INT default 30 (definido na aprovação) |
+| `order_type` | VARCHAR(10) — `produto` (default) ou `servico` |
+| `service_description` | TEXT (nullable, obrigatório para ordens de serviço) |
+| `payment_method` | enum `payment_method` (`a_vista` / `parcelado` / `pix` / `boleto`, nullable; setado na aprovação) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `purchase_order_items`

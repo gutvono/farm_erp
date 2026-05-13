@@ -90,19 +90,22 @@ def soft_delete_supplier(db: Session, supplier_id: UUID) -> Optional[Supplier]:
 
 def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
     ordered_at = data.ordered_at or datetime.now(timezone.utc)
-    total_amount = sum(
-        Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
-        for item in data.items
-    )
+
+    if data.order_type == "servico":
+        total_amount = Decimal(str(data.total_amount or 0))
+    else:
+        total_amount = sum(
+            Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
+            for item in data.items
+        )
 
     order = PurchaseOrder(
         supplier_id=data.supplier_id,
         total_amount=total_amount,
         ordered_at=ordered_at,
         notes=data.notes,
-        installments=data.installments,
-        first_due_date=data.first_due_date,
-        installment_interval_days=data.installment_interval_days,
+        order_type=data.order_type,
+        service_description=data.service_description,
     )
     db.add(order)
     db.flush()  # get order.id before creating items
@@ -241,8 +244,30 @@ def submit_for_approval(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
     )
 
 
-def approve_order(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
-    return _set_status(db, order_id, PurchaseOrderStatus.APROVADA)
+def approve_order(
+    db: Session,
+    order_id: UUID,
+    *,
+    payment_method: Optional[str] = None,
+    installments: Optional[int] = None,
+    first_due_date=None,
+    installment_interval_days: Optional[int] = None,
+) -> Optional[PurchaseOrder]:
+    extra_fields: dict = {}
+    if payment_method is not None:
+        extra_fields["payment_method"] = payment_method
+    if installments is not None:
+        extra_fields["installments"] = installments
+    if first_due_date is not None:
+        extra_fields["first_due_date"] = first_due_date
+    if installment_interval_days is not None:
+        extra_fields["installment_interval_days"] = installment_interval_days
+    return _set_status(
+        db,
+        order_id,
+        PurchaseOrderStatus.APROVADA,
+        extra_fields=extra_fields or None,
+    )
 
 
 def cancel_order_financial(
