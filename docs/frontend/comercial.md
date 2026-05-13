@@ -65,11 +65,11 @@ Página única com 2 abas (Tabs shadcn): **Vendas** e **Clientes**. Vendas são 
 | `onSuccess` | `() => void` | Recarrega lista |
 
 #### Seção "Condições de Pagamento"
-- Select de parcelas (1x = À vista, 2x–12x)
-- Quando `installments >= 2`: campos "Vencimento 1ª Parcela" (date) e "Intervalo (dias)" aparecem
-- Tabela de preview em tempo real: Parcela X/Y | Vencimento | Valor (última parcela absorve resíduo de centavos)
-- Campos enviados ao backend apenas quando `installments >= 2`
-- Validação via Zod `.superRefine`: `first_due_date` obrigatório quando parcelado
+- Select de **Forma de Pagamento**: `a_vista` / `parcelado` / `pix` / `boleto` (default `a_vista`)
+- Quando `parcelado`: Select de parcelas (2x–12x), campo "Vencimento 1ª Parcela" e "Intervalo (dias)"
+- Tabela de preview em tempo real: Parcela X/Y | Vencimento | Valor (última parcela absorve resíduo)
+- Enviado sempre; campos de parcelamento enviados apenas quando `payment_method === "parcelado"`
+- Validação via Zod `.superRefine`: `first_due_date` obrigatório quando parcelado com `installments >= 2`
 
 ### `VendaCard`
 | Prop | Tipo | Descrição |
@@ -97,12 +97,13 @@ entregue  → cancelada (AlertDialog: "venda será cancelada")
 
 A página busca `getItens({ category: "cafe" })` ao montar para listar apenas itens de café no `VendaForm`.
 
-## Campos de parcelamento em `Sale`
+## Campos de pagamento em `Sale`
 
 ```typescript
-installments: number              // default 1
-first_due_date: string | null     // vencimento da 1ª parcela
-installment_interval_days: number // default 30
+payment_method: PaymentMethod | null  // "a_vista" | "parcelado" | "pix" | "boleto"
+installments: number                  // default 1
+first_due_date: string | null         // vencimento da 1ª parcela
+installment_interval_days: number     // default 30
 ```
 
-`createVenda` aceita esses campos opcionais — enviados apenas quando `installments >= 2`.
+`createVenda` sempre envia `payment_method`; campos de parcelamento enviados apenas quando `payment_method === "parcelado"`.

@@ -50,6 +50,24 @@ export interface DashboardData {
   cash_flow: CashFlowPoint[]
 }
 
+export type PaymentMethod = "a_vista" | "parcelado" | "pix" | "boleto"
+
+export interface PixPaymentInfo {
+  pix_key: string
+  pix_code: string
+  amount: number
+  description: string
+}
+
+export interface BoletoPaymentInfo {
+  boleto_number: string
+  barcode: string
+  due_date: string
+  amount: number
+  beneficiary: string
+  payer: string
+}
+
 export type MovementType = "entrada" | "saida"
 
 export interface FinancialMovement {
@@ -79,6 +97,7 @@ export interface AccountsPayable {
   notes: string | null
   installment_number: number | null
   installment_total: number | null
+  payment_method: PaymentMethod | null
   created_at: string
   updated_at: string
 }
@@ -104,6 +123,7 @@ export interface AccountsReceivable {
   notes: string | null
   installment_number: number | null
   installment_total: number | null
+  payment_method: PaymentMethod | null
   created_at: string
   updated_at: string
 }
@@ -229,6 +249,8 @@ export interface PurchaseOrder {
   supplier_id: string
   supplier_name: string
   status: PurchaseOrderStatus
+  order_type: "produto" | "servico"
+  service_description: string | null
   total_amount: number
   receipt_total_amount: number
   financial_approval_note: string | null
@@ -238,6 +260,7 @@ export interface PurchaseOrder {
   installments: number
   first_due_date: string | null
   installment_interval_days: number
+  payment_method: PaymentMethod | null
   items: PurchaseOrderItem[]
   created_at: string
   updated_at: string
@@ -302,6 +325,7 @@ export interface Sale {
   installments: number
   first_due_date: string | null
   installment_interval_days: number
+  payment_method: PaymentMethod | null
   items: SaleItem[]
   created_at: string
   updated_at: string

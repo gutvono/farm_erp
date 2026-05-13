@@ -14,8 +14,10 @@ Página única com 4 abas (Tabs shadcn) que cobrem todas as operações financei
 | `components/modules/financeiro/SaldoCard.tsx` | Componente | Card de saldo + entradas/saídas + botão atualizar |
 | `components/modules/financeiro/ContaRow.tsx` | Componente | Linha clicável de conta (pagar ou receber) |
 | `components/modules/financeiro/StatusBadge.tsx` | Componente | Badge colorido para status de contas |
-| `components/modules/financeiro/ContaPayableDetail.tsx` | Componente | Sheet lateral com detalhes e ações da conta a pagar |
-| `components/modules/financeiro/ContaReceivableDetail.tsx` | Componente | Sheet lateral com detalhes e ações da conta a receber |
+| `components/modules/financeiro/ContaPayableDetail.tsx` | Componente | Sheet lateral com detalhes, badge de pagamento e botões PIX/Boleto |
+| `components/modules/financeiro/ContaReceivableDetail.tsx` | Componente | Sheet lateral com detalhes, badge de pagamento e botões PIX/Boleto |
+| `components/modules/financeiro/PixModal.tsx` | Componente | Modal com chave PIX, código copia-e-cola e botão confirmar |
+| `components/modules/financeiro/BoletoModal.tsx` | Componente | Modal com linha digitável, download PDF (jsPDF) e botão confirmar |
 | `components/modules/financeiro/NovaContaForm.tsx` | Componente | Dialog com form (React Hook Form + Zod) para criar conta avulsa |
 | `components/modules/financeiro/MovimentacoesTable.tsx` | Componente | Tabela paginada de movimentações com filtro por módulo |
 | `components/ui/tabs.tsx` | UI (novo) | Primitivo Tabs do shadcn/Radix |
@@ -47,11 +49,14 @@ Amounts retornam como string no payload JSON (Pydantic + Decimal). O service con
 ## Abas
 
 ### 2. Aprovações (`approvals`) — nova
-- Lista ordens de compra com status `aguardando_aprovacao_financeiro` via `getOrdens("aguardando_aprovacao_financeiro")` do service de Compras
-- Card por ordem: fornecedor, data, valor, lista de itens
-- Badge contador na aba (número de ordens pendentes em amarelo)
-- Botão **Aprovar** → AlertDialog de confirmação → `aprovarOrdem(id)` → toast + recarrega lista
-- Botão **Recusar** → Dialog com Input de motivo (obrigatório) → `recusarOrdem(id, note)` → toast + recarrega lista
+- Lista ordens de compra com status `aguardando_aprovacao_financeiro`
+- Badge contador na aba (amarelo)
+- Ordens de serviço mostram `service_description`; ordens de produto mostram lista de itens
+- Botão **Aprovar** → Dialog com condições de pagamento:
+  - Select `payment_method` (a_vista / parcelado / pix / boleto)
+  - Quando parcelado: parcelas (2–24x), data 1ª parcela, intervalo; preview em tempo real
+  - Envia `aprovarOrdem(id, { payment_method, installments?, first_due_date?, installment_interval_days? })`
+- Botão **Recusar** → Dialog com Input de motivo → `recusarOrdem(id, note)`
 
 ### 1. Visão Geral (`overview`)
 - `SaldoCard` com saldo, total de entradas e total de saídas; botão "Atualizar" recarrega a aba
@@ -117,9 +122,20 @@ Amounts retornam como string no payload JSON (Pydantic + Decimal). O service con
 - Toasts via `sonner` em todas as ações (sucesso e erro)
 - Em erros da API (ex.: "Saldo insuficiente"), o toast recebe a mensagem original retornada por `apiFetch`
 
+## PIX e Boleto nos Detalhes de Conta
+
+`ContaPayableDetail` e `ContaReceivableDetail` exibem:
+- Badge colorido para `payment_method` (À Vista / Parcelado / PIX / Boleto)
+- Botão "Ver informações PIX" quando `payment_method === "pix"` e conta não finalizada
+- Botão "Ver Boleto" quando `payment_method === "boleto"` e conta não finalizada
+
+**PixModal**: chave PIX + código copia-e-cola + botão "Confirmar pagamento".
+**BoletoModal**: linha digitável + botão cópia + download PDF via `jsPDF` + botão "Confirmar pagamento".
+
 ## Dependências
 
 - `recharts` — gráfico (reutilizado do dashboard)
 - `react-hook-form` + `@hookform/resolvers` + `zod` — formulário de nova conta
 - `sonner` — toasts
-- `@radix-ui/react-tabs` + `@radix-ui/react-alert-dialog` — novos primitivos shadcn
+- `jspdf` — geração de PDF do boleto
+- `@radix-ui/react-tabs` + `@radix-ui/react-alert-dialog` — primitivos shadcn

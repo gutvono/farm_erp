@@ -36,21 +36,35 @@ const schema = z
   .object({
     supplier_id: z.string().min(1, "Selecione um fornecedor"),
     notes: z.string().optional(),
-    installments: z.number().int().min(1).max(12),
-    first_due_date: z.string().optional(),
-    installment_interval_days: z
-      .number({ error: "Informe o intervalo" })
-      .int()
-      .min(1),
-    items: z.array(itemSchema).min(1, "Adicione pelo menos 1 item"),
+    order_type: z.enum(["produto", "servico"]),
+    service_description: z.string().optional(),
+    total_amount: z.number().optional(),
+    items: z.array(itemSchema),
   })
   .superRefine((data, ctx) => {
-    if (data.installments >= 2 && !data.first_due_date) {
-      ctx.addIssue({
-        code: z.ZodIssueCode.custom,
-        message: "Informe o vencimento da 1ª parcela",
-        path: ["first_due_date"],
-      })
+    if (data.order_type === "servico") {
+      if (!data.service_description || !data.service_description.trim()) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Descreva o serviço",
+          path: ["service_description"],
+        })
+      }
+      if (!data.total_amount || data.total_amount <= 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Informe o valor do serviço",
+          path: ["total_amount"],
+        })
+      }
+    } else {
+      if (!data.items || data.items.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "Adicione pelo menos 1 item",
+          path: ["items"],
+        })
+      }
     }
   })
 
@@ -62,21 +76,6 @@ interface OrdemFormProps {
   suppliers: Supplier[]
   stockItems: StockItem[]
   onSuccess: () => void
-}
-
-function calcInstallmentDates(
-  firstDueDateStr: string,
-  installments: number,
-  intervalDays: number
-): Date[] {
-  const [y, m, d] = firstDueDateStr.split("-").map(Number)
-  const dates: Date[] = []
-  for (let i = 0; i < installments; i++) {
-    const dt = new Date(y, m - 1, d)
-    dt.setDate(dt.getDate() + i * intervalDays)
-    dates.push(dt)
-  }
-  return dates
 }
 
 export function OrdemForm({
@@ -101,9 +100,9 @@ export function OrdemForm({
     defaultValues: {
       supplier_id: "",
       notes: "",
-      installments: 1,
-      first_due_date: "",
-      installment_interval_days: 30,
+      order_type: "produto",
+      service_description: "",
+      total_amount: undefined,
       items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
     },
   })
@@ -112,42 +111,25 @@ export function OrdemForm({
 
   const watchedItems = watch("items")
   const supplierId = watch("supplier_id")
-  const installments = watch("installments")
-  const firstDueDate = watch("first_due_date")
-  const intervalDays = watch("installment_interval_days")
+  const orderType = watch("order_type")
 
-  const totalAmount = watchedItems.reduce((acc, item) => {
-    const q = Number(item.quantity) || 0
-    const p = Number(item.unit_price) || 0
-    return acc + q * p
-  }, 0)
-
-  const installmentPreview: { label: string; due: string; amount: number }[] =
-    (() => {
-      if (installments < 2 || !firstDueDate) return []
-      const base = Math.round((totalAmount / installments) * 100) / 100
-      const dates = calcInstallmentDates(firstDueDate, installments, intervalDays || 30)
-      return dates.map((dt, i) => {
-        const amount =
-          i === installments - 1
-            ? Math.round((totalAmount - base * (installments - 1)) * 100) / 100
-            : base
-        return {
-          label: `Parcela ${i + 1}/${installments}`,
-          due: dt.toLocaleDateString("pt-BR"),
-          amount,
-        }
-      })
-    })()
+  const totalAmount =
+    orderType === "produto"
+      ? watchedItems.reduce((acc, item) => {
+          const q = Number(item.quantity) || 0
+          const p = Number(item.unit_price) || 0
+          return acc + q * p
+        }, 0)
+      : Number(watch("total_amount")) || 0
 
   useEffect(() => {
     if (open) {
       reset({
         supplier_id: "",
         notes: "",
-        installments: 1,
-        first_due_date: "",
-        installment_interval_days: 30,
+        order_type: "produto",
+        service_description: "",
+        total_amount: undefined,
         items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
       })
     }
@@ -156,19 +138,27 @@ export function OrdemForm({
   async function onSubmit(data: FormData) {
     setLoading(true)
     try {
-      await createOrdem({
-        supplier_id: data.supplier_id,
-        notes: data.notes || undefined,
-        installments: data.installments,
-        first_due_date: data.installments >= 2 ? data.first_due_date : undefined,
-        installment_interval_days:
-          data.installments >= 2 ? data.installment_interval_days : undefined,
-        items: data.items.map((item) => ({
-          stock_item_id: item.stock_item_id,
-          quantity: item.quantity,
-          unit_price: item.unit_price,
-        })),
-      })
+      if (data.order_type === "servico") {
+        await createOrdem({
+          supplier_id: data.supplier_id,
+          notes: data.notes || undefined,
+          order_type: "servico",
+          service_description: data.service_description,
+          total_amount: data.total_amount,
+          items: [],
+        })
+      } else {
+        await createOrdem({
+          supplier_id: data.supplier_id,
+          notes: data.notes || undefined,
+          order_type: "produto",
+          items: data.items.map((item) => ({
+            stock_item_id: item.stock_item_id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+          })),
+        })
+      }
       toast.success("Ordem de compra criada com sucesso")
       onSuccess()
       onOpenChange(false)
@@ -216,171 +206,165 @@ export function OrdemForm({
             </div>
           </div>
 
-          {/* Condições de Pagamento */}
-          <div className="space-y-3 rounded-md border p-4">
-            <Label className="text-sm font-semibold">Condições de Pagamento</Label>
-            <div className="grid grid-cols-3 gap-4">
-              <div className="space-y-1">
-                <Label className="text-xs">Parcelas</Label>
-                <Select
-                  value={String(installments)}
-                  onValueChange={(v) => setValue("installments", parseInt(v, 10))}
-                >
-                  <SelectTrigger>
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {Array.from({ length: 12 }, (_, i) => i + 1).map((n) => (
-                      <SelectItem key={n} value={String(n)}>
-                        {n === 1 ? "À vista" : `${n}x`}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-
-              {installments >= 2 && (
-                <>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Vencimento 1ª Parcela</Label>
-                    <Input type="date" {...register("first_due_date")} />
-                    {errors.first_due_date && (
-                      <p className="text-xs text-red-500">{errors.first_due_date.message}</p>
-                    )}
-                  </div>
-                  <div className="space-y-1">
-                    <Label className="text-xs">Intervalo (dias)</Label>
-                    <Input
-                      type="number"
-                      min={1}
-                      {...register("installment_interval_days", { valueAsNumber: true })}
-                    />
-                    {errors.installment_interval_days && (
-                      <p className="text-xs text-red-500">
-                        {errors.installment_interval_days.message}
-                      </p>
-                    )}
-                  </div>
-                </>
-              )}
+          {/* Tipo de Ordem */}
+          <div className="space-y-2">
+            <Label>Tipo de Ordem</Label>
+            <div className="flex gap-2">
+              <button
+                type="button"
+                onClick={() => setValue("order_type", "produto")}
+                className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                  orderType === "produto"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Produto
+              </button>
+              <button
+                type="button"
+                onClick={() => setValue("order_type", "servico")}
+                className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
+                  orderType === "servico"
+                    ? "border-slate-900 bg-slate-900 text-white"
+                    : "border-slate-200 bg-white text-slate-700 hover:bg-slate-50"
+                }`}
+              >
+                Serviço
+              </button>
             </div>
-
-            {installmentPreview.length > 0 && (
-              <div className="overflow-hidden rounded border">
-                <table className="w-full text-xs">
-                  <thead className="bg-slate-100">
-                    <tr>
-                      <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
-                      <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
-                      <th className="px-3 py-1.5 text-right font-medium">Valor</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {installmentPreview.map((row, i) => (
-                      <tr key={i} className="border-t">
-                        <td className="px-3 py-1.5">{row.label}</td>
-                        <td className="px-3 py-1.5">{row.due}</td>
-                        <td className="px-3 py-1.5 text-right">{formatCurrency(row.amount)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            )}
+            <p className="text-xs text-slate-500">
+              {orderType === "servico"
+                ? "As condições de pagamento serão definidas na aprovação financeira."
+                : "Os itens de produto serão conferidos no recebimento."}
+            </p>
           </div>
 
-          {/* Itens */}
-          <div className="space-y-2">
-            <div className="flex items-center justify-between">
-              <Label>Itens *</Label>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={() => append({ stock_item_id: "", quantity: 0, unit_price: 0 })}
-              >
-                <Plus className="h-3 w-3 mr-1" /> Adicionar item
-              </Button>
+          {orderType === "servico" ? (
+            /* Campos para Serviço */
+            <div className="space-y-4">
+              <div className="space-y-1">
+                <Label htmlFor="service_description">Descrição do Serviço *</Label>
+                <textarea
+                  id="service_description"
+                  {...register("service_description")}
+                  rows={3}
+                  placeholder="Descreva o serviço a ser realizado..."
+                  className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
+                />
+                {errors.service_description && (
+                  <p className="text-xs text-red-500">{errors.service_description.message}</p>
+                )}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="total_amount">Valor do Serviço (R$) *</Label>
+                <Input
+                  id="total_amount"
+                  type="number"
+                  step="0.01"
+                  min="0.01"
+                  {...register("total_amount", { valueAsNumber: true })}
+                  placeholder="0.00"
+                />
+                {errors.total_amount && (
+                  <p className="text-xs text-red-500">{errors.total_amount.message}</p>
+                )}
+              </div>
             </div>
-
-            {errors.items && typeof errors.items.message === "string" && (
-              <p className="text-xs text-red-500">{errors.items.message}</p>
-            )}
-
+          ) : (
+            /* Itens para Produto */
             <div className="space-y-2">
-              {fields.map((field, idx) => {
-                const qty = Number(watchedItems[idx]?.quantity) || 0
-                const price = Number(watchedItems[idx]?.unit_price) || 0
-                const lineTotal = qty * price
+              <div className="flex items-center justify-between">
+                <Label>Itens *</Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => append({ stock_item_id: "", quantity: 0, unit_price: 0 })}
+                >
+                  <Plus className="h-3 w-3 mr-1" /> Adicionar item
+                </Button>
+              </div>
 
-                return (
-                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-5 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Item</Label>}
-                      <Select
-                        value={watchedItems[idx]?.stock_item_id ?? ""}
-                        onValueChange={(v) => setValue(`items.${idx}.stock_item_id`, v)}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {stockItems.map((s) => (
-                            <SelectItem key={s.id} value={s.id}>
-                              {s.name}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {errors.items?.[idx]?.stock_item_id && (
-                        <p className="text-xs text-red-500">
-                          {errors.items[idx]?.stock_item_id?.message}
-                        </p>
-                      )}
-                    </div>
+              {errors.items && typeof errors.items.message === "string" && (
+                <p className="text-xs text-red-500">{errors.items.message}</p>
+              )}
 
-                    <div className="col-span-2 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
-                      <Input
-                        type="number"
-                        step="0.001"
-                        {...register(`items.${idx}.quantity`, { valueAsNumber: true })}
-                      />
-                    </div>
+              <div className="space-y-2">
+                {fields.map((field, idx) => {
+                  const qty = Number(watchedItems[idx]?.quantity) || 0
+                  const price = Number(watchedItems[idx]?.unit_price) || 0
+                  const lineTotal = qty * price
 
-                    <div className="col-span-2 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Preço Unit.</Label>}
-                      <Input
-                        type="number"
-                        step="0.01"
-                        {...register(`items.${idx}.unit_price`, { valueAsNumber: true })}
-                      />
-                    </div>
+                  return (
+                    <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-5 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Item</Label>}
+                        <Select
+                          value={watchedItems[idx]?.stock_item_id ?? ""}
+                          onValueChange={(v) => setValue(`items.${idx}.stock_item_id`, v)}
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {stockItems.map((s) => (
+                              <SelectItem key={s.id} value={s.id}>
+                                {s.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        {errors.items?.[idx]?.stock_item_id && (
+                          <p className="text-xs text-red-500">
+                            {errors.items[idx]?.stock_item_id?.message}
+                          </p>
+                        )}
+                      </div>
 
-                    <div className="col-span-2 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Subtotal</Label>}
-                      <div className="h-9 flex items-center px-2 rounded-md border bg-slate-50 text-sm font-medium">
-                        {formatCurrency(lineTotal)}
+                      <div className="col-span-2 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                        <Input
+                          type="number"
+                          step="0.001"
+                          {...register(`items.${idx}.quantity`, { valueAsNumber: true })}
+                        />
+                      </div>
+
+                      <div className="col-span-2 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Preço Unit.</Label>}
+                        <Input
+                          type="number"
+                          step="0.01"
+                          {...register(`items.${idx}.unit_price`, { valueAsNumber: true })}
+                        />
+                      </div>
+
+                      <div className="col-span-2 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Subtotal</Label>}
+                        <div className="h-9 flex items-center px-2 rounded-md border bg-slate-50 text-sm font-medium">
+                          {formatCurrency(lineTotal)}
+                        </div>
+                      </div>
+
+                      <div className="col-span-1">
+                        {idx === 0 && <div className="text-xs invisible">X</div>}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          disabled={fields.length === 1}
+                          onClick={() => remove(idx)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
                       </div>
                     </div>
-
-                    <div className="col-span-1">
-                      {idx === 0 && <div className="text-xs invisible">X</div>}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        disabled={fields.length === 1}
-                        onClick={() => remove(idx)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
-                  </div>
-                )
-              })}
+                  )
+                })}
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="flex items-center justify-between pt-2 border-t">
             <div className="text-sm font-semibold text-slate-700">
