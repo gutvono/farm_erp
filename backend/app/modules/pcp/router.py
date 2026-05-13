@@ -9,6 +9,7 @@ from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
 from app.modules.pcp import service as pcp_service
 from app.modules.pcp.schemas import (
+    HarvestCreate,
     PlotActivityCreate,
     PlotCreate,
     PlotOut,
@@ -163,12 +164,24 @@ def get_order(
     )
 
 
+@router.post("/ordens/{order_id}/colher", response_model=SuccessResponse)
+def colher_safra(
+    order_id: UUID,
+    body: HarvestCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    result = pcp_service.registrar_colheita(db, order_id, body.percentage_harvested)
+    return success("Colheita registrada com sucesso", result.model_dump(mode="json"))
+
+
 @router.post("/ordens/{order_id}/produzir", response_model=SuccessResponse)
 def produzir_safra(
     order_id: UUID,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
+    """Alias de compatibilidade: colhe o percentual restante da ordem (100% se nada colhido)."""
     result = pcp_service.produzir_safra(db, order_id)
     return success("Safra produzida com sucesso", result.model_dump(mode="json"))
 
@@ -181,3 +194,17 @@ def delete_order(
 ) -> SuccessResponse:
     pcp_service.soft_delete_order(db, order_id)
     return success("Ordem removida com sucesso")
+
+
+# ---------------------------------------------------------------------------
+# Relatórios
+# ---------------------------------------------------------------------------
+
+
+@router.get("/relatorios", response_model=SuccessResponse)
+def relatorios(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    report = pcp_service.gerar_relatorios(db)
+    return success("Relatórios gerados com sucesso", report.model_dump(mode="json"))

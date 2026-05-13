@@ -1,13 +1,15 @@
 from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.modules.pcp.model import (
     Plot,
     PlotActivity,
+    ProductionHarvest,
     ProductionInput,
     ProductionOrder,
 )
@@ -95,6 +97,11 @@ def create_activity(db: Session, data: PlotActivityCreate) -> PlotActivity:
         labor_type=data.labor_type,
         cost=data.cost,
         details=data.details,
+        hours_spent=data.hours_spent,
+        employee_id=data.employee_id,
+        quantity_applied=data.quantity_applied,
+        quantity_unit=data.quantity_unit,
+        result=data.result,
     )
     db.add(activity)
     db.commit()
@@ -125,6 +132,25 @@ def list_activities(
 # ---------------------------------------------------------------------------
 
 
+def gerar_numero_ordem(db: Session) -> str:
+    """OP-{ANO}-{SEQ:03d} — busca maior seq do ano corrente e incrementa."""
+    year = datetime.now(timezone.utc).year
+    prefix = f"OP-{year}-"
+    latest = (
+        db.query(ProductionOrder.order_number)
+        .filter(ProductionOrder.order_number.like(f"{prefix}%"))
+        .order_by(ProductionOrder.order_number.desc())
+        .first()
+    )
+    next_seq = 1
+    if latest and latest[0]:
+        try:
+            next_seq = int(latest[0].split("-")[-1]) + 1
+        except (ValueError, IndexError):
+            next_seq = 1
+    return f"{prefix}{next_seq:03d}"
+
+
 def create_order(
     db: Session,
     data: ProductionOrderCreate,
@@ -134,15 +160,23 @@ def create_order(
     Create a ProductionOrder with PLANEJADA status.
     `input_cost_map` maps stock_item_id → unit_cost (resolved by service layer).
     """
+    order_number = gerar_numero_ordem(db)
     order = ProductionOrder(
         plot_id=data.plot_id,
+        order_number=order_number,
         planned_date=data.planned_date,
+        start_date=data.start_date,
+        expected_end_date=data.expected_end_date,
+        responsible_employee_id=data.responsible_employee_id,
         executed_at=None,
         total_sacas=Decimal("0"),
         especial_sacas=Decimal("0"),
         superior_sacas=Decimal("0"),
         tradicional_sacas=Decimal("0"),
         total_cost=Decimal("0"),
+        estimated_cost=Decimal("0"),
+        realized_cost=Decimal("0"),
+        harvest_progress=Decimal("0"),
         status=ProductionOrderStatus.PLANEJADA,
         notes=data.notes,
     )
@@ -189,6 +223,21 @@ def list_orders(
     )
     for o in orders:
         _ = o.inputs
+        _ = o.harvests
+    return orders
+
+
+def list_orders_for_report(db: Session) -> list[ProductionOrder]:
+    """All non-deleted orders, ordered by created_at desc, with inputs and harvests eagerly loaded."""
+    orders = (
+        db.query(ProductionOrder)
+        .filter(ProductionOrder.deleted_at.is_(None))
+        .order_by(ProductionOrder.created_at.desc())
+        .all()
+    )
+    for o in orders:
+        _ = o.inputs
+        _ = o.harvests
     return orders
 
 
@@ -203,6 +252,21 @@ def get_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
     )
     if order:
         _ = order.inputs
+    return order
+
+
+def get_order_with_harvests(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
+    order = (
+        db.query(ProductionOrder)
+        .filter(
+            ProductionOrder.id == order_id,
+            ProductionOrder.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if order:
+        _ = order.inputs
+        _ = order.harvests
     return order
 
 
@@ -224,6 +288,82 @@ def soft_delete_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
     if not order:
         return None
     order.deleted_at = datetime.now(timezone.utc)
+    db.add(order)
+    db.commit()
+    db.refresh(order)
+    return order
+
+
+# ---------------------------------------------------------------------------
+# Production Harvests
+# ---------------------------------------------------------------------------
+
+
+def create_harvest(
+    db: Session,
+    *,
+    order_id: UUID,
+    percentage_harvested: Decimal,
+    sacks_total: Decimal,
+    sacks_especial: Decimal,
+    sacks_superior: Decimal,
+    sacks_tradicional: Decimal,
+    inputs_consumed: list[dict[str, Any]],
+    is_final: bool,
+) -> ProductionHarvest:
+    """Cria registro de colheita parcial. harvest_number = total atual + 1."""
+    current_count = (
+        db.query(func.count(ProductionHarvest.id))
+        .filter(ProductionHarvest.production_order_id == order_id)
+        .scalar()
+        or 0
+    )
+    harvest = ProductionHarvest(
+        production_order_id=order_id,
+        harvest_number=current_count + 1,
+        percentage_harvested=percentage_harvested,
+        sacks_total=sacks_total,
+        sacks_especial=sacks_especial,
+        sacks_superior=sacks_superior,
+        sacks_tradicional=sacks_tradicional,
+        inputs_consumed=inputs_consumed,
+        is_final=is_final,
+    )
+    db.add(harvest)
+    db.commit()
+    db.refresh(harvest)
+    return harvest
+
+
+def update_order_harvest_progress(
+    db: Session,
+    order_id: UUID,
+    *,
+    additional_percentage: Decimal,
+    additional_sacks_total: Decimal,
+    additional_sacks_especial: Decimal,
+    additional_sacks_superior: Decimal,
+    additional_sacks_tradicional: Decimal,
+) -> Optional[ProductionOrder]:
+    """
+    Acumula totais e progresso na ordem. Se atingir 100%, marca como concluida
+    e preenche executed_at.
+    """
+    order = get_order(db, order_id)
+    if not order:
+        return None
+    order.harvest_progress = Decimal(order.harvest_progress) + additional_percentage
+    order.total_sacas = Decimal(order.total_sacas) + additional_sacks_total
+    order.especial_sacas = Decimal(order.especial_sacas) + additional_sacks_especial
+    order.superior_sacas = Decimal(order.superior_sacas) + additional_sacks_superior
+    order.tradicional_sacas = (
+        Decimal(order.tradicional_sacas) + additional_sacks_tradicional
+    )
+    if Decimal(order.harvest_progress) >= Decimal("100"):
+        order.status = ProductionOrderStatus.CONCLUIDA
+        order.executed_at = datetime.now(timezone.utc)
+    elif order.status == ProductionOrderStatus.PLANEJADA:
+        order.status = ProductionOrderStatus.EM_EXECUCAO
     db.add(order)
     db.commit()
     db.refresh(order)

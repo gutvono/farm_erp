@@ -20,6 +20,7 @@ class StockItemCreate(BaseModel):
     unit: StockUnit = StockUnit.UNIDADE
     minimum_stock: Decimal = Field(default=Decimal("0"), ge=0)
     unit_cost: Decimal = Field(default=Decimal("0"), ge=0)
+    hourly_cost: Optional[Decimal] = Field(default=None, ge=0)
     description: Optional[str] = None
 
 
@@ -29,6 +30,7 @@ class StockItemUpdate(BaseModel):
     unit: Optional[StockUnit] = None
     minimum_stock: Optional[Decimal] = Field(default=None, ge=0)
     unit_cost: Optional[Decimal] = Field(default=None, ge=0)
+    hourly_cost: Optional[Decimal] = Field(default=None, ge=0)
     description: Optional[str] = None
 
 
@@ -40,6 +42,7 @@ class StockItemOut(BaseModel):
     unit: StockUnit
     minimum_stock: Decimal
     unit_cost: Decimal
+    hourly_cost: Optional[Decimal] = None
     quantity_on_hand: Decimal
     description: Optional[str] = None
     is_below_minimum: bool
@@ -58,6 +61,7 @@ class StockItemOut(BaseModel):
             "unit": item.unit,
             "minimum_stock": item.minimum_stock,
             "unit_cost": item.unit_cost,
+            "hourly_cost": item.hourly_cost,
             "quantity_on_hand": item.quantity_on_hand,
             "description": item.description,
             "is_below_minimum": Decimal(item.quantity_on_hand) < Decimal(item.minimum_stock),

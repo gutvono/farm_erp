@@ -126,6 +126,13 @@ def create_movement(db: Session, data: StockMovementCreate) -> StockMovement:
             source_module="estoque",
             reference_id=movement.id,
         )
+        # Weighted average cost: recompute after the entry is persisted.
+        novo_custo = estoque_repo.calcular_custo_medio(db, data.stock_item_id)
+        if novo_custo > 0:
+            item.unit_cost = novo_custo
+            db.add(item)
+            db.commit()
+            db.refresh(item)
     else:
         # saida or zero-cost entrada → internal movement at R$0.00
         fin_service.registrar_movimento(
