@@ -107,6 +107,7 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
         installments=data.installments,
         first_due_date=data.first_due_date,
         installment_interval_days=data.installment_interval_days,
+        payment_method=data.payment_method.value if data.payment_method else None,
     )
     db.add(sale)
     db.flush()  # get sale.id before creating items

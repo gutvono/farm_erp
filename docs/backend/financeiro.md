@@ -40,8 +40,11 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/financeiro/contas-pagar` | Cria nova conta |
 | `GET` | `/api/financeiro/contas-pagar/{id}` | Detalhe |
 | `PUT` | `/api/financeiro/contas-pagar/{id}` | Atualiza conta em aberto |
-| `PUT` | `/api/financeiro/contas-pagar/{id}/pagar` | Marca como paga + gera movimento de saída. **Se a conta tem `purchase_order_id`, dispara o fluxo de conclusão em Compras** (entrada de estoque dos aceitos, NF-RECEBIMENTO, NF-DEVOLUCAO se houver, transição para `concluida`) |
+| `PUT` | `/api/financeiro/contas-pagar/{id}/pagar` | Marca como paga + gera movimento de saída. **Se a conta tem `purchase_order_id`, dispara o fluxo de conclusão em Compras** (entrada de estoque dos aceitos, NF-RECEBIMENTO, NF-DEVOLUCAO se houver, transição para `concluida`; ordens de serviço apenas transicionam para `concluida`) |
 | `PUT` | `/api/financeiro/contas-pagar/{id}/cancelar` | Cancela conta (sem movimento) |
+| `PATCH` | `/api/financeiro/contas-pagar/{id}/metodo-pagamento` | Atualiza `payment_method` da conta (apenas se `em_aberto`) |
+| `GET` | `/api/financeiro/contas-pagar/{id}/pix` | Retorna `PixPaymentInfo` (chave + payload EMV simulado). Requer `payment_method == "pix"` |
+| `GET` | `/api/financeiro/contas-pagar/{id}/boleto` | Retorna `BoletoPaymentInfo` (linha digitável + código de barras simulados, determinístico por id). Requer `payment_method == "boleto"` |
 
 ### Contas a Receber
 
@@ -54,6 +57,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `PUT` | `/api/financeiro/contas-receber/{id}/receber` | Registra recebimento parcial ou total |
 | `PUT` | `/api/financeiro/contas-receber/{id}/inadimplente` | Marca cliente como inadimplente |
 | `PUT` | `/api/financeiro/contas-receber/{id}/reverter-inadimplencia` | Reverte inadimplência |
+| `PATCH` | `/api/financeiro/contas-receber/{id}/metodo-pagamento` | Atualiza `payment_method` da conta (apenas se `em_aberto`) |
+| `GET` | `/api/financeiro/contas-receber/{id}/pix` | Retorna `PixPaymentInfo`. Requer `payment_method == "pix"` |
+| `GET` | `/api/financeiro/contas-receber/{id}/boleto` | Retorna `BoletoPaymentInfo`. Requer `payment_method == "boleto"` |
 | `GET` | `/api/financeiro/relatorio-inadimplencia` | Lista clientes com contas em inadimplência |
 
 ## Schemas principais
@@ -79,7 +85,8 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "due_date": "2026-04-30",
   "supplier_id": "uuid",
   "purchase_order_id": "uuid",
-  "notes": "opcional"
+  "notes": "opcional",
+  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto"
 }
 ```
 
@@ -92,9 +99,39 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "due_date": "2026-05-15",
   "sale_id": "uuid",
   "invoice_id": "uuid",
-  "notes": "opcional"
+  "notes": "opcional",
+  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto"
 }
 ```
+
+### PaymentMethodUpdate (body do `PATCH .../metodo-pagamento`)
+```json
+{ "payment_method": "pix" }
+```
+
+### PixPaymentInfo (response do `GET .../pix`)
+```json
+{
+  "pix_key": "fazenda.cafe@pix.com.br",
+  "pix_code": "00020126580014BR.GOV.BCB.PIX0136...6304XXXX",
+  "amount": 1500.00,
+  "description": "..."
+}
+```
+- Payload EMV simulado (não validado pelo Banco Central) — gerado de forma determinística por id da conta.
+
+### BoletoPaymentInfo (response do `GET .../boleto`)
+```json
+{
+  "boleto_number": "34191.xxxxx xxxxx.xxxxxx xxxxxx.xxxxxx X DDMMYYYY VVVVVVVVVV",
+  "barcode": "34191xxxxxxxxxx...",
+  "due_date": "30/04/2026",
+  "amount": 1500.00,
+  "beneficiary": "Fazenda Café Arábica Ltda. — CNPJ: 00.000.000/0001-00",
+  "payer": "Fornecedor X / Cliente Y"
+}
+```
+- Determinístico por id da conta (mesmo boleto gerado múltiplas vezes retorna o mesmo número).
 
 ### ReceivePaymentRequest
 ```json
@@ -225,6 +262,7 @@ No fluxo de **compra parcelada** (Compras divide `receipt_total_amount` em N par
 | `notes` | TEXT (nullable) |
 | `installment_number` | INT (nullable) — 1-based |
 | `installment_total` | INT (nullable) |
+| `payment_method` | enum `payment_method` (`a_vista` / `parcelado` / `pix` / `boleto`, nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ### `accounts_receivable`
@@ -244,6 +282,7 @@ No fluxo de **compra parcelada** (Compras divide `receipt_total_amount` em N par
 | `notes` | TEXT (nullable) |
 | `installment_number` | INT (nullable) — 1-based |
 | `installment_total` | INT (nullable) |
+| `payment_method` | enum `payment_method` (`a_vista` / `parcelado` / `pix` / `boleto`, nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
 ## Integrações entre módulos

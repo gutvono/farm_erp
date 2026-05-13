@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus
+from app.shared.enums import PaymentMethod, PurchaseOrderReceiptStatus, PurchaseOrderStatus
 
 
 # ---------------------------------------------------------------------------
@@ -89,18 +89,50 @@ class PurchaseOrderItemOut(BaseModel):
 class PurchaseOrderCreate(BaseModel):
     supplier_id: UUID
     notes: Optional[str] = None
-    items: list[PurchaseOrderItemCreate] = Field(min_length=1)
+    items: list[PurchaseOrderItemCreate] = Field(default_factory=list)
     ordered_at: Optional[datetime] = None
+    order_type: str = Field(default="produto")
+    service_description: Optional[str] = None
+    total_amount: Optional[Decimal] = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def _validate_order_type(self) -> "PurchaseOrderCreate":
+        if self.order_type not in ("produto", "servico"):
+            raise ValueError("order_type deve ser 'produto' ou 'servico'")
+        if self.order_type == "servico":
+            if not self.service_description:
+                raise ValueError(
+                    "service_description é obrigatório para ordens de serviço"
+                )
+            if self.total_amount is None or self.total_amount <= 0:
+                raise ValueError(
+                    "total_amount é obrigatório e deve ser maior que zero para ordens de serviço"
+                )
+        else:
+            if not self.items:
+                raise ValueError(
+                    "items é obrigatório para ordens de produto (mínimo 1 item)"
+                )
+        return self
+
+
+class ApproveOrderRequest(BaseModel):
+    payment_method: PaymentMethod
     installments: int = Field(default=1, ge=1, le=24)
     first_due_date: Optional[date] = None
     installment_interval_days: int = Field(default=30, ge=1)
 
     @model_validator(mode="after")
-    def _validate_installments(self) -> "PurchaseOrderCreate":
-        if self.installments >= 2 and self.first_due_date is None:
-            raise ValueError(
-                "first_due_date é obrigatório quando installments >= 2"
-            )
+    def _validate_payment_method(self) -> "ApproveOrderRequest":
+        if self.payment_method == PaymentMethod.PARCELADO:
+            if self.installments < 2:
+                raise ValueError(
+                    "Pagamento parcelado exige installments >= 2"
+                )
+            if self.first_due_date is None:
+                raise ValueError(
+                    "first_due_date é obrigatório para pagamento parcelado"
+                )
         return self
 
 
@@ -115,6 +147,9 @@ class PurchaseOrderOut(BaseModel):
     ordered_at: datetime
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
+    order_type: str = "produto"
+    service_description: Optional[str] = None
+    payment_method: Optional[str] = None
     installments: int = 1
     first_due_date: Optional[date] = None
     installment_interval_days: int = 30
@@ -137,6 +172,14 @@ class PurchaseOrderOut(BaseModel):
             ordered_at=order.ordered_at,
             received_at=order.received_at,
             notes=order.notes,
+            order_type=order.order_type or "produto",
+            service_description=order.service_description,
+            payment_method=(
+                order.payment_method.value
+                if order.payment_method is not None
+                and hasattr(order.payment_method, "value")
+                else order.payment_method
+            ),
             installments=order.installments or 1,
             first_due_date=order.first_due_date,
             installment_interval_days=order.installment_interval_days or 30,
@@ -219,6 +262,9 @@ class PurchaseOrderWithReceipts(BaseModel):
     ordered_at: datetime
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
+    order_type: str = "produto"
+    service_description: Optional[str] = None
+    payment_method: Optional[str] = None
     installments: int = 1
     first_due_date: Optional[date] = None
     installment_interval_days: int = 30
@@ -242,6 +288,14 @@ class PurchaseOrderWithReceipts(BaseModel):
             ordered_at=order.ordered_at,
             received_at=order.received_at,
             notes=order.notes,
+            order_type=order.order_type or "produto",
+            service_description=order.service_description,
+            payment_method=(
+                order.payment_method.value
+                if order.payment_method is not None
+                and hasattr(order.payment_method, "value")
+                else order.payment_method
+            ),
             installments=order.installments or 1,
             first_due_date=order.first_due_date,
             installment_interval_days=order.installment_interval_days or 30,

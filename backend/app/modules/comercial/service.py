@@ -121,6 +121,14 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
         )
 
     installments = sale.installments or 1
+    payment_method_raw = sale.payment_method
+    if payment_method_raw is None:
+        payment_method_value = None
+    elif hasattr(payment_method_raw, "value"):
+        payment_method_value = payment_method_raw.value
+    else:
+        payment_method_value = payment_method_raw
+
     if installments <= 1:
         # 5. Create invoice (flow à vista — unchanged)
         faturamento_service.criar_fatura(
@@ -141,6 +149,7 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
             due_date=date.today() + timedelta(days=30),
             source_module="comercial",
             reference_id=sale.id,
+            payment_method=payment_method_value,
         )
     else:
         # 5. Create parceled invoices (one per installment)
@@ -171,6 +180,7 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
                 invoice_id=invoice.id,
                 installment_number=invoice.installment_number,
                 installment_total=installments,
+                payment_method=payment_method_value,
             )
 
     # 7. Register financial movement (entrada/venda, R$0 placeholder)

@@ -10,6 +10,7 @@ from app.shared.enums import (
     AccountReceivableStatus,
     FinancialCategory,
     MovementType,
+    PaymentMethod,
 )
 
 
@@ -54,6 +55,7 @@ class AccountPayableCreate(BaseModel):
     supplier_id: Optional[UUID] = None
     purchase_order_id: Optional[UUID] = None
     notes: Optional[str] = None
+    payment_method: Optional[PaymentMethod] = None
 
 
 class AccountPayableUpdate(BaseModel):
@@ -77,6 +79,7 @@ class AccountPayableOut(BaseModel):
     notes: Optional[str] = None
     installment_number: Optional[int] = None
     installment_total: Optional[int] = None
+    payment_method: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -101,6 +104,7 @@ class AccountReceivableCreate(BaseModel):
     sale_id: Optional[UUID] = None
     invoice_id: Optional[UUID] = None
     notes: Optional[str] = None
+    payment_method: Optional[PaymentMethod] = None
 
 
 class AccountReceivableUpdate(BaseModel):
@@ -125,6 +129,7 @@ class AccountReceivableOut(BaseModel):
     notes: Optional[str] = None
     installment_number: Optional[int] = None
     installment_total: Optional[int] = None
+    payment_method: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
@@ -160,6 +165,26 @@ class CashFlowOut(BaseModel):
     total_entradas: Decimal
     total_saidas: Decimal
     saldo: Decimal
+
+
+class PaymentMethodUpdate(BaseModel):
+    payment_method: PaymentMethod
+
+
+class PixPaymentInfo(BaseModel):
+    pix_key: str
+    pix_code: str
+    amount: Decimal
+    description: str
+
+
+class BoletoPaymentInfo(BaseModel):
+    boleto_number: str
+    barcode: str
+    due_date: str
+    amount: Decimal
+    beneficiary: str
+    payer: str
 
 
 class DefaulterItem(BaseModel):

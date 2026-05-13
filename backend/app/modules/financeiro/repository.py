@@ -130,6 +130,7 @@ def create_payable(
     notes: Optional[str] = None,
     installment_number: Optional[int] = None,
     installment_total: Optional[int] = None,
+    payment_method: Optional[str] = None,
 ) -> AccountPayable:
     payable = AccountPayable(
         number=number,
@@ -141,6 +142,7 @@ def create_payable(
         notes=notes,
         installment_number=installment_number,
         installment_total=installment_total,
+        payment_method=payment_method,
     )
     db.add(payable)
     db.commit()
@@ -203,6 +205,7 @@ def create_receivable(
     notes: Optional[str] = None,
     installment_number: Optional[int] = None,
     installment_total: Optional[int] = None,
+    payment_method: Optional[str] = None,
 ) -> AccountReceivable:
     receivable = AccountReceivable(
         number=number,
@@ -215,6 +218,7 @@ def create_receivable(
         notes=notes,
         installment_number=installment_number,
         installment_total=installment_total,
+        payment_method=payment_method,
     )
     db.add(receivable)
     db.commit()

@@ -17,11 +17,14 @@ from app.modules.financeiro.schemas import (
     AccountReceivableOut,
     AccountReceivableUpdate,
     BalanceOut,
+    BoletoPaymentInfo,
     CashFlowOut,
     DefaulterItem,
     FinancialMovementCreate,
     FinancialMovementOut,
     PayPayableRequest,
+    PaymentMethodUpdate,
+    PixPaymentInfo,
     ReceivePaymentRequest,
 )
 from app.shared.enums import (
@@ -193,6 +196,44 @@ def cancel_payable(
     )
 
 
+@router.patch(
+    "/contas-pagar/{payable_id}/metodo-pagamento", response_model=SuccessResponse
+)
+def update_payable_payment_method(
+    payable_id: UUID,
+    body: PaymentMethodUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    payable = fin_service.update_payable_payment_method(
+        db, payable_id, body.payment_method
+    )
+    return success(
+        "Método de pagamento atualizado com sucesso",
+        AccountPayableOut.model_validate(payable).model_dump(mode="json"),
+    )
+
+
+@router.get("/contas-pagar/{payable_id}/pix", response_model=SuccessResponse)
+def get_payable_pix(
+    payable_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    info = fin_service.get_payable_pix(db, payable_id)
+    return success("Dados PIX gerados com sucesso", info.model_dump(mode="json"))
+
+
+@router.get("/contas-pagar/{payable_id}/boleto", response_model=SuccessResponse)
+def get_payable_boleto(
+    payable_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    info = fin_service.get_payable_boleto(db, payable_id)
+    return success("Dados do boleto gerados com sucesso", info.model_dump(mode="json"))
+
+
 # ---------------------------------------------------------------------------
 # Accounts Receivable
 # ---------------------------------------------------------------------------
@@ -302,6 +343,44 @@ def revert_defaulter(
         "Inadimplência revertida com sucesso",
         AccountReceivableOut.model_validate(receivable).model_dump(mode="json"),
     )
+
+
+@router.patch(
+    "/contas-receber/{receivable_id}/metodo-pagamento", response_model=SuccessResponse
+)
+def update_receivable_payment_method(
+    receivable_id: UUID,
+    body: PaymentMethodUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    receivable = fin_service.update_receivable_payment_method(
+        db, receivable_id, body.payment_method
+    )
+    return success(
+        "Método de pagamento atualizado com sucesso",
+        AccountReceivableOut.model_validate(receivable).model_dump(mode="json"),
+    )
+
+
+@router.get("/contas-receber/{receivable_id}/pix", response_model=SuccessResponse)
+def get_receivable_pix(
+    receivable_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    info = fin_service.get_receivable_pix(db, receivable_id)
+    return success("Dados PIX gerados com sucesso", info.model_dump(mode="json"))
+
+
+@router.get("/contas-receber/{receivable_id}/boleto", response_model=SuccessResponse)
+def get_receivable_boleto(
+    receivable_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    info = fin_service.get_receivable_boleto(db, receivable_id)
+    return success("Dados do boleto gerados com sucesso", info.model_dump(mode="json"))
 
 
 @router.get("/relatorio-inadimplencia", response_model=SuccessResponse)

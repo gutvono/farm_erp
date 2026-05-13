@@ -17,7 +17,12 @@ from app.modules.compras.schemas import (
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
 from app.modules.financeiro import service as fin_service
-from app.shared.enums import FinancialCategory, MovementType, PurchaseOrderStatus
+from app.shared.enums import (
+    FinancialCategory,
+    MovementType,
+    PaymentMethod,
+    PurchaseOrderStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -80,14 +85,15 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
     # Validate supplier exists
     _get_supplier_or_404(db, data.supplier_id)
 
-    # Validate all stock items exist
-    for item_data in data.items:
-        stock_item = estoque_repo.get_item(db, item_data.stock_item_id)
-        if not stock_item:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Item de estoque não encontrado: {item_data.stock_item_id}",
-            )
+    # Service orders skip item validation
+    if data.order_type == "produto":
+        for item_data in data.items:
+            stock_item = estoque_repo.get_item(db, item_data.stock_item_id)
+            if not stock_item:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Item de estoque não encontrado: {item_data.stock_item_id}",
+                )
 
     return compras_repo.create_order(db, data)
 
@@ -165,13 +171,33 @@ def submit_for_approval(db: Session, order_id: UUID) -> PurchaseOrder:
     return compras_repo.submit_for_approval(db, order_id)
 
 
-def approve_order(db: Session, order_id: UUID) -> PurchaseOrder:
+def approve_order(
+    db: Session,
+    order_id: UUID,
+    *,
+    payment_method: PaymentMethod,
+    installments: int = 1,
+    first_due_date: Optional[date] = None,
+    installment_interval_days: int = 30,
+) -> PurchaseOrder:
     order = _get_order_or_404(db, order_id)
     if order.status != PurchaseOrderStatus.AGUARDANDO_APROVACAO_FINANCEIRO:
         raise HTTPException(
             status_code=400,
             detail="Apenas ordens aguardando aprovação podem ser aprovadas",
         )
+
+    if payment_method == PaymentMethod.PARCELADO:
+        if installments < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Pagamento parcelado exige installments >= 2",
+            )
+        if first_due_date is None:
+            raise HTTPException(
+                status_code=400,
+                detail="first_due_date é obrigatório para pagamento parcelado",
+            )
 
     fin_service.registrar_movimento(
         db,
@@ -182,7 +208,14 @@ def approve_order(db: Session, order_id: UUID) -> PurchaseOrder:
         source_module="compras",
         reference_id=order.id,
     )
-    return compras_repo.approve_order(db, order_id)
+    return compras_repo.approve_order(
+        db,
+        order_id,
+        payment_method=payment_method.value,
+        installments=installments,
+        first_due_date=first_due_date,
+        installment_interval_days=installment_interval_days,
+    )
 
 
 def cancel_order_financial(db: Session, order_id: UUID, note: str) -> PurchaseOrder:
@@ -217,6 +250,24 @@ def finalize_receipt(
             detail="Apenas ordens em conferência podem ser finalizadas",
         )
 
+    # Service orders bypass item-by-item conferência and generate the conta a
+    # pagar straight from the order total_amount.
+    if (order.order_type or "produto") == "servico":
+        updated = compras_repo._set_status(
+            db, order_id, PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
+        )
+        _gerar_contas_pagar_da_ordem(db, updated, amount=Decimal(updated.total_amount or 0))
+        fin_service.registrar_movimento(
+            db,
+            movement_type=MovementType.SAIDA,
+            category=FinancialCategory.COMPRA,
+            amount=Decimal("0"),
+            description="Conferência finalizada (serviço) — aguardando pagamento",
+            source_module="compras",
+            reference_id=order.id,
+        )
+        return compras_repo.get_order_with_receipts(db, order_id)
+
     # Build map of receipts by item id for validation
     receipts_by_item = {r.purchase_order_item_id: r for r in order.receipts}
     for payload in items:
@@ -246,49 +297,10 @@ def finalize_receipt(
             )
 
     updated = compras_repo.finalize_receipt(db, order_id, items)
-    supplier = _get_supplier_or_404(db, order.supplier_id)
 
     receipt_total = Decimal(updated.receipt_total_amount or 0)
-    installments = updated.installments or 1
     if receipt_total > 0:
-        if installments <= 1:
-            fin_service.criar_conta_pagar(
-                db,
-                description=(
-                    f"Ordem de compra #{order.id} — {supplier.name} (itens aceitos)"
-                ),
-                amount=receipt_total,
-                due_date=date.today() + timedelta(days=30),
-                supplier_id=order.supplier_id,
-                source_module="compras",
-                reference_id=order.id,
-                notes=order.notes,
-            )
-        else:
-            base_share = (receipt_total / Decimal(installments)).quantize(
-                Decimal("0.01")
-            )
-            last_share = receipt_total - (base_share * (installments - 1))
-            interval = updated.installment_interval_days or 30
-            first_due = updated.first_due_date or date.today() + timedelta(days=30)
-            for idx in range(installments):
-                amount = last_share if idx == installments - 1 else base_share
-                due = first_due + timedelta(days=interval * idx)
-                fin_service.criar_conta_pagar(
-                    db,
-                    description=(
-                        f"Ordem de compra #{order.id} — {supplier.name} "
-                        f"(parcela {idx + 1}/{installments})"
-                    ),
-                    amount=amount,
-                    due_date=due,
-                    supplier_id=order.supplier_id,
-                    source_module="compras",
-                    reference_id=order.id,
-                    notes=order.notes,
-                    installment_number=idx + 1,
-                    installment_total=installments,
-                )
+        _gerar_contas_pagar_da_ordem(db, updated, amount=receipt_total)
 
     fin_service.registrar_movimento(
         db,
@@ -300,6 +312,99 @@ def finalize_receipt(
         reference_id=order.id,
     )
     return compras_repo.get_order_with_receipts(db, order_id)
+
+
+def _gerar_contas_pagar_da_ordem(
+    db: Session,
+    order: PurchaseOrder,
+    *,
+    amount: Decimal,
+) -> None:
+    """Generate accounts payable for a purchase order based on payment_method/installments."""
+    if amount <= 0:
+        return
+    supplier = _get_supplier_or_404(db, order.supplier_id)
+    payment_method_raw = order.payment_method
+    payment_method_value = (
+        payment_method_raw.value
+        if payment_method_raw is not None and hasattr(payment_method_raw, "value")
+        else payment_method_raw
+    )
+    installments = order.installments or 1
+    is_parcelado = payment_method_value == PaymentMethod.PARCELADO.value and installments > 1
+    type_label = "serviço" if (order.order_type or "produto") == "servico" else "itens aceitos"
+
+    if not is_parcelado:
+        fin_service.criar_conta_pagar(
+            db,
+            description=(
+                f"Ordem de compra #{order.id} — {supplier.name} ({type_label})"
+            ),
+            amount=amount,
+            due_date=order.first_due_date or (date.today() + timedelta(days=30)),
+            supplier_id=order.supplier_id,
+            source_module="compras",
+            reference_id=order.id,
+            notes=order.notes,
+            payment_method=payment_method_value,
+        )
+        return
+
+    base_share = (amount / Decimal(installments)).quantize(Decimal("0.01"))
+    last_share = amount - (base_share * (installments - 1))
+    interval = order.installment_interval_days or 30
+    first_due = order.first_due_date or date.today() + timedelta(days=30)
+    for idx in range(installments):
+        share = last_share if idx == installments - 1 else base_share
+        due = first_due + timedelta(days=interval * idx)
+        fin_service.criar_conta_pagar(
+            db,
+            description=(
+                f"Ordem de compra #{order.id} — {supplier.name} "
+                f"(parcela {idx + 1}/{installments})"
+            ),
+            amount=share,
+            due_date=due,
+            supplier_id=order.supplier_id,
+            source_module="compras",
+            reference_id=order.id,
+            notes=order.notes,
+            installment_number=idx + 1,
+            installment_total=installments,
+            payment_method=payment_method_value,
+        )
+
+
+def complete_service_order(db: Session, order_id: UUID) -> PurchaseOrder:
+    """Encerra uma ordem de serviço (aprovada → aguardando_pagamento)."""
+    order = _get_order_or_404(db, order_id)
+    if (order.order_type or "produto") != "servico":
+        raise HTTPException(
+            status_code=400,
+            detail="Endpoint disponível apenas para ordens de serviço",
+        )
+    if order.status != PurchaseOrderStatus.APROVADA:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas ordens de serviço aprovadas podem ser concluídas",
+        )
+
+    updated = compras_repo._set_status(
+        db, order_id, PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
+    )
+    _gerar_contas_pagar_da_ordem(
+        db, updated, amount=Decimal(updated.total_amount or 0)
+    )
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description="Serviço concluído — aguardando pagamento",
+        source_module="compras",
+        reference_id=order.id,
+    )
+    return compras_repo.get_order(db, order_id)
 
 
 def get_order_with_receipts(db: Session, order_id: UUID) -> PurchaseOrder:
@@ -316,9 +421,9 @@ def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
 def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
     """
     Chamada pelo Financeiro quando a conta a pagar vinculada à ordem é paga.
-    Registra entradas no estoque (apenas qty_accepted > 0), gera NF de
-    recebimento e, se houver itens recusados, NF de devolução; por fim, move
-    a ordem para CONCLUIDA.
+    Para ordens de produto: registra entradas no estoque (apenas qty_accepted
+    > 0) e gera NF de recebimento/devolução. Para ordens de serviço: apenas
+    move a ordem para CONCLUIDA. Em ambos os casos, transiciona o status.
     """
     from app.modules.faturamento import service as fat_service
 
@@ -336,6 +441,9 @@ def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
             status_code=400,
             detail="Ordem não está aguardando pagamento",
         )
+
+    if (order.order_type or "produto") == "servico":
+        return compras_repo.complete_order(db, order_id)
 
     items_by_id = {item.id: item for item in order.items}
     has_accepted = False
