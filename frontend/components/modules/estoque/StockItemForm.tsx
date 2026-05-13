@@ -35,6 +35,7 @@ const schema = z.object({
   }),
   minimum_stock: z.number().min(0, "Mínimo deve ser >= 0"),
   unit_cost: z.number().min(0, "Custo deve ser >= 0"),
+  hourly_cost: z.number().min(0).optional(),
   description: z.string().optional(),
 })
 
@@ -92,10 +93,11 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
         unit: item.unit,
         minimum_stock: item.minimum_stock,
         unit_cost: item.unit_cost,
+        hourly_cost: item.hourly_cost ?? undefined,
         description: item.description ?? "",
       })
     } else if (open && !item) {
-      reset({ sku: "", name: "", minimum_stock: 0, unit_cost: 0, description: "" })
+      reset({ sku: "", name: "", minimum_stock: 0, unit_cost: 0, hourly_cost: undefined, description: "" })
     }
   }, [open, item, reset])
 
@@ -109,6 +111,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
           unit: data.unit as StockUnit,
           minimum_stock: data.minimum_stock,
           unit_cost: data.unit_cost,
+          hourly_cost: data.hourly_cost,
           description: data.description,
         })
         toast.success("Item atualizado com sucesso")
@@ -120,6 +123,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
           unit: data.unit as StockUnit,
           minimum_stock: data.minimum_stock,
           unit_cost: data.unit_cost,
+          hourly_cost: data.hourly_cost,
           description: data.description || undefined,
         })
         toast.success("Item criado com sucesso")
@@ -234,6 +238,22 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
               )}
             </div>
           </div>
+
+          {(categoryValue === "equipamento" || categoryValue === "veiculo") && (
+            <div className="space-y-1">
+              <Label htmlFor="hourly_cost">Custo por Hora (R$) — opcional</Label>
+              <Input
+                id="hourly_cost"
+                type="number"
+                step="0.01"
+                placeholder="Ex: 35.00"
+                {...register("hourly_cost", { valueAsNumber: true })}
+              />
+              {errors.hourly_cost && (
+                <p className="text-xs text-red-500">{errors.hourly_cost.message}</p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-1">
             <Label htmlFor="description">Descrição (opcional)</Label>

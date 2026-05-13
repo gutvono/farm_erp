@@ -58,6 +58,8 @@ interface RawPayable {
   supplier_id: string | null
   purchase_order_id: string | null
   notes: string | null
+  installment_number: number | null
+  installment_total: number | null
   created_at: string
   updated_at: string
 }
@@ -74,6 +76,8 @@ function parsePayable(raw: RawPayable): AccountsPayable {
     supplier_id: raw.supplier_id,
     purchase_order_id: raw.purchase_order_id,
     notes: raw.notes,
+    installment_number: raw.installment_number,
+    installment_total: raw.installment_total,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -92,6 +96,8 @@ interface RawReceivable {
   sale_id: string | null
   invoice_id: string | null
   notes: string | null
+  installment_number: number | null
+  installment_total: number | null
   created_at: string
   updated_at: string
 }
@@ -110,6 +116,8 @@ function parseReceivable(raw: RawReceivable): AccountsReceivable {
     sale_id: raw.sale_id,
     invoice_id: raw.invoice_id,
     notes: raw.notes,
+    installment_number: raw.installment_number,
+    installment_total: raw.installment_total,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
