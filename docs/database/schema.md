@@ -185,7 +185,8 @@ Itens de estoque (café, insumos, veículos, equipamentos).
 | `category` | ENUM `stock_category` | `cafe` \| `insumo` \| `veiculo` \| `equipamento` \| `outro` |
 | `unit` | ENUM `stock_unit` | `saca` \| `litro` \| `kg` \| `unidade` |
 | `minimum_stock` | `NUMERIC(12,3)` | Gatilho de alerta |
-| `unit_cost` | `NUMERIC(12,2)` | Custo médio |
+| `unit_cost` | `NUMERIC(12,2)` | Custo médio por unidade |
+| `hourly_cost` | `NUMERIC(10,2)` NULL | Custo por hora (para itens como mão de obra e máquinas) |
 | `quantity_on_hand` | `NUMERIC(12,3)` | Saldo atual (denormalizado; ledger é `stock_movements`) |
 
 #### `stock_movements`
@@ -297,21 +298,52 @@ Talhões da fazenda.
 | `capacity_sacas` | `NUMERIC(12,3)` | Capacidade em sacas de 60kg |
 
 #### `production_orders`
-Execuções de safra. Distribui o total em três qualidades.
+Execuções de safra. Suporta colheitas parciais com acompanhamento de progresso.
+
+Status (`production_order_status`): `planejada → em_producao → em_execucao | pausada → concluida | cancelada`
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `plot_id` | FK `plots.id` | Talhão |
-| `executed_at` | `TIMESTAMPTZ` | Data da produção |
+| `order_number` | `VARCHAR(20)` UNIQUE NULL | Número sequencial da ordem |
+| `start_date` | `DATE` NULL | Data de início |
+| `expected_end_date` | `DATE` NULL | Previsão de conclusão |
+| `responsible_employee_id` | FK `employees.id` NULL | Responsável pela colheita |
+| `executed_at` | `TIMESTAMPTZ` | Data da produção (preenchida ao concluir) |
 | `total_sacas` | `NUMERIC(12,3)` | Total produzido |
 | `especial_sacas`, `superior_sacas`, `tradicional_sacas` | `NUMERIC(12,3)` | Por qualidade |
-| `total_cost` | `NUMERIC(12,2)` | Custo dos insumos |
+| `estimated_cost` | `NUMERIC(12,2)` default 0 | Custo estimado dos insumos |
+| `realized_cost` | `NUMERIC(12,2)` default 0 | Custo realizado |
+| `total_cost` | `NUMERIC(12,2)` | Custo total dos insumos consumidos |
+| `harvest_progress` | `NUMERIC(5,2)` default 0 | Percentual colhido (0–100) |
+
+#### `production_harvests`
+Registra cada colheita parcial de uma ordem. Append-only — sem soft delete.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `production_order_id` | FK `production_orders.id` CASCADE | Ordem pai |
+| `harvest_number` | `INTEGER` | Sequencial da colheita (1, 2, 3…) |
+| `percentage_harvested` | `NUMERIC(5,2)` | % colhida nesta rodada |
+| `sacks_total` | `NUMERIC(8,2)` default 0 | Total de sacas desta colheita |
+| `sacks_especial`, `sacks_superior`, `sacks_tradicional` | `NUMERIC(8,2)` | Por qualidade |
+| `inputs_consumed` | `JSON` NULL | Snapshot dos insumos consumidos |
+| `is_final` | `BOOLEAN` default false | `true` quando atinge 100% |
+| `harvested_at` | `TIMESTAMPTZ` default now() | Data/hora da colheita |
 
 #### `production_inputs`
 Insumos consumidos na produção (CASCADE).
 
 #### `plot_activities`
 Atividades em talhões (plantio, adubação, poda, colheita etc.).
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `hours_spent` | `NUMERIC(6,2)` NULL | Horas trabalhadas na atividade |
+| `employee_id` | FK `employees.id` NULL | Funcionário responsável |
+| `quantity_applied` | `NUMERIC(10,3)` NULL | Quantidade de insumo aplicado |
+| `quantity_unit` | `VARCHAR(20)` NULL | Unidade da quantidade aplicada |
+| `result` | `VARCHAR(20)` NULL | Resultado: `concluida`, `parcial`, `reagendada` |
 
 ---
 
@@ -338,8 +370,9 @@ stock_items ──── stock_movements (ledger)
 
 employees ──── payroll_entries ──── payroll_periods
 
-plots ──┬──── production_orders ──── production_inputs ──▶ stock_items
-        └──── plot_activities
+plots ──┬──── production_orders ──┬── production_inputs ──▶ stock_items
+        │                        └── production_harvests
+        └──── plot_activities ──▶ employees (opcional)
 
 financial_movements (ledger, referencia opcional por source_module + reference_id)
 ```

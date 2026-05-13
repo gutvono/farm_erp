@@ -36,6 +36,7 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     minimum_stock = Column(Numeric(12, 3), nullable=False, default=0)
     unit_cost = Column(Numeric(12, 2), nullable=False, default=0)
     quantity_on_hand = Column(Numeric(12, 3), nullable=False, default=0)
+    hourly_cost = Column(Numeric(10, 2), nullable=True)
     description = Column(Text, nullable=True)
 
     movements = relationship("StockMovement", back_populates="stock_item")

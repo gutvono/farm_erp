@@ -16,6 +16,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { AtividadeForm } from "@/components/modules/pcp/AtividadeForm"
 import { OrdemProducaoCard } from "@/components/modules/pcp/OrdemProducaoCard"
 import { OrdemProducaoForm } from "@/components/modules/pcp/OrdemProducaoForm"
+import { RelatoriosPCP } from "@/components/modules/pcp/RelatoriosPCP"
 import { TalhaoCard } from "@/components/modules/pcp/TalhaoCard"
 import { TalhaoForm } from "@/components/modules/pcp/TalhaoForm"
 import { getAtividades, getOrdens, getTalhoes } from "@/services/pcp"
@@ -36,6 +37,7 @@ const ORDEM_STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "all", label: "Todos os status" },
   { value: "planejada", label: "Planejada" },
   { value: "em_producao", label: "Em Produção" },
+  { value: "em_execucao", label: "Em Execução" },
   { value: "concluida", label: "Concluída" },
   { value: "cancelada", label: "Cancelada" },
 ]
@@ -131,6 +133,7 @@ export default function PCPPage() {
             <TabsTrigger value="ordens">Ordens de Produção</TabsTrigger>
             <TabsTrigger value="talhoes">Talhões</TabsTrigger>
             <TabsTrigger value="atividades">Atividades</TabsTrigger>
+            <TabsTrigger value="relatorios">Relatórios</TabsTrigger>
           </TabsList>
 
           {/* ── Aba Ordens de Produção ── */}
@@ -262,6 +265,10 @@ export default function PCPPage() {
                 ))}
               </div>
             )}
+          </TabsContent>
+          {/* ── Aba Relatórios ── */}
+          <TabsContent value="relatorios">
+            <RelatoriosPCP />
           </TabsContent>
         </Tabs>
       </div>

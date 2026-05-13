@@ -1,6 +1,6 @@
-from sqlalchemy import Column, Date, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
 from sqlalchemy import Enum as SAEnum
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import relationship
 
 from app.core.database import Base
@@ -52,11 +52,29 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         default=ProductionOrderStatus.PLANEJADA,
         index=True,
     )
+    order_number = Column(String(20), unique=True, nullable=True, index=True)
+    start_date = Column(Date, nullable=True)
+    expected_end_date = Column(Date, nullable=True)
+    responsible_employee_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    estimated_cost = Column(Numeric(12, 2), nullable=False, default=0)
+    realized_cost = Column(Numeric(12, 2), nullable=False, default=0)
+    harvest_progress = Column(Numeric(5, 2), nullable=False, default=0)
     notes = Column(Text, nullable=True)
 
     plot = relationship("Plot", back_populates="production_orders")
+    responsible_employee = relationship("Employee", foreign_keys=[responsible_employee_id])
     inputs = relationship(
         "ProductionInput",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
+    harvests = relationship(
+        "ProductionHarvest",
         back_populates="production_order",
         cascade="all, delete-orphan",
     )
@@ -110,5 +128,42 @@ class PlotActivity(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     )
     cost = Column(Numeric(12, 2), nullable=False, default=0)
     details = Column(Text, nullable=True)
+    hours_spent = Column(Numeric(6, 2), nullable=True)
+    employee_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("employees.id", ondelete="SET NULL"),
+        nullable=True,
+        index=True,
+    )
+    quantity_applied = Column(Numeric(10, 3), nullable=True)
+    quantity_unit = Column(String(20), nullable=True)
+    result = Column(String(20), nullable=True)
 
     plot = relationship("Plot", back_populates="activities")
+    employee = relationship("Employee", foreign_keys=[employee_id])
+
+
+class ProductionHarvest(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_harvests"
+
+    production_order_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("production_orders.id", ondelete="CASCADE"),
+        nullable=False,
+        index=True,
+    )
+    harvest_number = Column(Integer, nullable=False)
+    percentage_harvested = Column(Numeric(5, 2), nullable=False)
+    sacks_total = Column(Numeric(8, 2), nullable=False, default=0)
+    sacks_especial = Column(Numeric(8, 2), nullable=False, default=0)
+    sacks_superior = Column(Numeric(8, 2), nullable=False, default=0)
+    sacks_tradicional = Column(Numeric(8, 2), nullable=False, default=0)
+    inputs_consumed = Column(JSON, nullable=True)
+    is_final = Column(Boolean, nullable=False, default=False)
+    harvested_at = Column(
+        DateTime(timezone=True),
+        nullable=False,
+        server_default=func.now(),
+    )
+
+    production_order = relationship("ProductionOrder", back_populates="harvests")

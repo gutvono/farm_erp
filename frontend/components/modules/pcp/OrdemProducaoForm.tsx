@@ -23,7 +23,8 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createOrdem } from "@/services/pcp"
-import { Plot, StockItem } from "@/types/index"
+import { getFuncionarios } from "@/services/folha"
+import { Employee, Plot, StockItem } from "@/types/index"
 
 const inputSchema = z.object({
   stock_item_id: z.string().min(1, "Selecione um insumo"),
@@ -32,7 +33,10 @@ const inputSchema = z.object({
 
 const schema = z.object({
   plot_id: z.string().min(1, "Selecione um talhão"),
-  planned_date: z.string().min(1, "Data planejada é obrigatória"),
+  planned_date: z.string().optional(),
+  start_date: z.string().optional(),
+  expected_end_date: z.string().optional(),
+  responsible_employee_id: z.string().optional(),
   notes: z.string().optional(),
   inputs: z.array(inputSchema).min(1, "Adicione pelo menos 1 insumo"),
 })
@@ -55,6 +59,7 @@ export function OrdemProducaoForm({
   onSuccess,
 }: OrdemProducaoFormProps) {
   const [loading, setLoading] = useState(false)
+  const [employees, setEmployees] = useState<Employee[]>([])
 
   const {
     register,
@@ -69,6 +74,9 @@ export function OrdemProducaoForm({
     defaultValues: {
       plot_id: "",
       planned_date: "",
+      start_date: "",
+      expected_end_date: "",
+      responsible_employee_id: "",
       notes: "",
       inputs: [{ stock_item_id: "", quantity: 0 }],
     },
@@ -76,6 +84,7 @@ export function OrdemProducaoForm({
 
   const { fields, append, remove } = useFieldArray({ control, name: "inputs" })
   const plotId = watch("plot_id")
+  const responsibleId = watch("responsible_employee_id")
   const watchedInputs = watch("inputs")
 
   useEffect(() => {
@@ -83,9 +92,13 @@ export function OrdemProducaoForm({
       reset({
         plot_id: "",
         planned_date: "",
+        start_date: "",
+        expected_end_date: "",
+        responsible_employee_id: "",
         notes: "",
         inputs: [{ stock_item_id: "", quantity: 0 }],
       })
+      getFuncionarios({ is_active: true }).then(setEmployees).catch(() => {})
     }
   }, [open, reset])
 
@@ -94,7 +107,10 @@ export function OrdemProducaoForm({
     try {
       await createOrdem({
         plot_id: data.plot_id,
-        planned_date: data.planned_date,
+        planned_date: data.planned_date || undefined,
+        start_date: data.start_date || undefined,
+        expected_end_date: data.expected_end_date || undefined,
+        responsible_employee_id: data.responsible_employee_id || undefined,
         notes: data.notes || undefined,
         inputs: data.inputs.map((inp) => ({
           stock_item_id: inp.stock_item_id,
@@ -119,35 +135,64 @@ export function OrdemProducaoForm({
         </DialogHeader>
 
         <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          <div className="grid grid-cols-3 gap-4">
-            <div className="col-span-2 space-y-1">
-              <Label>Talhão *</Label>
-              <Select value={plotId} onValueChange={(v) => setValue("plot_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione o talhão" />
-                </SelectTrigger>
-                <SelectContent>
-                  {plots.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name} — {p.capacity_sacas} sacas
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.plot_id && (
-                <p className="text-xs text-red-500">{errors.plot_id.message}</p>
-              )}
-            </div>
+          {/* Talhão */}
+          <div className="space-y-1">
+            <Label>Talhão *</Label>
+            <Select value={plotId} onValueChange={(v) => setValue("plot_id", v)}>
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o talhão" />
+              </SelectTrigger>
+              <SelectContent>
+                {plots.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>
+                    {p.name} — {p.capacity_sacas} sacas
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            {errors.plot_id && (
+              <p className="text-xs text-red-500">{errors.plot_id.message}</p>
+            )}
+          </div>
 
+          {/* Datas */}
+          <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1">
-              <Label htmlFor="planned_date">Data Planejada *</Label>
+              <Label htmlFor="planned_date">Data Planejada</Label>
               <Input id="planned_date" type="date" {...register("planned_date")} />
-              {errors.planned_date && (
-                <p className="text-xs text-red-500">{errors.planned_date.message}</p>
-              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="start_date">Data de Início</Label>
+              <Input id="start_date" type="date" {...register("start_date")} />
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="expected_end_date">Término Previsto</Label>
+              <Input id="expected_end_date" type="date" {...register("expected_end_date")} />
             </div>
           </div>
 
+          {/* Responsável */}
+          <div className="space-y-1">
+            <Label>Responsável (opcional)</Label>
+            <Select
+              value={responsibleId ?? ""}
+              onValueChange={(v) => setValue("responsible_employee_id", v === "_none" ? "" : v)}
+            >
+              <SelectTrigger>
+                <SelectValue placeholder="Selecione o funcionário" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="_none">Nenhum</SelectItem>
+                {employees.map((e) => (
+                  <SelectItem key={e.id} value={e.id}>
+                    {e.name} — {e.role}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Observações */}
           <div className="space-y-1">
             <Label htmlFor="notes">Observações</Label>
             <Input id="notes" {...register("notes")} placeholder="Observações sobre a safra..." />

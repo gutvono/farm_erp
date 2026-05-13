@@ -25,6 +25,7 @@ interface RawStockItem {
   quantity_on_hand: string | number
   minimum_stock: string | number
   unit_cost: string | number
+  hourly_cost: string | number | null
   description: string | null
   is_below_minimum: boolean
   created_at: string
@@ -41,6 +42,7 @@ function parseStockItem(raw: RawStockItem): StockItem {
     quantity_on_hand: toNumber(raw.quantity_on_hand),
     minimum_stock: toNumber(raw.minimum_stock),
     unit_cost: toNumber(raw.unit_cost),
+    hourly_cost: raw.hourly_cost != null ? toNumber(raw.hourly_cost) : null,
     description: raw.description,
     is_below_minimum: raw.is_below_minimum,
     created_at: raw.created_at,
@@ -134,6 +136,7 @@ export async function createItem(data: {
   unit: StockUnit
   minimum_stock: number
   unit_cost: number
+  hourly_cost?: number
   description?: string
 }): Promise<StockItem> {
   const response = await apiFetch<ApiResponse<RawStockItem>>("/api/estoque/itens", {
@@ -151,6 +154,7 @@ export async function updateItem(
     unit: StockUnit
     minimum_stock: number
     unit_cost: number
+    hourly_cost: number
     description: string
   }>
 ): Promise<StockItem> {

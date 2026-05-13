@@ -151,6 +151,7 @@ export interface StockItem {
   quantity_on_hand: number
   minimum_stock: number
   unit_cost: number
+  hourly_cost: number | null
   description: string | null
   is_below_minimum: boolean
   created_at: string
@@ -353,6 +354,7 @@ export interface Plot {
 
 export type ActivityType = "plantio" | "adubacao" | "poda" | "colheita" | "irrigacao" | "outra"
 export type LaborType = "interna" | "externa"
+export type ActivityResult = "concluida" | "parcial" | "reagendada"
 
 export interface PlotActivity {
   id: string
@@ -363,6 +365,12 @@ export interface PlotActivity {
   labor_type: LaborType
   cost: number
   details: string | null
+  hours_spent: number | null
+  employee_id: string | null
+  employee_name: string | null
+  quantity_applied: number | null
+  quantity_unit: string | null
+  result: ActivityResult | null
   created_at: string
   updated_at: string
 }
@@ -377,35 +385,115 @@ export interface ProductionInput {
   subtotal: number
 }
 
-export type ProductionOrderStatus = "planejada" | "em_producao" | "concluida" | "cancelada"
+export type ProductionOrderStatus =
+  | "planejada"
+  | "em_producao"
+  | "em_execucao"
+  | "pausada"
+  | "concluida"
+  | "cancelada"
+
+export interface HarvestInputConsumed {
+  stock_item_id: string
+  name: string
+  quantity: number
+  unit: string
+}
+
+export interface ProductionHarvest {
+  id: string
+  production_order_id: string
+  harvest_number: number
+  percentage_harvested: number
+  sacks_total: number
+  sacks_especial: number
+  sacks_superior: number
+  sacks_tradicional: number
+  inputs_consumed: HarvestInputConsumed[]
+  is_final: boolean
+  harvested_at: string
+}
 
 export interface ProductionOrder {
   id: string
   plot_id: string
   plot_name: string
+  order_number: string
   status: ProductionOrderStatus
   planned_date: string | null
+  start_date: string | null
+  expected_end_date: string | null
   executed_at: string | null
+  responsible_employee_id: string | null
+  responsible_employee_name: string | null
   total_sacas: number
   especial_sacas: number
   superior_sacas: number
   tradicional_sacas: number
   total_cost: number
+  estimated_cost: number
+  realized_cost: number
+  harvest_progress: number
+  is_overdue: boolean
   notes: string | null
   inputs: ProductionInput[]
+  harvests: ProductionHarvest[]
   created_at: string
   updated_at: string
 }
 
 export interface ProductionResult {
   order_id: string
+  harvest: ProductionHarvest
+  order: ProductionOrder
+  items_below_minimum: string[]
+}
+
+// ── PCP Reports ───────────────────────────────────────────────────────────────
+
+export interface ProducaoPorTalhaoItem {
+  plot_id: string
+  plot_name: string
   total_sacas: number
   especial_sacas: number
   superior_sacas: number
   tradicional_sacas: number
-  inputs_consumed: ProductionInput[]
-  items_below_minimum: string[]
-  executed_at: string
+  total_orders: number
+}
+
+export interface ConsumoInsumoItem {
+  stock_item_id: string
+  stock_item_name: string
+  total_quantity: number
+  total_subtotal: number
+  unit: string
+}
+
+export interface OrdensResumo {
+  planejada: number
+  em_producao: number
+  em_execucao: number
+  pausada: number
+  concluida: number
+  cancelada: number
+  atrasadas: number
+}
+
+export interface CustoPrevistoVsRealizadoItem {
+  order_id: string
+  order_number: string
+  plot_name: string
+  status: ProductionOrderStatus
+  estimated_cost: number
+  realized_cost: number
+  diferenca: number
+}
+
+export interface PCPReport {
+  producao_por_talhao: ProducaoPorTalhaoItem[]
+  consumo_insumos: ConsumoInsumoItem[]
+  ordens_resumo: OrdensResumo
+  custo_previsto_vs_realizado: CustoPrevistoVsRealizadoItem[]
 }
 
 // ── FOLHA DE PAGAMENTO ────────────────────────────────────────────────────────

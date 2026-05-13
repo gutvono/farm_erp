@@ -36,10 +36,17 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/api/pcp/ordens` | Lista ordens (filtro: `status`) |
-| `POST` | `/api/pcp/ordens` | Cria ordem planejada com insumos |
-| `GET` | `/api/pcp/ordens/{id}` | Detalhe com inputs |
-| `POST` | `/api/pcp/ordens/{id}/produzir` | Executa safra (consome insumos, produz café, retorna `ProductionResult`) |
+| `POST` | `/api/pcp/ordens` | Cria ordem planejada com insumos e responsável; gera `order_number` e calcula `estimated_cost` |
+| `GET` | `/api/pcp/ordens/{id}` | Detalhe com inputs e histórico de colheitas |
+| `POST` | `/api/pcp/ordens/{id}/colher` | Registra colheita parcial (`percentage_harvested` no body) |
+| `POST` | `/api/pcp/ordens/{id}/produzir` | Alias: colhe o percentual restante (mantido para compatibilidade) |
 | `DELETE` | `/api/pcp/ordens/{id}` | Soft delete (apenas `planejada`) |
+
+### Relatórios
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/pcp/relatorios` | Relatório consolidado (produção por talhão, consumo de insumos, resumo de status, custo previsto vs realizado) |
 
 ## Schemas
 
@@ -62,7 +69,12 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "activity_date": "2026-04-15",
   "labor_type": "interna | externa",
   "cost": 0.00,
-  "details": "opcional"
+  "details": "opcional",
+  "hours_spent": 4.5,
+  "employee_id": "uuid (opcional)",
+  "quantity_applied": 25.5,
+  "quantity_unit": "kg",
+  "result": "concluida | parcial | reagendada"
 }
 ```
 
@@ -71,6 +83,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 {
   "plot_id": "uuid",
   "planned_date": "2026-05-20",
+  "start_date": "2026-05-12",
+  "expected_end_date": "2026-05-25",
+  "responsible_employee_id": "uuid (opcional)",
   "notes": "opcional",
   "inputs": [
     { "stock_item_id": "uuid", "quantity": 300.000 },
@@ -80,8 +95,39 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```
 
 - Status inicial: `planejada`
+- `order_number` gerado automaticamente no padrão `OP-{ANO}-{SEQ:03d}` (ex: `OP-2026-001`)
 - `unit_cost` e `subtotal` dos inputs são resolvidos a partir do `StockItem.unit_cost` no momento da criação
 - `total_cost` = soma dos subtotais dos inputs
+- `estimated_cost` = `total_cost` (insumos) + custo de mão de obra estimado:
+  - se houver `responsible_employee_id`, `start_date` e `expected_end_date`:
+    `(employee.base_salary / 22) × (expected_end_date - start_date)` dias
+
+### HarvestCreate
+```json
+{
+  "percentage_harvested": 50.0
+}
+```
+- `0 < percentage_harvested <= (100 - harvest_progress atual)`
+
+### HarvestOut
+```json
+{
+  "id": "uuid",
+  "production_order_id": "uuid",
+  "harvest_number": 1,
+  "percentage_harvested": 50.00,
+  "sacks_total": 49.37,
+  "sacks_especial": 9.42,
+  "sacks_superior": 27.05,
+  "sacks_tradicional": 12.90,
+  "inputs_consumed": [
+    { "stock_item_id": "uuid", "name": "Adubo Orgânico", "quantity": 5.0, "unit": "kg" }
+  ],
+  "is_final": false,
+  "harvested_at": "2026-05-13T02:46:41Z"
+}
+```
 
 ### ProductionOrderOut
 ```json
@@ -89,144 +135,148 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "id": "uuid",
   "plot_id": "uuid",
   "plot_name": "Talhão A - Bourbon Amarelo",
+  "order_number": "OP-2026-001",
   "planned_date": "2026-05-20",
+  "start_date": "2026-05-12",
+  "expected_end_date": "2026-05-25",
+  "responsible_employee_id": "uuid",
+  "responsible_employee_name": "Ana Pereira",
   "executed_at": null,
   "total_sacas": 0.000,
   "especial_sacas": 0.000,
   "superior_sacas": 0.000,
   "tradicional_sacas": 0.000,
   "total_cost": 8500.00,
+  "estimated_cost": 9500.00,
+  "realized_cost": 0.00,
+  "harvest_progress": 0.00,
   "status": "planejada",
+  "is_overdue": false,
   "notes": null,
-  "inputs": [
-    {
-      "id": "uuid",
-      "stock_item_id": "uuid",
-      "stock_item_name": "Fertilizante NPK 20-05-20",
-      "unit": "kg",
-      "quantity": 300.000,
-      "unit_cost": 12.00,
-      "subtotal": 3600.00
-    }
-  ],
+  "inputs": [ ... ],
+  "harvests": [ ... ],
   "created_at": "...",
   "updated_at": "..."
 }
 ```
 
+- `is_overdue` = `expected_end_date < hoje` e status não em `concluida | cancelada`
+
 ### ProductionResult
+Retorno do endpoint `/colher` (e `/produzir`):
 ```json
 {
   "order_id": "uuid",
-  "total_sacas": 104.123,
-  "especial_sacas": 21.456,
-  "superior_sacas": 52.321,
-  "tradicional_sacas": 30.346,
-  "inputs_consumed": [ ... ],
-  "items_below_minimum": ["Fungicida de contato"],
-  "executed_at": "2026-04-16T10:00:00Z"
+  "harvest": { ...HarvestOut },
+  "order": { ...ProductionOrderOut atualizada },
+  "items_below_minimum": ["Fungicida de contato"]
 }
 ```
 
-## Algoritmo de Simulação de Safra (`produzir_safra`)
+## Colheitas Parciais (`registrar_colheita`)
 
-O método central do módulo. Executa instantaneamente as seguintes etapas, na ordem:
+O método central do módulo. Cada chamada registra uma colheita parcial; a ordem
+é fechada automaticamente quando o `harvest_progress` acumulado atinge 100%.
 
-### 1. Validação de status
-- A ordem deve estar em `planejada` ou `em_producao`.
-- Se já estiver `concluida` ou `cancelada` → `HTTPException 400 "Ordem já finalizada"`.
+### 1. Validações
+- Ordem existe e não está em `concluida`/`cancelada` (HTTP 400 se estiver).
+- `percentage_harvested > 0` (HTTP 400).
+- `harvest_progress + percentage_harvested <= 100` (HTTP 400 com o restante disponível).
 
-### 2. Validação de disponibilidade
-Para cada `ProductionInput`:
-```python
-estoque_service.verificar_disponibilidade(db, stock_item_id, quantity)
-```
-Se qualquer insumo não tiver estoque suficiente →
-`HTTPException 400 "Estoque insuficiente para: {name}. Disponível: {quantity_on_hand} {unit}"`.
+### 2. Consumo proporcional dos insumos
+Para cada `ProductionInput`, calcula `qty_proporcional = input.quantity × (percentage / 100)`
+(3 casas decimais) e verifica disponibilidade. Se algum insumo falhar:
+`HTTPException 400 "Estoque insuficiente para: {name}. Disponível: ..."`.
 
-### 3. Consumo dos insumos
-Para cada input, chama `estoque_service.registrar_saida` com `source_module="pcp"`. Isso:
-- Cria movimentação no Estoque
-- Gera `saida/ajuste` no Financeiro (R$0,00) automaticamente via cadeia Estoque→Financeiro
-- Dispara notificação de estoque baixo se `quantity_on_hand < minimum_stock`
+Em seguida, registra a saída via `estoque_service.registrar_saida` com
+`source_module="pcp"`, gerando movimento agregado de consumo no Financeiro
+(`amount=0`).
 
-Ao final do consumo, registra um movimento agregado:
-```python
-fin_service.registrar_movimento(
-    movement_type=SAIDA,
-    category=PRODUCAO,
-    amount=0,
-    description=f"Consumo de insumos — Safra #{order_id}",
-    source_module="pcp",
-    reference_id=order_id,
-)
-```
+### 3. Simulação parcial
+- `base = plot.capacity_sacas × (percentage_harvested / 100)`
+- `total = base × random.uniform(0.90, 1.10)` (±10%)
+- Distribuição entre qualidades: especial 15–25%, superior 45–55%, tradicional restante.
 
-### 4. Simulação de resultado
-- **Base:** `plot.capacity_sacas`
-- **Variação total:** `random.uniform(0.90, 1.10)` → total = base × variação
-- **Distribuição entre qualidades:**
-  - Especial: 15%–25% aleatório
-  - Superior: 45%–55% aleatório
-  - Tradicional: restante (`total - especial - superior`)
-- Todos os valores arredondados para 3 casas decimais
-- Garante que `especial + superior + tradicional = total`
+### 4. Entrada no estoque (por qualidade)
+Identifica items na categoria `cafe` cujo nome contenha a palavra-chave
+(`especial`, `superior`, `tradicional`) e registra entrada com `unit_cost=0`.
+Em seguida, registra movimento agregado de entrada no Financeiro.
 
-Exemplo para talhão com capacity_sacas=100:
-- Total aleatório: 103.456 sacas
-- Especial: ~20.691 (≈20%)
-- Superior: ~52.243 (≈50%)
-- Tradicional: 30.522 (resto)
+### 5. Snapshot e persistência
+Persiste um `ProductionHarvest` com:
+- `harvest_number` sequencial (contador atual + 1).
+- `inputs_consumed` (snapshot serializado: stock_item_id, name, quantity, unit).
+- `is_final = True` se a colheita atual fecha 100%.
 
-### 5. Entrada no estoque (por qualidade)
-Para cada qualidade (`especial`, `superior`, `tradicional`), busca em `stock_items` onde `category='cafe'` um item cujo nome contenha a palavra (case-insensitive). Se encontrado, registra entrada:
+### 6. Atualiza ordem
+- `harvest_progress += percentage_harvested`.
+- `total_sacas`, `especial_sacas`, `superior_sacas`, `tradicional_sacas` acumulam
+  os totais desta colheita.
+- Transição automática de status:
+  - `planejada → em_execucao` na primeira colheita parcial.
+  - `→ concluida` quando `harvest_progress >= 100`.
+- `executed_at` é preenchido no fechamento.
 
-```python
-estoque_service.registrar_entrada(
-    stock_item_id=cafe_item.id,
-    quantity=quantity_produzida,
-    unit_cost=0,
-    description=f"Produção de safra #{order_id} — {cafe_item.name}",
-    source_module="pcp",
-    reference_id=order_id,
-)
-```
+### 7. Cálculo de `realized_cost` (apenas no fechamento)
+Quando `is_final=True`:
+- Custo de insumos: `SUM(input.quantity × stock_item.unit_cost)` — usa o `unit_cost`
+  corrente, que pode ter sido recalculado por média ponderada após compras intermediárias.
+- Custo de mão de obra: se houver `responsible_employee_id` e `start_date`,
+  `(employee.base_salary / 22) × (executed_at.date() - start_date).days` (mín. 1 dia).
+- `realized_cost = insumos + mão de obra` (R$ 0,01 de precisão).
+- Lança movimento financeiro `SAIDA / PRODUCAO` com `amount=realized_cost`.
 
-Em seguida, registra movimento agregado:
-```python
-fin_service.registrar_movimento(
-    movement_type=ENTRADA,
-    category=PRODUCAO,
-    amount=0,
-    description=f"Café produzido — Safra #{order_id}: {total} sacas",
-    source_module="pcp",
-    reference_id=order_id,
-)
-```
+### 8. Notificação de estoque baixo
+Após o consumo, percorre os insumos da ordem e devolve em `items_below_minimum`
+os nomes daqueles que ficaram abaixo de `minimum_stock`.
 
-### 6. Atualização da ordem
-- `status = concluida`
-- `executed_at = datetime.utcnow()`
-- `total_sacas`, `especial_sacas`, `superior_sacas`, `tradicional_sacas` atualizados
-- **Reload obrigatório** via `repository.get_order()` — múltiplos commits sequenciais expiram o `__dict__` dos objetos em memória.
-
-### 7. Retorno
+### 9. Retorno
 `ProductionResult` contendo:
-- `order_id`, `total_sacas`, `especial_sacas`, `superior_sacas`, `tradicional_sacas`
-- `inputs_consumed`: lista detalhada dos insumos consumidos
-- `items_below_minimum`: nomes dos insumos que ficaram abaixo do mínimo após o consumo
-- `executed_at`
+- `order_id`
+- `harvest`: registro recém-criado
+- `order`: ordem atualizada
+- `items_below_minimum`
+
+## Alias `produzir_safra`
+
+Mantido para compatibilidade com clientes existentes. Equivale a
+`registrar_colheita(db, order_id, 100 - harvest_progress)` — colhe todo o
+percentual restante numa única chamada. Retorna o mesmo `ProductionResult`.
 
 ## Registro de Atividades (`add_activity`)
 
 1. Valida que o talhão existe
-2. Cria registro em `plot_activities`
-3. Registra movimentação financeira:
+2. Valida `employee_id` (se informado, deve existir)
+3. Cria registro em `plot_activities` com todos os novos campos:
+   `hours_spent`, `employee_id`, `quantity_applied`, `quantity_unit`, `result`
+4. Registra movimentação financeira:
    - `movement_type=SAIDA`
    - `category=PRODUCAO`
    - `amount=activity.cost` (R$0,00 se mão de obra interna)
    - `description=f"Atividade no talhão {plot.name}: {activity_type}"`
    - `source_module="pcp"`, `reference_id=plot.id`
+
+## Relatórios (`gerar_relatorios`)
+
+Endpoint `GET /api/pcp/relatorios` consolida quatro visões a partir das ordens
+não-deletadas:
+
+### `producao_por_talhao`
+Agrupa ordens com status `concluida` por talhão, somando sacas por qualidade e
+contando ordens.
+
+### `consumo_insumos`
+Agrupa `production_inputs` de todas as ordens não-canceladas por `stock_item_id`,
+somando `quantity` e `subtotal`.
+
+### `ordens_resumo`
+Contagem por status (`planejada`, `em_producao`, `em_execucao`, `pausada`,
+`concluida`, `cancelada`) + `atrasadas` (ordens com `expected_end_date < hoje` e
+status não-final).
+
+### `custo_previsto_vs_realizado`
+Para cada ordem: `order_id`, `order_number`, `plot_name`, `status`,
+`estimated_cost`, `realized_cost`, `diferenca = realized - estimated`.
 
 ## Regras de Negócio
 
