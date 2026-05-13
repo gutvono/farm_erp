@@ -5,7 +5,7 @@ from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
-from app.shared.enums import SaleStatus, sa_enum_values
+from app.shared.enums import PaymentMethod, SaleStatus, sa_enum_values
 
 
 class Client(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -47,6 +47,11 @@ class Sale(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     installments = Column(Integer, nullable=False, default=1)
     first_due_date = Column(Date, nullable=True)
     installment_interval_days = Column(Integer, nullable=False, default=30)
+    payment_method = Column(
+        SAEnum(PaymentMethod, name="payment_method", values_callable=sa_enum_values),
+        nullable=True,
+        default=PaymentMethod.A_VISTA,
+    )
 
     client = relationship("Client", back_populates="sales")
     items = relationship("SaleItem", back_populates="sale", cascade="all, delete-orphan")

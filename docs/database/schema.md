@@ -115,6 +115,7 @@ Vendas realizadas. Segue fluxo `realizada → entregue → cancelada`.
 | `installments` | `INTEGER` default 1 | Número de parcelas |
 | `first_due_date` | `DATE` NULL | Vencimento da primeira parcela |
 | `installment_interval_days` | `INTEGER` default 30 | Intervalo entre parcelas (dias) |
+| `payment_method` | ENUM `payment_method` NULL | Forma de pagamento (`a_vista`, `parcelado`, `pix`, `boleto`) |
 
 #### `sale_items`
 Itens de uma venda.
@@ -149,6 +150,9 @@ Ordens de compra. Fluxo expandido:
 | `installments` | `INTEGER` default 1 | Número de parcelas |
 | `first_due_date` | `DATE` NULL | Vencimento da primeira parcela |
 | `installment_interval_days` | `INTEGER` default 30 | Intervalo entre parcelas (dias) |
+| `order_type` | `VARCHAR(10)` default `produto` | Tipo: `produto` \| `servico` |
+| `service_description` | `TEXT` NULL | Descrição do serviço (preenchida quando `order_type = servico`) |
+| `payment_method` | ENUM `payment_method` NULL | Forma de pagamento definida na aprovação financeira |
 
 **Novos valores do enum `purchase_order_status` (migration 0004):**
 - `aguardando_aprovacao_financeiro` — aguardando análise do setor financeiro
@@ -246,6 +250,7 @@ Contas a pagar. Status: `em_aberto → paga → cancelada`.
 |--------|------|-----------|
 | `installment_number` | `INTEGER` NULL | Número desta parcela |
 | `installment_total` | `INTEGER` NULL | Total de parcelas |
+| `payment_method` | ENUM `payment_method` NULL | Forma de pagamento utilizada |
 
 #### `accounts_receivable`
 Contas a receber. Status: `em_aberto → quitado | parcialmente_pago → cancelada`.
@@ -255,6 +260,7 @@ O cancelamento por inadimplência marca `clients.is_delinquent = TRUE`.
 |--------|------|-----------|
 | `installment_number` | `INTEGER` NULL | Número desta parcela |
 | `installment_total` | `INTEGER` NULL | Total de parcelas |
+| `payment_method` | ENUM `payment_method` NULL | Forma de pagamento utilizada |
 
 ---
 
@@ -392,6 +398,22 @@ operações `op.create_table()` explícitas. Motivos:
    versionado, `create_all` produz exatamente o mesmo DDL que Alembic geraria.
 3. **Migrations futuras usam autogenerate**: a partir daí, toda alteração deve
    vir de `alembic revision --autogenerate -m "..."` com diffs explícitos.
+
+### Enum `payment_method` (migration 1cd82e8905ef)
+
+Criado na migration `add_payment_method_and_service_orders`. Valores:
+
+| Valor | Descrição |
+|-------|-----------|
+| `a_vista` | Pagamento à vista |
+| `parcelado` | Parcelamento (vinculado ao campo `installments`) |
+| `pix` | Pix |
+| `boleto` | Boleto bancário |
+
+Usado em: `sales.payment_method`, `purchase_orders.payment_method`,
+`accounts_payable.payment_method`, `accounts_receivable.payment_method`.
+
+---
 
 ### Enum nativo do Postgres
 

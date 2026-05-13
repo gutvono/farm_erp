@@ -5,7 +5,7 @@ from sqlalchemy.orm import relationship
 
 from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
-from app.shared.enums import PurchaseOrderReceiptStatus, PurchaseOrderStatus, sa_enum_values
+from app.shared.enums import PaymentMethod, PurchaseOrderReceiptStatus, PurchaseOrderStatus, sa_enum_values
 
 
 class Supplier(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
@@ -52,6 +52,12 @@ class PurchaseOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     installments = Column(Integer, nullable=False, default=1)
     first_due_date = Column(Date, nullable=True)
     installment_interval_days = Column(Integer, nullable=False, default=30)
+    order_type = Column(String(10), nullable=False, default="produto")
+    service_description = Column(Text, nullable=True)
+    payment_method = Column(
+        SAEnum(PaymentMethod, name="payment_method", values_callable=sa_enum_values),
+        nullable=True,
+    )
 
     supplier = relationship("Supplier", back_populates="purchase_orders")
     items = relationship(

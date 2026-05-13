@@ -125,6 +125,13 @@ class CoffeeQuality(str, enum.Enum):
     TRADICIONAL = "tradicional"
 
 
+class PaymentMethod(str, enum.Enum):
+    A_VISTA = "a_vista"
+    PARCELADO = "parcelado"
+    PIX = "pix"
+    BOLETO = "boleto"
+
+
 def sa_enum_values(enum_cls):
     """Helper for SAEnum values_callable so DB stores the lowercase .value."""
     return [member.value for member in enum_cls]
