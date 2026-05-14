@@ -46,6 +46,8 @@ from app.modules.financeiro.model import (  # noqa: E402, F401
 from app.modules.folha.model import (  # noqa: E402, F401
     Employee,
     PayrollEntry,
+    PayrollEntryItem,
+    PayrollEvent,
     PayrollPeriod,
 )
 from app.modules.pcp.model import (  # noqa: E402, F401

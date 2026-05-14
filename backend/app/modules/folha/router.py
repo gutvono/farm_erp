@@ -12,7 +12,9 @@ from app.modules.auth.router import get_current_user
 from app.modules.folha import service as folha_service
 from app.modules.folha.schemas import (
     EmployeeUpdate,
+    PayrollAutoCalculationRequest,
     PayrollEntryUpdate,
+    PayrollManualItemUpsert,
     PayrollPeriodCreate,
 )
 from app.shared.enums import ContractType
@@ -216,6 +218,89 @@ def list_entries_by_period(
     entries = folha_service.list_entries_by_period(db, period_id)
     data = [folha_service.serialize_entry(db, e) for e in entries]
     return success("Holerites listados com sucesso", data)
+
+
+@router.get("/eventos", response_model=SuccessResponse)
+def list_events(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    events = folha_service.list_events(db)
+    data = [folha_service.serialize_event(event) for event in events]
+    return success("Eventos de folha listados com sucesso", data)
+
+
+@router.get("/entries/{entry_id}/itens", response_model=SuccessResponse)
+def list_entry_items(
+    entry_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    items = folha_service.list_entry_items(db, entry_id)
+    data = [folha_service.serialize_item(item) for item in items]
+    return success("Itens de folha listados com sucesso", data)
+
+
+@router.post("/entries/{entry_id}/itens", response_model=SuccessResponse)
+def upsert_entry_item(
+    entry_id: UUID,
+    body: PayrollManualItemUpsert,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    entry = folha_service.upsert_manual_item(db, entry_id, body)
+    return success(
+        "Item de folha salvo com sucesso",
+        folha_service.serialize_entry(db, entry),
+    )
+
+
+@router.post(
+    "/entries/{entry_id}/calculos/preview", response_model=SuccessResponse
+)
+def preview_calculation(
+    entry_id: UUID,
+    body: PayrollAutoCalculationRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    preview = folha_service.preview_calculation(db, entry_id, body)
+    return success(
+        "Calculo de folha simulado com sucesso",
+        folha_service.serialize_preview(preview),
+    )
+
+
+@router.post(
+    "/entries/{entry_id}/calculos/aplicar", response_model=SuccessResponse
+)
+def apply_calculation(
+    entry_id: UUID,
+    body: PayrollAutoCalculationRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    entry = folha_service.apply_calculation(db, entry_id, body)
+    return success(
+        "Calculo de folha aplicado com sucesso",
+        folha_service.serialize_entry(db, entry),
+    )
+
+
+@router.delete(
+    "/entries/{entry_id}/itens/{item_id}", response_model=SuccessResponse
+)
+def delete_entry_item(
+    entry_id: UUID,
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    entry = folha_service.delete_entry_item(db, entry_id, item_id)
+    return success(
+        "Item de folha removido com sucesso",
+        folha_service.serialize_entry(db, entry),
+    )
 
 
 @router.patch("/entries/{entry_id}", response_model=SuccessResponse)

@@ -45,6 +45,12 @@ O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, `
 | `GET` | `/api/folha/periodos/{period_id}/entries` | Lista holerites do período |
 | `PATCH` | `/api/folha/entries/{id}` | Atualiza `overtime_amount` e `deductions`; recalcula `total_amount` |
 | `POST` | `/api/folha/entries/{id}/pagar` | Paga o holerite individual (valida saldo) |
+| `GET` | `/api/folha/eventos` | Lista eventos de folha ativos |
+| `GET` | `/api/folha/entries/{id}/itens` | Lista itens detalhados do holerite |
+| `POST` | `/api/folha/entries/{id}/itens` | Lança/atualiza item manual |
+| `POST` | `/api/folha/entries/{id}/calculos/preview` | Simula cálculo automático sem gravar |
+| `POST` | `/api/folha/entries/{id}/calculos/aplicar` | Calcula e grava/atualiza item automático |
+| `DELETE` | `/api/folha/entries/{id}/itens/{item_id}` | Remove item do holerite |
 
 ## Schemas principais
 
@@ -93,6 +99,23 @@ photo_file?: image/jpeg|image/png
 { "overtime_amount": 500.00, "deductions": 200.00 }
 ```
 `total_amount` é recalculado automaticamente como `base_salary + overtime_amount − deductions` (nunca persiste o valor enviado pelo cliente).
+
+### PayrollAutoCalculationRequest
+```json
+{
+  "calculation_type": "inss | fgts | transport_voucher | overtime | night_shift",
+  "event_id": null,
+  "base_amount": null,
+  "quantity": 10,
+  "percentage": 50,
+  "start_time": "22:00",
+  "end_time": "05:00",
+  "rule": "urbana",
+  "real_transport_cost": 220.00
+}
+```
+
+`event_id` é opcional. Se omitido, o backend usa o evento padrão compatível com `calculation_type`.
 
 ### PayrollPeriodOut
 ```json
@@ -152,6 +175,11 @@ TERMINATION_COST = {
 ### Holerites
 - `PATCH /entries/{id}` só funciona em período `aberta` **e** entry `pendente`. Bloqueios retornam `400`.
 - `total_amount` (coluna `net_amount` no model) é sempre calculado no serviço/repo; nunca aceita valor do cliente.
+- Itens detalhados ficam em `payroll_entry_items` e sempre referenciam um evento em `payroll_events`.
+- `provento` com `affects_net=true` aumenta o líquido.
+- `desconto` com `affects_net=true` reduz o líquido.
+- `informativo` ou `affects_net=false` aparece no holerite, mas não altera o líquido. O FGTS usa esta regra.
+- Ao aplicar cálculos em um holerite legado, o serviço cria itens equivalentes para salário base, horas extras e descontos já agregados antes do recálculo.
 - `POST /entries/{id}/pagar`:
   - Valida que entry existe e está `pendente`.
   - Consulta saldo atual via `fin_service.get_balance(db)`.
@@ -230,6 +258,47 @@ Unique constraint `uq_payroll_period_competency (competency_year, competency_mon
 
 Unique constraint `uq_payroll_entry_period_employee (payroll_period_id, employee_id)`.
 
+### `payroll_events`
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `description` | VARCHAR(255) unique |
+| `event_type` | enum (`provento`/`desconto`/`informativo`) |
+| `calculation_type` | enum (`manual`/`overtime`/`night_shift`/`inss`/`fgts`/`transport_voucher`) |
+| `is_automatic` | BOOLEAN |
+| `affects_net` | BOOLEAN |
+| `is_active` | BOOLEAN |
+| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
+
+Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS, Vale transporte, FGTS e Descontos manuais.
+
+### `payroll_entry_items`
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `payroll_entry_id` | UUID FK → payroll_entries (CASCADE delete) |
+| `payroll_event_id` | UUID FK → payroll_events (RESTRICT delete) |
+| `amount` | NUMERIC(12,2), `CHECK amount >= 0` |
+| `calculation_base` | NUMERIC(12,2) nullable |
+| `quantity` | NUMERIC(12,4) nullable |
+| `percentage` | NUMERIC(7,2) nullable |
+| `metadata` | JSONB |
+| `source` | enum (`manual`/`automatic`) |
+| `created_at`, `updated_at` | TIMESTAMPTZ |
+
+Unique constraint `uq_payroll_entry_item_entry_event (payroll_entry_id, payroll_event_id)`.
+
+Com itens detalhados, o recálculo usa:
+
+```text
+net_amount = max(0, soma(proventos que afetam líquido) - soma(descontos que afetam líquido))
+```
+
+Campos legados seguem preenchidos:
+- `extras_value`: soma de Hora extra e Adicional noturno.
+- `deductions_value`: soma dos descontos que afetam líquido.
+- `net_amount`: líquido recalculado e usado pelos pagamentos.
+
 ## Migrations
 
 `0003_folha_extra_columns` (arquivo `alembic/versions/20260416_0003_folha_extra_columns.py`):
@@ -237,6 +306,13 @@ Unique constraint `uq_payroll_entry_period_employee (payroll_period_id, employee
 - Adiciona `payroll_periods.total_amount NUMERIC(12,2) NOT NULL DEFAULT 0`.
 
 Reversível via `downgrade()` (drop das duas colunas).
+
+`0006_payroll_events_items` (arquivo `alembic/versions/20260513_0006_payroll_events_items.py`):
+- Cria enums `payroll_event_type`, `payroll_calculation_type` e `payroll_item_source`.
+- Cria `payroll_events` e `payroll_entry_items`.
+- Insere os eventos padrão de cálculo automático.
+
+Reversível via `downgrade()` (drop das tabelas e enums).
 
 ## Observações
 

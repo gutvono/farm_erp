@@ -4,9 +4,86 @@ from typing import Optional
 from uuid import UUID
 
 from sqlalchemy.orm import Session
+from sqlalchemy.orm import joinedload
 
-from app.modules.folha.model import Employee, PayrollEntry, PayrollPeriod
-from app.shared.enums import ContractType, PayrollEntryStatus, PayrollPeriodStatus
+from app.modules.folha.model import (
+    Employee,
+    PayrollEntry,
+    PayrollEntryItem,
+    PayrollEvent,
+    PayrollPeriod,
+)
+from app.shared.enums import (
+    ContractType,
+    PayrollCalculationType,
+    PayrollEntryStatus,
+    PayrollEventType,
+    PayrollItemSource,
+    PayrollPeriodStatus,
+)
+
+
+SALARY_BASE_EVENT_DESCRIPTION = "Salario base"
+MANUAL_DEDUCTION_EVENT_DESCRIPTION = "Descontos manuais"
+
+DEFAULT_PAYROLL_EVENT_DEFINITIONS = (
+    {
+        "description": SALARY_BASE_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.PROVENTO,
+        "calculation_type": PayrollCalculationType.MANUAL,
+        "is_automatic": False,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": "Hora extra",
+        "event_type": PayrollEventType.PROVENTO,
+        "calculation_type": PayrollCalculationType.OVERTIME,
+        "is_automatic": True,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": "Adicional noturno",
+        "event_type": PayrollEventType.PROVENTO,
+        "calculation_type": PayrollCalculationType.NIGHT_SHIFT,
+        "is_automatic": True,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": "INSS",
+        "event_type": PayrollEventType.DESCONTO,
+        "calculation_type": PayrollCalculationType.INSS,
+        "is_automatic": True,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": "Vale transporte",
+        "event_type": PayrollEventType.DESCONTO,
+        "calculation_type": PayrollCalculationType.TRANSPORT_VOUCHER,
+        "is_automatic": True,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": "FGTS",
+        "event_type": PayrollEventType.INFORMATIVO,
+        "calculation_type": PayrollCalculationType.FGTS,
+        "is_automatic": True,
+        "affects_net": False,
+        "is_active": True,
+    },
+    {
+        "description": MANUAL_DEDUCTION_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.DESCONTO,
+        "calculation_type": PayrollCalculationType.MANUAL,
+        "is_automatic": False,
+        "affects_net": True,
+        "is_active": True,
+    },
+)
 
 
 # ---------------------------------------------------------------------------
@@ -122,6 +199,101 @@ def list_active_employees(db: Session) -> list[Employee]:
         .order_by(Employee.name.asc())
         .all()
     )
+
+
+# ---------------------------------------------------------------------------
+# Payroll Events
+# ---------------------------------------------------------------------------
+
+
+def ensure_default_events(db: Session) -> None:
+    changed = False
+    for fields in DEFAULT_PAYROLL_EVENT_DEFINITIONS:
+        event = (
+            db.query(PayrollEvent)
+            .filter(PayrollEvent.description == fields["description"])
+            .first()
+        )
+        if event:
+            continue
+        db.add(PayrollEvent(**fields))
+        changed = True
+    if changed:
+        db.commit()
+
+
+def list_events(
+    db: Session, *, include_inactive: bool = False
+) -> list[PayrollEvent]:
+    ensure_default_events(db)
+    query = db.query(PayrollEvent).filter(PayrollEvent.deleted_at.is_(None))
+    if not include_inactive:
+        query = query.filter(PayrollEvent.is_active.is_(True))
+    return query.order_by(PayrollEvent.description.asc()).all()
+
+
+def get_event(db: Session, event_id: UUID) -> Optional[PayrollEvent]:
+    ensure_default_events(db)
+    return (
+        db.query(PayrollEvent)
+        .filter(PayrollEvent.id == event_id, PayrollEvent.deleted_at.is_(None))
+        .first()
+    )
+
+
+def get_event_by_description(
+    db: Session, description: str
+) -> Optional[PayrollEvent]:
+    ensure_default_events(db)
+    return (
+        db.query(PayrollEvent)
+        .filter(
+            PayrollEvent.description == description,
+            PayrollEvent.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+
+def get_event_by_calculation_type(
+    db: Session,
+    calculation_type: PayrollCalculationType,
+) -> Optional[PayrollEvent]:
+    ensure_default_events(db)
+    return (
+        db.query(PayrollEvent)
+        .filter(
+            PayrollEvent.calculation_type == calculation_type,
+            PayrollEvent.deleted_at.is_(None),
+            PayrollEvent.is_active.is_(True),
+        )
+        .order_by(PayrollEvent.description.asc())
+        .first()
+    )
+
+
+def create_event(
+    db: Session,
+    *,
+    description: str,
+    event_type: PayrollEventType,
+    calculation_type: PayrollCalculationType = PayrollCalculationType.MANUAL,
+    is_automatic: bool = False,
+    affects_net: bool = True,
+    is_active: bool = True,
+) -> PayrollEvent:
+    event = PayrollEvent(
+        description=description,
+        event_type=event_type,
+        calculation_type=calculation_type,
+        is_automatic=is_automatic,
+        affects_net=affects_net,
+        is_active=is_active,
+    )
+    db.add(event)
+    db.commit()
+    db.refresh(event)
+    return event
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +443,8 @@ def create_entry(
     db.add(entry)
     db.commit()
     db.refresh(entry)
-    return entry
+    ensure_entry_base_item(db, entry)
+    return recalculate_entry_totals(db, entry.id) or entry
 
 
 def update_entry(
@@ -319,3 +492,213 @@ def list_pending_entries_by_period(
         .order_by(PayrollEntry.created_at.asc())
         .all()
     )
+
+
+# ---------------------------------------------------------------------------
+# Payroll Entry Items
+# ---------------------------------------------------------------------------
+
+
+def list_items_by_entry(
+    db: Session, entry_id: UUID
+) -> list[PayrollEntryItem]:
+    return (
+        db.query(PayrollEntryItem)
+        .options(joinedload(PayrollEntryItem.event))
+        .join(PayrollEvent)
+        .filter(PayrollEntryItem.payroll_entry_id == entry_id)
+        .order_by(PayrollEntryItem.created_at.asc())
+        .all()
+    )
+
+
+def list_items_by_period(
+    db: Session, period_id: UUID
+) -> list[PayrollEntryItem]:
+    return (
+        db.query(PayrollEntryItem)
+        .options(joinedload(PayrollEntryItem.event))
+        .join(PayrollEntry)
+        .filter(PayrollEntry.payroll_period_id == period_id)
+        .order_by(PayrollEntryItem.created_at.asc())
+        .all()
+    )
+
+
+def get_entry_item(db: Session, item_id: UUID) -> Optional[PayrollEntryItem]:
+    return (
+        db.query(PayrollEntryItem)
+        .options(joinedload(PayrollEntryItem.event))
+        .filter(PayrollEntryItem.id == item_id)
+        .first()
+    )
+
+
+def get_entry_item_by_event(
+    db: Session,
+    *,
+    entry_id: UUID,
+    event_id: UUID,
+) -> Optional[PayrollEntryItem]:
+    return (
+        db.query(PayrollEntryItem)
+        .options(joinedload(PayrollEntryItem.event))
+        .filter(
+            PayrollEntryItem.payroll_entry_id == entry_id,
+            PayrollEntryItem.payroll_event_id == event_id,
+        )
+        .first()
+    )
+
+
+def upsert_entry_item(
+    db: Session,
+    *,
+    entry_id: UUID,
+    event_id: UUID,
+    amount: Decimal,
+    calculation_base: Optional[Decimal] = None,
+    quantity: Optional[Decimal] = None,
+    percentage: Optional[Decimal] = None,
+    metadata: Optional[dict] = None,
+    source: PayrollItemSource = PayrollItemSource.MANUAL,
+) -> PayrollEntryItem:
+    item = get_entry_item_by_event(db, entry_id=entry_id, event_id=event_id)
+    if item is None:
+        item = PayrollEntryItem(
+            payroll_entry_id=entry_id,
+            payroll_event_id=event_id,
+        )
+    item.amount = amount
+    item.calculation_base = calculation_base
+    item.quantity = quantity
+    item.percentage = percentage
+    item.item_metadata = metadata or {}
+    item.source = source
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    _ = item.event
+    return item
+
+
+def delete_entry_item(db: Session, item_id: UUID) -> bool:
+    item = get_entry_item(db, item_id)
+    if not item:
+        return False
+    db.delete(item)
+    db.commit()
+    return True
+
+
+def ensure_entry_base_item(
+    db: Session, entry: PayrollEntry
+) -> PayrollEntryItem:
+    event = get_event_by_description(db, SALARY_BASE_EVENT_DESCRIPTION)
+    if event is None:
+        ensure_default_events(db)
+        event = get_event_by_description(db, SALARY_BASE_EVENT_DESCRIPTION)
+    return upsert_entry_item(
+        db,
+        entry_id=entry.id,
+        event_id=event.id,
+        amount=Decimal(str(entry.base_salary)),
+        calculation_base=Decimal(str(entry.base_salary)),
+        source=PayrollItemSource.AUTOMATIC,
+        metadata={"origin": "entry.base_salary"},
+    )
+
+
+def ensure_entry_legacy_items(db: Session, entry: PayrollEntry) -> None:
+    existing_items = list_items_by_entry(db, entry.id)
+    if existing_items:
+        if not any(
+            item.event
+            and item.event.description == SALARY_BASE_EVENT_DESCRIPTION
+            for item in existing_items
+        ):
+            ensure_entry_base_item(db, entry)
+        return
+
+    ensure_entry_base_item(db, entry)
+
+    extras_value = Decimal(str(entry.extras_value))
+    if extras_value > 0:
+        overtime_event = get_event_by_calculation_type(
+            db, PayrollCalculationType.OVERTIME
+        )
+        if overtime_event:
+            upsert_entry_item(
+                db,
+                entry_id=entry.id,
+                event_id=overtime_event.id,
+                amount=extras_value,
+                calculation_base=Decimal(str(entry.base_salary)),
+                source=PayrollItemSource.MANUAL,
+                metadata={"origin": "legacy_existing"},
+            )
+
+    deductions_value = Decimal(str(entry.deductions_value))
+    if deductions_value > 0:
+        manual_deduction_event = get_event_by_description(
+            db, MANUAL_DEDUCTION_EVENT_DESCRIPTION
+        )
+        if manual_deduction_event:
+            upsert_entry_item(
+                db,
+                entry_id=entry.id,
+                event_id=manual_deduction_event.id,
+                amount=deductions_value,
+                calculation_base=Decimal(str(entry.base_salary)),
+                source=PayrollItemSource.MANUAL,
+                metadata={"origin": "legacy_existing"},
+            )
+
+
+def recalculate_entry_totals(
+    db: Session, entry_id: UUID
+) -> Optional[PayrollEntry]:
+    entry = get_entry(db, entry_id)
+    if not entry:
+        return None
+
+    items = list_items_by_entry(db, entry_id)
+    if not items:
+        net_amount = (
+            Decimal(str(entry.base_salary))
+            + Decimal(str(entry.extras_value))
+            - Decimal(str(entry.deductions_value))
+        )
+        entry.net_amount = max(Decimal("0"), net_amount)
+        db.add(entry)
+        db.commit()
+        db.refresh(entry)
+        return entry
+
+    total_earnings = Decimal("0")
+    total_deductions = Decimal("0")
+    extras_total = Decimal("0")
+
+    for item in items:
+        event = item.event
+        if event is None or not event.affects_net:
+            continue
+        amount = Decimal(str(item.amount))
+        if event.event_type == PayrollEventType.PROVENTO:
+            total_earnings += amount
+            if event.calculation_type in {
+                PayrollCalculationType.OVERTIME,
+                PayrollCalculationType.NIGHT_SHIFT,
+            }:
+                extras_total += amount
+        elif event.event_type == PayrollEventType.DESCONTO:
+            total_deductions += amount
+
+    entry.extras_value = extras_total
+    entry.deductions_value = total_deductions
+    entry.net_amount = max(Decimal("0"), total_earnings - total_deductions)
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    _ = entry.items
+    return entry
