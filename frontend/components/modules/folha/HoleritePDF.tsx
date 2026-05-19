@@ -94,16 +94,32 @@ export function HoleritePDF({ entry, period, employee }: HoleritePDFProps) {
 
       doc.setFont("helvetica", "normal")
       let y = 104
-      doc.text("Salário base", 22, y)
-      doc.text(formatCurrency(entry.base_salary), 188, y, { align: "right" })
+      if (entry.items.length > 0) {
+        for (const item of entry.items) {
+          const isDiscount = item.event_type === "desconto"
+          const isInformative = item.event_type === "informativo" || !item.affects_net
+          const prefix = isDiscount ? "- " : isInformative ? "" : "+ "
+          const suffix = isInformative ? " (informativo)" : ""
 
-      y += 8
-      doc.text("Horas extras", 22, y)
-      doc.text(`+ ${formatCurrency(entry.overtime_amount)}`, 188, y, { align: "right" })
+          doc.text(`${item.event_description}${suffix}`, 22, y)
+          doc.text(`${prefix}${formatCurrency(item.amount)}`, 188, y, {
+            align: "right",
+          })
+          y += 8
+        }
+      } else {
+        doc.text("Salário base", 22, y)
+        doc.text(formatCurrency(entry.base_salary), 188, y, { align: "right" })
 
-      y += 8
-      doc.text("Descontos", 22, y)
-      doc.text(`- ${formatCurrency(entry.deductions)}`, 188, y, { align: "right" })
+        y += 8
+        doc.text("Horas extras", 22, y)
+        doc.text(`+ ${formatCurrency(entry.overtime_amount)}`, 188, y, { align: "right" })
+
+        y += 8
+        doc.text("Descontos", 22, y)
+        doc.text(`- ${formatCurrency(entry.deductions)}`, 188, y, { align: "right" })
+        y += 8
+      }
 
       y += 4
       doc.line(20, y, 190, y)

@@ -15,6 +15,7 @@
 --   bb...  accounts_receivable (financeiro)
 --   cc...  accounts_payable (financeiro)
 --   dd...  payroll_periods / payroll_entries (folha)
+--   de...  payroll_events (folha)
 --   ee...  plot_activities (pcp)
 --   ff...  stock_movements (estoque)
 --   a0...  financial_movements (financeiro)
@@ -63,7 +64,22 @@ INSERT INTO employees (id, name, document, email, phone, role, contract_type, ba
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 5. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos = 9)
+-- 5. PAYROLL EVENTS (catalogo de eventos padrao da folha)
+-- -----------------------------------------------------------------------------
+INSERT INTO payroll_events (
+  id, description, event_type, calculation_type, is_automatic, affects_net, is_active
+) VALUES
+('dededede-dede-dede-dede-dededede0001', 'Salario base',      'provento',    'manual',            FALSE, TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0002', 'Hora extra',        'provento',    'overtime',          TRUE,  TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0003', 'Adicional noturno', 'provento',    'night_shift',       TRUE,  TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0004', 'INSS',              'desconto',    'inss',              TRUE,  TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0005', 'Vale transporte',   'desconto',    'transport_voucher', TRUE,  TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0006', 'FGTS',              'informativo', 'fgts',              TRUE,  FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0007', 'Descontos manuais', 'desconto',    'manual',            FALSE, TRUE,  TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos = 9)
 -- quantity_on_hand reflete o estado pós produção/compra já representado no seed.
 -- -----------------------------------------------------------------------------
 INSERT INTO stock_items (id, sku, name, category, unit, minimum_stock, unit_cost, quantity_on_hand, description) VALUES
@@ -82,7 +98,7 @@ INSERT INTO stock_items (id, sku, name, category, unit, minimum_stock, unit_cost
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 6. PLOTS (2)
+-- 7. PLOTS (2)
 -- -----------------------------------------------------------------------------
 INSERT INTO plots (id, name, location, variety, capacity_sacas, notes) VALUES
 ('66666666-6666-6666-6666-666666666001', 'Talhão A - Bourbon Amarelo',  'Setor Norte, 12 ha', 'Arábica Bourbon Amarelo', 100.000, 'Maior altitude, café especial'),
@@ -90,7 +106,7 @@ INSERT INTO plots (id, name, location, variety, capacity_sacas, notes) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 7. PURCHASE ORDER (1 concluída)
+-- 8. PURCHASE ORDER (1 concluída)
 -- Ordem 88...8801: 500kg fertilizante + 200kg adubo = R$ 7.600
 -- -----------------------------------------------------------------------------
 INSERT INTO purchase_orders (id, supplier_id, status, total_amount, ordered_at, received_at, notes, order_type) VALUES
@@ -103,7 +119,7 @@ INSERT INTO purchase_order_items (id, purchase_order_id, stock_item_id, descript
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 8. PRODUCTION ORDER (1 concluída) - Talhão A, safra 2026/1
+-- 9. PRODUCTION ORDER (1 concluída) - Talhão A, safra 2026/1
 -- Total 100 sacas: 19 especial + 52 superior + 29 tradicional, custo R$ 8.500
 -- -----------------------------------------------------------------------------
 INSERT INTO production_orders (id, plot_id, executed_at, total_sacas, especial_sacas, superior_sacas, tradicional_sacas, total_cost, status, notes) VALUES
@@ -124,7 +140,7 @@ INSERT INTO plot_activities (id, plot_id, activity_type, activity_date, labor_ty
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 9. SALES (2)
+-- 10. SALES (2)
 -- Venda 1: Cliente 1, 10 especial + 20 superior = R$ 22.000 (entregue)
 -- Venda 2: Cliente 2, 15 superior + 30 tradicional = R$ 23.250 (realizada)
 -- -----------------------------------------------------------------------------
@@ -141,7 +157,7 @@ INSERT INTO sale_items (id, sale_id, stock_item_id, description, quantity, unit_
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 10. INVOICES (2) - uma por venda
+-- 11. INVOICES (2) - uma por venda
 -- -----------------------------------------------------------------------------
 INSERT INTO invoices (id, number, client_id, sale_id, issue_date, due_date, total_amount, status, notes) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'NF-0001', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999001', '2026-02-20', '2026-02-25', 22000.00, 'paga',    'Fatura paga em 2026-02-25'),
@@ -156,7 +172,7 @@ INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, su
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 11. ACCOUNTS PAYABLE (2)
+-- 12. ACCOUNTS PAYABLE (2)
 -- AP-0001: Purchase 1 paga. AP-0002: Energia elétrica em aberto.
 -- -----------------------------------------------------------------------------
 INSERT INTO accounts_payable (id, number, supplier_id, purchase_order_id, description, amount, due_date, paid_at, status, notes) VALUES
@@ -165,7 +181,7 @@ INSERT INTO accounts_payable (id, number, supplier_id, purchase_order_id, descri
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 12. ACCOUNTS RECEIVABLE (3)
+-- 13. ACCOUNTS RECEIVABLE (3)
 -- AR-0001: Venda 1 quitada. AR-0002: Venda 2 em aberto. AR-0003: Dona Rita cancelada.
 -- -----------------------------------------------------------------------------
 INSERT INTO accounts_receivable (id, number, client_id, sale_id, invoice_id, description, amount, amount_received, due_date, received_at, status, notes) VALUES
@@ -175,7 +191,7 @@ INSERT INTO accounts_receivable (id, number, client_id, sale_id, invoice_id, des
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 13. PAYROLL PERIODS (3: 01/2026 fechada+paga, 02/2026 fechada+paga, 03/2026 aberta)
+-- 14. PAYROLL PERIODS (3: 01/2026 fechada+paga, 02/2026 fechada+paga, 03/2026 aberta)
 -- -----------------------------------------------------------------------------
 INSERT INTO payroll_periods (id, competency_year, competency_month, status, closed_at, total_amount) VALUES
 ('dddddddd-dddd-dddd-dddd-dddddddd0001', 2026, 1, 'fechada', '2026-02-01 18:00:00-03', 29300.00),
@@ -220,7 +236,7 @@ INSERT INTO payroll_entries (id, payroll_period_id, employee_id, base_salary, ex
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 14. STOCK MOVEMENTS (seed das entradas/saídas que justificam quantity_on_hand)
+-- 15. STOCK MOVEMENTS (seed das entradas/saídas que justificam quantity_on_hand)
 -- Entrada inicial de equipamentos; entrada de compra; saídas da produção e vendas;
 -- entradas do café produzido.
 -- -----------------------------------------------------------------------------
@@ -249,7 +265,7 @@ INSERT INTO stock_movements (id, stock_item_id, movement_type, quantity, unit_co
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 15. FINANCIAL MOVEMENTS (saldo inicial + eventos dos últimos 3 meses)
+-- 16. FINANCIAL MOVEMENTS (saldo inicial + eventos dos últimos 3 meses)
 -- Saldo inicial R$ 150.000 em 2026-01-01.
 -- Saldo projetado (entradas - saídas): 150000 + 22000 - 7600 - 29300 - 31943.33 = 103156.67
 -- -----------------------------------------------------------------------------
@@ -290,7 +306,7 @@ INSERT INTO financial_movements (id, movement_type, category, amount, descriptio
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 16. NOTIFICATIONS (exemplos)
+-- 17. NOTIFICATIONS (exemplos)
 -- -----------------------------------------------------------------------------
 INSERT INTO notifications (id, type, title, message, module, link, is_read, user_id) VALUES
 ('ab000000-0000-0000-0000-000000000001', 'warning', 'Estoque abaixo do mínimo', 'Pesticida Fungicida (INS-PEST) está com 15 litros (mín. 20)', 'estoque',  '/estoque',   FALSE, '11111111-1111-1111-1111-111111111001'),
@@ -313,6 +329,7 @@ ON CONFLICT (id) DO NOTHING;
 --   2 contas a pagar (1 paga, 1 em aberto)
 --   3 contas a receber (1 quitada, 1 em aberto, 1 cancelada)
 --   3 períodos de folha, 24 lançamentos
+--   7 eventos de folha
 --   17 movimentações de estoque
 --   25 movimentações financeiras
 --   3 notificações

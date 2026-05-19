@@ -4,8 +4,15 @@ import {
   ContractType,
   Employee,
   PayrollBatchResult,
+  PayrollCalculationPreview,
+  PayrollCalculationRequest,
   PayrollEntry,
+  PayrollEntryItem,
   PayrollEntryStatus,
+  PayrollEvent,
+  PayrollCalculationType,
+  PayrollEventType,
+  PayrollItemSource,
   PayrollPeriod,
   PayrollPeriodStatus,
 } from "@/types/index"
@@ -146,12 +153,82 @@ interface RawPayrollEntry {
   net_amount?: string | number
   status: PayrollEntryStatus
   paid_at: string | null
+  gross_amount?: string | number
+  total_earnings?: string | number
+  total_deductions?: string | number
+  total_informative?: string | number
+  items?: RawPayrollEntryItem[]
+}
+
+interface RawPayrollEvent {
+  id: string
+  description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  is_automatic: boolean
+  affects_net: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+interface RawPayrollEntryItem {
+  id: string
+  payroll_entry_id: string
+  payroll_event_id: string
+  event_description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  amount: string | number
+  calculation_base: string | number | null
+  quantity: string | number | null
+  percentage: string | number | null
+  metadata: Record<string, unknown>
+  source: PayrollItemSource
+  affects_net: boolean
+  created_at: string
+  updated_at: string
+}
+
+function parseEvent(raw: RawPayrollEvent): PayrollEvent {
+  return {
+    id: raw.id,
+    description: raw.description,
+    event_type: raw.event_type,
+    calculation_type: raw.calculation_type,
+    is_automatic: raw.is_automatic,
+    affects_net: raw.affects_net,
+    is_active: raw.is_active,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
+}
+
+function parseEntryItem(raw: RawPayrollEntryItem): PayrollEntryItem {
+  return {
+    id: raw.id,
+    payroll_entry_id: raw.payroll_entry_id,
+    payroll_event_id: raw.payroll_event_id,
+    event_description: raw.event_description,
+    event_type: raw.event_type,
+    calculation_type: raw.calculation_type,
+    amount: toNumber(raw.amount),
+    calculation_base: toNumberOrNull(raw.calculation_base),
+    quantity: toNumberOrNull(raw.quantity),
+    percentage: toNumberOrNull(raw.percentage),
+    metadata: raw.metadata ?? {},
+    source: raw.source,
+    affects_net: raw.affects_net,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
 }
 
 function parseEntry(raw: RawPayrollEntry): PayrollEntry {
   const overtime = raw.overtime_amount ?? raw.extras_value ?? 0
   const deductions = raw.deductions ?? raw.deductions_value ?? 0
   const total = raw.total_amount ?? raw.net_amount ?? 0
+  const items = (raw.items ?? []).map(parseEntryItem)
   return {
     id: raw.id,
     payroll_period_id: raw.payroll_period_id,
@@ -164,6 +241,11 @@ function parseEntry(raw: RawPayrollEntry): PayrollEntry {
     total_amount: toNumber(total),
     status: raw.status,
     paid_at: raw.paid_at,
+    gross_amount: toNumber(raw.gross_amount ?? raw.base_salary),
+    total_earnings: toNumber(raw.total_earnings ?? raw.base_salary),
+    total_deductions: toNumber(raw.total_deductions ?? deductions),
+    total_informative: toNumber(raw.total_informative ?? 0),
+    items,
   }
 }
 
@@ -239,6 +321,101 @@ export async function pagarEntry(id: string): Promise<PayrollEntry> {
   const response = await apiFetch<ApiResponse<RawPayrollEntry>>(
     `/api/folha/entries/${id}/pagar`,
     { method: "POST" }
+  )
+  return parseEntry(response.data)
+}
+
+export async function getEventosFolha(): Promise<PayrollEvent[]> {
+  const response = await apiFetch<ApiResponse<RawPayrollEvent[]>>(
+    "/api/folha/eventos"
+  )
+  return response.data.map(parseEvent)
+}
+
+export async function getEntryItens(id: string): Promise<PayrollEntryItem[]> {
+  const response = await apiFetch<ApiResponse<RawPayrollEntryItem[]>>(
+    `/api/folha/entries/${id}/itens`
+  )
+  return response.data.map(parseEntryItem)
+}
+
+interface RawCalculationPreview {
+  event_id: string
+  event_description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  amount: string | number
+  calculation_base: string | number
+  quantity: string | number | null
+  percentage: string | number | null
+  metadata: Record<string, unknown>
+  affects_net: boolean
+}
+
+function parseCalculationPreview(
+  raw: RawCalculationPreview
+): PayrollCalculationPreview {
+  return {
+    event_id: raw.event_id,
+    event_description: raw.event_description,
+    event_type: raw.event_type,
+    calculation_type: raw.calculation_type,
+    amount: toNumber(raw.amount),
+    calculation_base: toNumber(raw.calculation_base),
+    quantity: toNumberOrNull(raw.quantity),
+    percentage: toNumberOrNull(raw.percentage),
+    metadata: raw.metadata ?? {},
+    affects_net: raw.affects_net,
+  }
+}
+
+export async function previewCalculoFolha(
+  id: string,
+  data: PayrollCalculationRequest
+): Promise<PayrollCalculationPreview> {
+  const response = await apiFetch<ApiResponse<RawCalculationPreview>>(
+    `/api/folha/entries/${id}/calculos/preview`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseCalculationPreview(response.data)
+}
+
+export async function aplicarCalculoFolha(
+  id: string,
+  data: PayrollCalculationRequest
+): Promise<PayrollEntry> {
+  const response = await apiFetch<ApiResponse<RawPayrollEntry>>(
+    `/api/folha/entries/${id}/calculos/aplicar`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseEntry(response.data)
+}
+
+export async function upsertEntryItem(
+  id: string,
+  data: {
+    event_id: string
+    amount: number
+    calculation_base?: number
+    quantity?: number
+    percentage?: number
+    metadata?: Record<string, unknown>
+  }
+): Promise<PayrollEntry> {
+  const response = await apiFetch<ApiResponse<RawPayrollEntry>>(
+    `/api/folha/entries/${id}/itens`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseEntry(response.data)
+}
+
+export async function deleteEntryItem(
+  entryId: string,
+  itemId: string
+): Promise<PayrollEntry> {
+  const response = await apiFetch<ApiResponse<RawPayrollEntry>>(
+    `/api/folha/entries/${entryId}/itens/${itemId}`,
+    { method: "DELETE" }
   )
   return parseEntry(response.data)
 }

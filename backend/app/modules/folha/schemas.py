@@ -1,11 +1,18 @@
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
-from typing import Optional
+from typing import Any, Optional
 from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.enums import ContractType, PayrollEntryStatus, PayrollPeriodStatus
+from app.shared.enums import (
+    ContractType,
+    PayrollCalculationType,
+    PayrollEntryStatus,
+    PayrollEventType,
+    PayrollItemSource,
+    PayrollPeriodStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +97,113 @@ class PayrollEntryUpdate(BaseModel):
     deductions: Decimal = Field(default=Decimal("0"), ge=0)
 
 
+class PayrollEventOut(BaseModel):
+    id: UUID
+    description: str
+    event_type: PayrollEventType
+    calculation_type: PayrollCalculationType
+    is_automatic: bool
+    affects_net: bool
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @classmethod
+    def from_model(cls, event) -> "PayrollEventOut":
+        return cls(
+            id=event.id,
+            description=event.description,
+            event_type=event.event_type,
+            calculation_type=event.calculation_type,
+            is_automatic=event.is_automatic,
+            affects_net=event.affects_net,
+            is_active=event.is_active,
+            created_at=event.created_at,
+            updated_at=event.updated_at,
+        )
+
+
+class PayrollEntryItemOut(BaseModel):
+    id: UUID
+    payroll_entry_id: UUID
+    payroll_event_id: UUID
+    event_description: str
+    event_type: PayrollEventType
+    calculation_type: PayrollCalculationType
+    amount: Decimal
+    calculation_base: Optional[Decimal] = None
+    quantity: Optional[Decimal] = None
+    percentage: Optional[Decimal] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    source: PayrollItemSource
+    affects_net: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @classmethod
+    def from_model(cls, item) -> "PayrollEntryItemOut":
+        event = item.event
+        return cls(
+            id=item.id,
+            payroll_entry_id=item.payroll_entry_id,
+            payroll_event_id=item.payroll_event_id,
+            event_description=event.description if event else "",
+            event_type=event.event_type if event else PayrollEventType.INFORMATIVO,
+            calculation_type=(
+                event.calculation_type if event else PayrollCalculationType.MANUAL
+            ),
+            amount=item.amount,
+            calculation_base=item.calculation_base,
+            quantity=item.quantity,
+            percentage=item.percentage,
+            metadata=item.item_metadata or {},
+            source=item.source,
+            affects_net=event.affects_net if event else False,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+
+class PayrollManualItemUpsert(BaseModel):
+    event_id: UUID
+    amount: Decimal = Field(ge=0)
+    calculation_base: Optional[Decimal] = Field(default=None, ge=0)
+    quantity: Optional[Decimal] = Field(default=None, ge=0)
+    percentage: Optional[Decimal] = Field(default=None, ge=0)
+    metadata: dict[str, Any] = Field(default_factory=dict)
+
+
+class PayrollAutoCalculationRequest(BaseModel):
+    calculation_type: PayrollCalculationType
+    event_id: Optional[UUID] = None
+    base_amount: Optional[Decimal] = Field(default=None, ge=0)
+    quantity: Optional[Decimal] = Field(default=None, ge=0)
+    percentage: Optional[Decimal] = Field(default=None, ge=0)
+    start_time: Optional[time] = None
+    end_time: Optional[time] = None
+    rule: Optional[str] = Field(default=None, pattern="^(urbana|rural)$")
+    real_transport_cost: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class PayrollCalculationPreview(BaseModel):
+    event_id: UUID
+    event_description: str
+    event_type: PayrollEventType
+    calculation_type: PayrollCalculationType
+    amount: Decimal
+    calculation_base: Decimal
+    quantity: Optional[Decimal] = None
+    percentage: Optional[Decimal] = None
+    metadata: dict[str, Any] = Field(default_factory=dict)
+    affects_net: bool
+
+    model_config = ConfigDict(use_enum_values=True)
+
+
 class PayrollEntryOut(BaseModel):
     id: UUID
     payroll_period_id: UUID
@@ -102,13 +216,63 @@ class PayrollEntryOut(BaseModel):
     total_amount: Decimal
     status: PayrollEntryStatus
     paid_at: Optional[datetime] = None
+    gross_amount: Decimal = Decimal("0")
+    total_earnings: Decimal = Decimal("0")
+    total_deductions: Decimal = Decimal("0")
+    total_informative: Decimal = Decimal("0")
+    items: list[PayrollEntryItemOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
     @classmethod
-    def from_model(cls, entry, employee_name: str, contract_type: ContractType) -> "PayrollEntryOut":
+    def from_model(
+        cls,
+        entry,
+        employee_name: str,
+        contract_type: ContractType,
+        items: Optional[list[PayrollEntryItemOut]] = None,
+    ) -> "PayrollEntryOut":
+        item_list = items or []
+        if item_list:
+            def enum_value(value):
+                return value.value if hasattr(value, "value") else value
+
+            total_earnings = sum(
+                (
+                    item.amount
+                    for item in item_list
+                    if enum_value(item.event_type) == PayrollEventType.PROVENTO.value
+                    and item.affects_net
+                ),
+                Decimal("0"),
+            )
+            total_deductions = sum(
+                (
+                    item.amount
+                    for item in item_list
+                    if enum_value(item.event_type) == PayrollEventType.DESCONTO.value
+                    and item.affects_net
+                ),
+                Decimal("0"),
+            )
+            total_informative = sum(
+                (
+                    item.amount
+                    for item in item_list
+                    if enum_value(item.event_type) == PayrollEventType.INFORMATIVO.value
+                    or not item.affects_net
+                ),
+                Decimal("0"),
+            )
+            gross_amount = total_earnings
+        else:
+            total_earnings = Decimal(entry.base_salary) + Decimal(entry.extras_value)
+            total_deductions = Decimal(entry.deductions_value)
+            total_informative = Decimal("0")
+            gross_amount = total_earnings
+
         return cls(
             id=entry.id,
             payroll_period_id=entry.payroll_period_id,
@@ -121,9 +285,18 @@ class PayrollEntryOut(BaseModel):
             total_amount=entry.net_amount,
             status=entry.status,
             paid_at=entry.paid_at,
+            gross_amount=gross_amount,
+            total_earnings=total_earnings,
+            total_deductions=total_deductions,
+            total_informative=total_informative,
+            items=item_list,
             created_at=entry.created_at,
             updated_at=entry.updated_at,
         )
+
+
+class PayrollEntryDetailedOut(PayrollEntryOut):
+    pass
 
 
 # ---------------------------------------------------------------------------

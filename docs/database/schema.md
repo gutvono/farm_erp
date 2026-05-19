@@ -48,8 +48,8 @@ nome do enum.
 |--------|-------------|------------|
 | `users`, `clients`, `suppliers`, `employees` | ✅ | entidades cadastrais |
 | `stock_items`, `plots` | ✅ | cadastros base |
-| `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods` | ✅ | operações de negócio |
-| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `payroll_entries` | ❌ | itens filhos (cascateados pelo pai) |
+| `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events` | ✅ | operações de negócio e catálogos |
+| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
 | `notifications` | ❌ | efêmeras por design |
 
@@ -291,6 +291,42 @@ Fórmula do `net_amount`:
 net = base_salary + extras_value - absences_value - deductions_value
 ```
 
+Quando o holerite possui itens detalhados, `payroll_entries` mantém esses campos
+como agregados de compatibilidade e o líquido passa a ser recalculado por eventos:
+
+```
+net = max(0, soma(proventos que afetam líquido) - soma(descontos que afetam líquido))
+```
+
+#### `payroll_events`
+Catálogo de eventos usados nos holerites.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `description` | `VARCHAR(255)` UNIQUE | Nome do evento |
+| `event_type` | ENUM `payroll_event_type` | `provento` \| `desconto` \| `informativo` |
+| `calculation_type` | ENUM `payroll_calculation_type` | `manual`, `overtime`, `night_shift`, `inss`, `fgts`, `transport_voucher` |
+| `is_automatic` | `BOOLEAN` | Calculado pelo sistema |
+| `affects_net` | `BOOLEAN` | Entra no cálculo do líquido |
+| `is_active` | `BOOLEAN` | Disponível para lançamento |
+
+Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS,
+Vale transporte, FGTS e Descontos manuais.
+
+#### `payroll_entry_items`
+Itens de folha por holerite. UNIQUE (`payroll_entry_id`, `payroll_event_id`).
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `payroll_entry_id` | `UUID` FK | Holerite |
+| `payroll_event_id` | `UUID` FK | Evento |
+| `amount` | `NUMERIC(12,2)` | Valor do item, `CHECK amount >= 0` |
+| `calculation_base` | `NUMERIC(12,2)` NULL | Base usada no cálculo |
+| `quantity` | `NUMERIC(12,4)` NULL | Horas/quantidade |
+| `percentage` | `NUMERIC(7,2)` NULL | Percentual aplicado |
+| `metadata` | `JSONB` | Parâmetros específicos, ex.: horário noturno |
+| `source` | ENUM `payroll_item_source` | `manual` \| `automatic` |
+
 ---
 
 ### PCP (Produção)
@@ -375,6 +411,8 @@ suppliers ────┬──── purchase_orders ──┬── purchase_o
 stock_items ──── stock_movements (ledger)
 
 employees ──── payroll_entries ──── payroll_periods
+                  │
+                  └──── payroll_entry_items ──── payroll_events
 
 plots ──┬──── production_orders ──┬── production_inputs ──▶ stock_items
         │                        └── production_harvests

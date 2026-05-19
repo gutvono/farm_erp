@@ -525,6 +525,15 @@ export interface PCPReport {
 export type ContractType = "clt" | "pj" | "temporario"
 export type PayrollEntryStatus = "pendente" | "pago"
 export type PayrollPeriodStatus = "aberta" | "fechada"
+export type PayrollEventType = "provento" | "desconto" | "informativo"
+export type PayrollCalculationType =
+  | "manual"
+  | "overtime"
+  | "night_shift"
+  | "inss"
+  | "fgts"
+  | "transport_voucher"
+export type PayrollItemSource = "manual" | "automatic"
 
 export interface Employee {
   id: string
@@ -553,6 +562,11 @@ export interface PayrollEntry {
   total_amount: number
   status: PayrollEntryStatus
   paid_at: string | null
+  gross_amount: number
+  total_earnings: number
+  total_deductions: number
+  total_informative: number
+  items: PayrollEntryItem[]
 }
 
 export interface PayrollPeriod {
@@ -570,4 +584,59 @@ export interface PayrollBatchResult {
   total_paid: number
   insufficient_balance: boolean
   failed_employees: string[]
+}
+
+export interface PayrollEvent {
+  id: string
+  description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  is_automatic: boolean
+  affects_net: boolean
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollEntryItem {
+  id: string
+  payroll_entry_id: string
+  payroll_event_id: string
+  event_description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  amount: number
+  calculation_base: number | null
+  quantity: number | null
+  percentage: number | null
+  metadata: Record<string, unknown>
+  source: PayrollItemSource
+  affects_net: boolean
+  created_at: string
+  updated_at: string
+}
+
+export interface PayrollCalculationRequest {
+  calculation_type: PayrollCalculationType
+  event_id?: string
+  base_amount?: number
+  quantity?: number
+  percentage?: number
+  start_time?: string
+  end_time?: string
+  rule?: "urbana" | "rural"
+  real_transport_cost?: number
+}
+
+export interface PayrollCalculationPreview {
+  event_id: string
+  event_description: string
+  event_type: PayrollEventType
+  calculation_type: PayrollCalculationType
+  amount: number
+  calculation_base: number
+  quantity: number | null
+  percentage: number | null
+  metadata: Record<string, unknown>
+  affects_net: boolean
 }

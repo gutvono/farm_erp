@@ -96,6 +96,26 @@ class PayrollEntryStatus(str, enum.Enum):
     PAGO = "pago"
 
 
+class PayrollEventType(str, enum.Enum):
+    PROVENTO = "provento"
+    DESCONTO = "desconto"
+    INFORMATIVO = "informativo"
+
+
+class PayrollCalculationType(str, enum.Enum):
+    MANUAL = "manual"
+    OVERTIME = "overtime"
+    NIGHT_SHIFT = "night_shift"
+    INSS = "inss"
+    FGTS = "fgts"
+    TRANSPORT_VOUCHER = "transport_voucher"
+
+
+class PayrollItemSource(str, enum.Enum):
+    MANUAL = "manual"
+    AUTOMATIC = "automatic"
+
+
 class ProductionOrderStatus(str, enum.Enum):
     PLANEJADA = "planejada"
     EM_PRODUCAO = "em_producao"
