@@ -270,6 +270,23 @@ def get_order_with_harvests(db: Session, order_id: UUID) -> Optional[ProductionO
     return order
 
 
+def has_active_order_for_plot(
+    db: Session, plot_id: UUID, exclude_order_id: Optional[UUID] = None
+) -> bool:
+    """Returns True if the plot already has an order with status em_execucao or pausada."""
+    query = db.query(ProductionOrder).filter(
+        ProductionOrder.plot_id == plot_id,
+        ProductionOrder.status.in_([
+            ProductionOrderStatus.EM_EXECUCAO,
+            ProductionOrderStatus.PAUSADA,
+        ]),
+        ProductionOrder.deleted_at.is_(None),
+    )
+    if exclude_order_id:
+        query = query.filter(ProductionOrder.id != exclude_order_id)
+    return query.first() is not None
+
+
 def update_order(db: Session, order_id: UUID, **kwargs) -> Optional[ProductionOrder]:
     order = get_order(db, order_id)
     if not order:

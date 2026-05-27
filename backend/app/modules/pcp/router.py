@@ -164,6 +164,16 @@ def get_order(
     )
 
 
+@router.post("/ordens/{order_id}/iniciar", response_model=SuccessResponse)
+def iniciar_producao(
+    order_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = pcp_service.iniciar_producao(db, order_id)
+    return success("Produção iniciada com sucesso", pcp_service.serialize_order(db, order))
+
+
 @router.post("/ordens/{order_id}/colher", response_model=SuccessResponse)
 def colher_safra(
     order_id: UUID,

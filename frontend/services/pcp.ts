@@ -347,6 +347,14 @@ export async function produzirSafra(id: string): Promise<ProductionResult> {
   return parseResult(response.data)
 }
 
+export async function iniciarProducao(id: string): Promise<ProductionOrder> {
+  const response = await apiFetch<ApiResponse<RawProductionOrder>>(
+    `/api/pcp/ordens/${id}/iniciar`,
+    { method: "POST" }
+  )
+  return parseOrder(response.data)
+}
+
 export async function deleteOrdem(id: string): Promise<void> {
   await apiFetch(`/api/pcp/ordens/${id}`, { method: "DELETE" })
 }

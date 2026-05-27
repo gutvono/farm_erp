@@ -244,6 +244,29 @@ def soft_delete_order(db: Session, order_id: UUID) -> ProductionOrder:
     return pcp_repo.soft_delete_order(db, order_id)
 
 
+def iniciar_producao(db: Session, order_id: UUID) -> ProductionOrder:
+    """Changes status from planejada to em_execucao after validating no other active order exists for the plot."""
+    order = pcp_repo.get_order_with_harvests(db, order_id)
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordem não encontrada")
+    if order.status != ProductionOrderStatus.PLANEJADA:
+        raise HTTPException(
+            status_code=400,
+            detail="Somente ordens com status 'Planejada' podem ser iniciadas",
+        )
+    if pcp_repo.has_active_order_for_plot(db, order.plot_id, exclude_order_id=order_id):
+        raise HTTPException(
+            status_code=400,
+            detail="Talhão já possui uma produção em andamento. Conclua ou cancele a produção atual antes de iniciar uma nova.",
+        )
+    order.status = ProductionOrderStatus.EM_EXECUCAO
+    if not order.start_date:
+        from datetime import date
+        order.start_date = date.today()
+    db.commit()
+    return pcp_repo.get_order_with_harvests(db, order_id)
+
+
 # ---------------------------------------------------------------------------
 # Colheita parcial e final
 # ---------------------------------------------------------------------------
