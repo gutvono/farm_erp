@@ -87,6 +87,7 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
     client = _get_client_or_404(db, data.client_id)
 
     # 2. Validate stock availability for each item
+    stock_items_by_id = {}
     for item_data in data.items:
         stock_item = estoque_repo.get_item(db, item_data.stock_item_id)
         if not stock_item:
@@ -94,6 +95,7 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
                 status_code=404,
                 detail=f"Item de estoque não encontrado: {item_data.stock_item_id}",
             )
+        stock_items_by_id[item_data.stock_item_id] = stock_item
         available = estoque_service.verificar_disponibilidade(
             db, item_data.stock_item_id, item_data.quantity
         )
@@ -109,12 +111,19 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
     # 3. Create the sale record
     sale = comercial_repo.create_sale(db, data)
 
-    # 4. Deduct stock for each item
+    # 4. Deduct stock for each item, passing the item's current CMP so the
+    # saída carries unit_cost (viabiliza cálculo de CMV). Reaproveita o
+    # StockItem já consultado na validação de disponibilidade.
     for item in sale.items:
+        stock_item = stock_items_by_id.get(item.stock_item_id)
+        unit_cost = (
+            Decimal(str(stock_item.unit_cost)) if stock_item else Decimal("0")
+        )
         estoque_service.registrar_saida(
             db,
             stock_item_id=item.stock_item_id,
             quantity=Decimal(item.quantity),
+            unit_cost=unit_cost,
             description=f"Venda #{sale.id}",
             source_module="comercial",
             reference_id=sale.id,

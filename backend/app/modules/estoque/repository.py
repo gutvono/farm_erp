@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import asc, desc, func
+from sqlalchemy import asc, desc
 from sqlalchemy.orm import Session
 
 from app.modules.estoque.model import StockItem, StockMovement
@@ -32,32 +32,6 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
     db.commit()
     db.refresh(item)
     return item
-
-
-def calcular_custo_medio(db: Session, stock_item_id: UUID) -> Decimal:
-    """
-    Média ponderada das entradas com unit_cost > 0:
-        SUM(quantity * unit_cost) / SUM(quantity)
-    Retorna 0 se não houver entradas com valor.
-    """
-    row = (
-        db.query(
-            func.sum(StockMovement.quantity * StockMovement.unit_cost).label("total_value"),
-            func.sum(StockMovement.quantity).label("total_quantity"),
-        )
-        .filter(
-            StockMovement.stock_item_id == stock_item_id,
-            StockMovement.movement_type == MovementType.ENTRADA,
-            StockMovement.unit_cost > 0,
-        )
-        .one()
-    )
-    total_quantity = row.total_quantity or Decimal("0")
-    total_value = row.total_value or Decimal("0")
-    if Decimal(total_quantity) <= 0:
-        return Decimal("0")
-    avg = Decimal(total_value) / Decimal(total_quantity)
-    return avg.quantize(Decimal("0.01"))
 
 
 def list_items(

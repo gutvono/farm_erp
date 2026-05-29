@@ -126,10 +126,15 @@ estoque_service.registrar_saida(
     db,
     stock_item_id=item.id,
     quantity=Decimal("5"),
+    unit_cost=Decimal("450.00"),  # opcional, default R$0
     description="Venda #0010",
     source_module="comercial",
     reference_id=sale.id,
 )
+# unit_cost é opcional (default Decimal("0")). O Comercial passa o CMP atual do
+# item para que a saída carregue o custo (viabiliza cálculo de CMV). Saídas
+# internas do PCP e chamadas manuais omitem o parâmetro e ficam com R$0, pois o
+# custo de produção é rastreado na ordem de produção (pcp_order.total_cost).
 
 # Comercial: verificar disponibilidade antes de confirmar venda
 disponivel = estoque_service.verificar_disponibilidade(
@@ -164,17 +169,27 @@ if not disponivel:
 - Campo obrigatório e único
 - Validado na criação (409 se duplicado)
 
-### Custo médio ponderado
+### Custo médio ponderado (CMP móvel)
 Após toda movimentação `entrada` com `unit_cost > 0`, o `unit_cost` do item é
-recalculado como média ponderada de todas as entradas históricas com valor:
+recalculado como **custo médio móvel** (moving weighted average), considerando o
+saldo já em estoque imediatamente antes da nova entrada:
 
 ```
-unit_cost = SUM(movement.quantity × movement.unit_cost) / SUM(movement.quantity)
+novo_cmp = (qty_antes × cmp_antes + nova_qty × novo_preço) / (qty_antes + nova_qty)
 ```
 
-Considera apenas movimentos `entrada` com `unit_cost > 0` (ajustes a R$0 e
-saídas são ignorados). A fórmula vive em `repository.calcular_custo_medio()` e é
-chamada pelo `service.create_movement()` após criar a movimentação.
+Onde:
+- `qty_antes` = saldo do item antes da entrada (`quantity_on_hand - nova_qty`,
+  pois o `repository.create_movement()` já incrementou `quantity_on_hand` quando
+  o cálculo ocorre). Se `qty_antes < 0`, é tratado como `0` (entrada em estoque
+  zerado).
+- `cmp_antes` = `unit_cost` atual do item (ainda não atualizado nesta chamada).
+- `nova_qty` / `novo_preço` = quantidade e custo unitário do movimento.
+
+Diferentemente do CMP histórico (que somava todas as entradas e ignorava o
+estoque já consumido, distorcendo o custo), o CMP móvel reflete apenas o saldo
+vigente. O cálculo é feito inline no `service.create_movement()` usando os
+valores já em memória — sem query extra ao banco.
 
 Saídas e entradas com `unit_cost = 0` **não** disparam o recálculo.
 
