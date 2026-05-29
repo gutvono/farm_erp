@@ -235,6 +235,11 @@ def start_receipt(db: Session, order_id: UUID) -> PurchaseOrder:
             status_code=400,
             detail="Apenas ordens aprovadas podem iniciar a conferência",
         )
+    if (order.order_type or "produto") == "servico":
+        raise HTTPException(
+            status_code=400,
+            detail="Ordens de serviço não passam pela conferência de estoque. Use o endpoint /concluir-servico.",
+        )
     return compras_repo.start_receipt(db, order_id)
 
 
@@ -299,8 +304,10 @@ def finalize_receipt(
     updated = compras_repo.finalize_receipt(db, order_id, items)
 
     receipt_total = Decimal(updated.receipt_total_amount or 0)
-    if receipt_total > 0:
-        _gerar_contas_pagar_da_ordem(db, updated, amount=receipt_total)
+    shipping_cost = Decimal(str(updated.shipping_cost or 0))
+    payable_amount = receipt_total + shipping_cost
+    if payable_amount > 0:
+        _gerar_contas_pagar_da_ordem(db, updated, amount=payable_amount)
 
     fin_service.registrar_movimento(
         db,
@@ -472,6 +479,16 @@ def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
         fat_service.criar_nota_recebimento(db, order.id)
     if has_rejected:
         fat_service.criar_nota_devolucao(db, order.id)
+
+    # NF de transporte (somente se houver custo de frete)
+    shipping_cost = Decimal(str(order.shipping_cost or 0))
+    if shipping_cost > 0:
+        fat_service.criar_nota_transporte(
+            db,
+            shipping_cost=shipping_cost,
+            order_id=order.id,
+            client_id=None,
+        )
 
     return compras_repo.complete_order(db, order_id)
 

@@ -41,6 +41,7 @@ class Sale(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    shipping_cost = Column(Numeric(12, 2), nullable=True, default=0)
     sold_at = Column(DateTime(timezone=True), nullable=False)
     delivered_at = Column(DateTime(timezone=True), nullable=True)
     notes = Column(Text, nullable=True)

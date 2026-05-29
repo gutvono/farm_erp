@@ -15,7 +15,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { deleteOrdem } from "@/services/pcp"
+import { deleteOrdem, iniciarProducao } from "@/services/pcp"
 import { ProductionOrder, ProductionResult } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { ColheitaModal } from "./ColheitaModal"
@@ -47,14 +47,15 @@ interface OrdemProducaoCardProps {
 export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProducaoCardProps) {
   const [expanded, setExpanded] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [iniciarOpen, setIniciarOpen] = useState(false)
   const [colheitaOpen, setColheitaOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [iniciando, setIniciando] = useState(false)
   const [currentOrder, setCurrentOrder] = useState<ProductionOrder>(order)
 
-  const isFinal =
-    currentOrder.status === "concluida" || currentOrder.status === "cancelada"
   const isPlanejada = currentOrder.status === "planejada"
-  const canHarvest = !isFinal
+  const canHarvest =
+    currentOrder.status === "em_execucao" || currentOrder.status === "pausada"
 
   const especial = currentOrder.especial_sacas
   const superior = currentOrder.superior_sacas
@@ -74,6 +75,21 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
     } finally {
       setDeleting(false)
       setDeleteOpen(false)
+    }
+  }
+
+  async function handleIniciar() {
+    setIniciando(true)
+    try {
+      const updated = await iniciarProducao(currentOrder.id)
+      setCurrentOrder(updated)
+      toast.success("Produção iniciada!")
+      onProduced()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao iniciar produção")
+    } finally {
+      setIniciando(false)
+      setIniciarOpen(false)
     }
   }
 
@@ -138,6 +154,17 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
             </div>
 
             <div className="flex items-center gap-1 flex-shrink-0">
+              {isPlanejada && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  disabled={iniciando}
+                  onClick={() => setIniciarOpen(true)}
+                  className="text-green-700 border-green-300 hover:bg-green-50"
+                >
+                  ▶ Iniciar Produção
+                </Button>
+              )}
               {canHarvest && (
                 <Button
                   variant="outline"
@@ -146,7 +173,7 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                   className="text-green-700 border-green-300 hover:bg-green-50"
                 >
                   <Wheat className="h-4 w-4 mr-1" />
-                  Colher
+                  Registrar Colheita
                 </Button>
               )}
               {isPlanejada && (
@@ -306,6 +333,28 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
         order={currentOrder}
         onSuccess={handleColheitaSuccess}
       />
+
+      <AlertDialog open={iniciarOpen} onOpenChange={setIniciarOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Iniciar produção?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Iniciar produção neste talhão? O status mudará para{" "}
+              <strong>Em execução</strong> e a colheita poderá ser registrada.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancelar</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleIniciar}
+              disabled={iniciando}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              {iniciando ? "Iniciando..." : "Confirmar"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

@@ -93,14 +93,17 @@ def soft_delete_client(db: Session, client_id: UUID) -> Optional[Client]:
 
 def create_sale(db: Session, data: SaleCreate) -> Sale:
     sold_at = data.sold_at or datetime.now(timezone.utc)
-    total_amount = sum(
+    items_total = sum(
         Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
         for item in data.items
     )
+    shipping = Decimal(str(data.shipping_cost or 0))
+    total_amount = items_total + shipping
 
     sale = Sale(
         client_id=data.client_id,
         total_amount=total_amount,
+        shipping_cost=shipping,
         sold_at=sold_at,
         notes=data.notes,
         status=SaleStatus.REALIZADA,

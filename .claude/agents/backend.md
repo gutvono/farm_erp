@@ -159,6 +159,41 @@ Rules:
 - Test downgrades locally before pushing
 - One logical change per migration
 
+### Project conventions (observed)
+
+- **Sequential ids:** use `revision = "000N_short_name"` continuing the chain
+  (`0001_initial_schema` → … → `0008_fix_payroll_desc_index`). `down_revision`
+  must point to the current head.
+- **Filename:** `alembic/versions/YYYYMMDD_000N_short_name.py` (date prefix +
+  same `000N_short_name` as the revision id).
+- **32-char limit:** `alembic_version.version_num` is `VARCHAR(32)`. The
+  **revision id** (not the filename) must be ≤ 32 chars, otherwise
+  `alembic upgrade` fails on the version bump with
+  `value too long for type character varying(32)`. Keep the id short; the
+  filename can be more descriptive.
+- **Verify with `alembic check`:** after `upgrade head`, run `alembic check`.
+  It must report `No new upgrade operations detected` — i.e. the SQLAlchemy
+  models and the migrations are in sync, no residual diff.
+
+### Running migrations in this project (Docker)
+
+The backend code is **baked into the image** (`COPY . .`), not bind-mounted
+(only `./backend/uploads` is mounted). After changing models/migrations you
+**must rebuild** for the container to see them. In dev the compose `command:`
+overrides the Dockerfile `CMD`, so `entrypoint.sh` (which runs
+`alembic upgrade head`) does **not** run automatically — apply migrations by hand:
+
+```bash
+docker compose build backend
+docker compose up -d backend
+docker compose exec backend poetry run alembic upgrade head
+docker compose exec backend poetry run alembic check
+```
+
+> Use `docker compose` (v2). The legacy `docker-compose` (v1) breaks on newer
+> image formats with `KeyError: 'ContainerConfig'`. Mixing the two splits the
+> project across underscore/dash container names — stick to v2 everywhere.
+
 ## Transactions
 
 For multi-step operations (e.g., creating a sale + invoice + account receivable):

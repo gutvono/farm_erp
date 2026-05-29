@@ -314,6 +314,15 @@ Reversível via `downgrade()` (drop das duas colunas).
 
 Reversível via `downgrade()` (drop das tabelas e enums).
 
+`0008_fix_payroll_desc_index` (arquivo `alembic/versions/20260528_0008_fix_payroll_desc_index.py`):
+- Corrige a divergência entre o model e a 0006 em `payroll_events.description`: o model declara `unique=True, index=True` (um único índice unique `ix_payroll_events_description`), mas a 0006 criou uma constraint `UNIQUE` (`payroll_events_description_key`) **somada a** um índice não-unique de mesmo nome lógico.
+- `upgrade()`: remove a constraint `UNIQUE` e o índice não-unique; recria `ix_payroll_events_description` como índice **unique**.
+- Elimina o diff residual reportado por `alembic check`.
+
+Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQUE`).
+
+> **Convenção:** `alembic_version.version_num` é `VARCHAR(32)` — o `revision id` de cada migration deve ter no máximo 32 caracteres (por isso `0008_fix_payroll_desc_index` e não o nome completo do arquivo).
+
 ## Observações
 
 - Mensagens de erro e resposta em português.

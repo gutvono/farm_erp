@@ -43,6 +43,7 @@ const schema = z
       .number({ error: "Informe o intervalo" })
       .int()
       .min(1),
+    shipping_cost: z.number().min(0).optional(),
     items: z.array(itemSchema).min(1, "Adicione pelo menos 1 item"),
   })
   .superRefine((data, ctx) => {
@@ -106,6 +107,7 @@ export function VendaForm({
       installments: 2,
       first_due_date: "",
       installment_interval_days: 30,
+      shipping_cost: undefined,
       items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
     },
   })
@@ -123,21 +125,24 @@ export function VendaForm({
 
   const selectedClient = clients.find((c) => c.id === clientId)
 
-  const totalAmount = watchedItems.reduce((acc, item) => {
+  const itemsTotal = watchedItems.reduce((acc, item) => {
     const q = Number(item.quantity) || 0
     const p = Number(item.unit_price) || 0
     return acc + q * p
   }, 0)
 
+  const shippingCost = Number(watch("shipping_cost")) || 0
+  const totalAmount = itemsTotal + shippingCost
+
   const installmentPreview: { label: string; due: string; amount: number }[] =
     (() => {
       if (!isParcelado || installments < 2 || !firstDueDate) return []
-      const base = Math.round((totalAmount / installments) * 100) / 100
+      const base = Math.round((itemsTotal / installments) * 100) / 100
       const dates = calcInstallmentDates(firstDueDate, installments, intervalDays || 30)
       return dates.map((dt, i) => {
         const amount =
           i === installments - 1
-            ? Math.round((totalAmount - base * (installments - 1)) * 100) / 100
+            ? Math.round((itemsTotal - base * (installments - 1)) * 100) / 100
             : base
         return {
           label: `Parcela ${i + 1}/${installments}`,
@@ -156,6 +161,7 @@ export function VendaForm({
         installments: 2,
         first_due_date: "",
         installment_interval_days: 30,
+        shipping_cost: undefined,
         items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
       })
     }
@@ -172,6 +178,8 @@ export function VendaForm({
         first_due_date: isParcelado && data.installments >= 2 ? data.first_due_date : undefined,
         installment_interval_days:
           isParcelado && data.installments >= 2 ? data.installment_interval_days : undefined,
+        shipping_cost:
+          data.shipping_cost && data.shipping_cost > 0 ? data.shipping_cost : undefined,
         items: data.items.map((item) => ({
           stock_item_id: item.stock_item_id,
           quantity: item.quantity,
@@ -304,27 +312,34 @@ export function VendaForm({
                 </div>
 
                 {installmentPreview.length > 0 && (
-                  <div className="overflow-hidden rounded border">
-                    <table className="w-full text-xs">
-                      <thead className="bg-slate-100">
-                        <tr>
-                          <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
-                          <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
-                          <th className="px-3 py-1.5 text-right font-medium">Valor</th>
-                        </tr>
-                      </thead>
-                      <tbody>
-                        {installmentPreview.map((row, i) => (
-                          <tr key={i} className="border-t">
-                            <td className="px-3 py-1.5">{row.label}</td>
-                            <td className="px-3 py-1.5">{row.due}</td>
-                            <td className="px-3 py-1.5 text-right">
-                              {formatCurrency(row.amount)}
-                            </td>
+                  <div className="space-y-1">
+                    <div className="overflow-hidden rounded border">
+                      <table className="w-full text-xs">
+                        <thead className="bg-slate-100">
+                          <tr>
+                            <th className="px-3 py-1.5 text-left font-medium">Parcela</th>
+                            <th className="px-3 py-1.5 text-left font-medium">Vencimento</th>
+                            <th className="px-3 py-1.5 text-right font-medium">Valor</th>
                           </tr>
-                        ))}
-                      </tbody>
-                    </table>
+                        </thead>
+                        <tbody>
+                          {installmentPreview.map((row, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="px-3 py-1.5">{row.label}</td>
+                              <td className="px-3 py-1.5">{row.due}</td>
+                              <td className="px-3 py-1.5 text-right">
+                                {formatCurrency(row.amount)}
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                    {shippingCost > 0 && (
+                      <p className="text-xs text-slate-500">
+                        Frete (cobrado à vista): {formatCurrency(shippingCost)}
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
@@ -422,6 +437,27 @@ export function VendaForm({
                 )
               })}
             </div>
+          </div>
+
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="shipping_cost">Valor do Transporte (R$)</Label>
+              <span className="text-xs text-slate-500">Gera uma NF de transporte separada</span>
+            </div>
+            <Input
+              id="shipping_cost"
+              type="number"
+              step="0.01"
+              min="0"
+              {...register("shipping_cost", {
+                setValueAs: (v) => {
+                  if (v === "" || v === null || v === undefined) return undefined
+                  const n = Number(v)
+                  return Number.isNaN(n) ? undefined : n
+                },
+              })}
+              placeholder="0.00"
+            />
           </div>
 
           <div className="flex items-center justify-between pt-2 border-t">

@@ -194,6 +194,7 @@ export default function EstoquePage() {
   }
 
   const criticalCount = items.filter((i) => i.is_below_minimum).length
+  const recebimentosProduto = recebimentos.filter((o) => o.order_type === "produto")
 
   return (
     <RootLayout title="Estoque">
@@ -212,9 +213,9 @@ export default function EstoquePage() {
             <TabsTrigger value="inventory">Inventário</TabsTrigger>
             <TabsTrigger value="recebimentos" className="relative">
               Recebimentos
-              {recebimentos.length > 0 && (
+              {recebimentosProduto.length > 0 && (
                 <span className="ml-1.5 rounded-full bg-orange-500 text-white text-xs px-1.5 py-0.5 leading-none">
-                  {recebimentos.length}
+                  {recebimentosProduto.length}
                 </span>
               )}
             </TabsTrigger>
@@ -334,14 +335,14 @@ export default function EstoquePage() {
 
             {recebimentosLoading ? (
               <div className="py-12 text-center text-slate-400">Carregando recebimentos...</div>
-            ) : recebimentos.length === 0 ? (
+            ) : recebimentosProduto.length === 0 ? (
               <div className="py-12 text-center text-slate-400">
                 <PackageCheck className="h-10 w-10 mx-auto mb-2 text-slate-300" />
                 Nenhuma ordem aguardando conferência
               </div>
             ) : (
               <div className="space-y-4">
-                {recebimentos.map((order) => {
+                {recebimentosProduto.map((order) => {
                   const isExpanded = expandedConferencia === order.id
                   return (
                     <Card key={order.id} className="border-slate-200">

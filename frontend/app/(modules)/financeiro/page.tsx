@@ -56,7 +56,7 @@ import {
   getMovimentacoes,
   getSaldo,
 } from "@/services/financeiro"
-import { getOrdens, aprovarOrdem, recusarOrdem } from "@/services/compras"
+import { getOrdens, aprovarOrdem, recusarOrdem, concluirServico } from "@/services/compras"
 import {
   AccountsPayable,
   AccountsReceivable,
@@ -253,6 +253,10 @@ export default function FinanceiroPage() {
     if (!approveTarget) return
     setApproving(true)
     try {
+      const isServico = approveTarget.order_type === "servico"
+      const orderId = approveTarget.id
+      const supplierName = approveTarget.supplier_name
+
       const data: Parameters<typeof aprovarOrdem>[1] = {
         payment_method: approvePaymentMethod as Parameters<typeof aprovarOrdem>[1]["payment_method"],
       }
@@ -261,10 +265,18 @@ export default function FinanceiroPage() {
         data.first_due_date = approveFirstDueDate
         data.installment_interval_days = approveIntervalDays
       }
-      await aprovarOrdem(approveTarget.id, data)
-      toast.success(`Ordem de ${approveTarget.supplier_name} aprovada`)
-      setApproveTarget(null)
-      await loadPendingOrders()
+      await aprovarOrdem(orderId, data)
+
+      if (isServico) {
+        await concluirServico(orderId)
+        toast.success(`Serviço de ${supplierName} aprovado e enviado para pagamento`)
+        setApproveTarget(null)
+        await Promise.all([loadPendingOrders(), loadPayables()])
+      } else {
+        toast.success(`Ordem de ${supplierName} aprovada`)
+        setApproveTarget(null)
+        await loadPendingOrders()
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao aprovar ordem")
     } finally {

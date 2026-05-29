@@ -96,6 +96,7 @@ class SaleCreate(BaseModel):
     first_due_date: Optional[date] = None
     installment_interval_days: int = Field(default=30, ge=1)
     payment_method: PaymentMethod = PaymentMethod.A_VISTA
+    shipping_cost: Optional[Decimal] = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_installments(self) -> "SaleCreate":
@@ -116,6 +117,7 @@ class SaleOut(BaseModel):
     client_name: str
     status: SaleStatus
     total_amount: Decimal
+    shipping_cost: Decimal = Decimal("0")
     sold_at: datetime
     delivered_at: Optional[datetime] = None
     notes: Optional[str] = None
@@ -144,6 +146,7 @@ class SaleOut(BaseModel):
             client_name=sale.client.name if sale.client else "",
             status=sale.status,
             total_amount=sale.total_amount,
+            shipping_cost=Decimal(str(sale.shipping_cost or 0)),
             sold_at=sale.sold_at,
             delivered_at=sale.delivered_at,
             notes=sale.notes,

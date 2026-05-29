@@ -333,6 +333,7 @@ def soft_delete_invoice(db: Session, invoice_id: UUID) -> Invoice:
 
 _NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"
 _NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"
+_NF_TRANSPORTE_PREFIX = "[NF-TRANSPORTE]"
 
 
 def _build_purchase_notes(prefix: str, order_id: UUID, supplier_name: str, extra: str = "") -> str:
@@ -513,6 +514,66 @@ def criar_nota_devolucao(db: Session, order_id: UUID) -> Optional[Invoice]:
         category=FinancialCategory.COMPRA,
         amount=Decimal("0"),
         description=f"NF de devolução emitida: {invoice.number} — ordem #{order.id}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+    return invoice
+
+
+def criar_nota_transporte(
+    db: Session,
+    *,
+    shipping_cost: Decimal,
+    sale_id: Optional[UUID] = None,
+    order_id: Optional[UUID] = None,
+    client_id: Optional[UUID] = None,
+) -> Invoice:
+    """
+    Cria NF de transporte (1 item à vista com o custo de frete).
+    Chamada pelo Comercial na criação da venda (sale_id preenchido, client_id do
+    cliente) e pelo Compras em complete_order_after_payment (order_id preenchido,
+    client_id=None).
+    """
+    from app.modules.financeiro import service as fin_service
+
+    if sale_id:
+        ref_label = f"Venda #{sale_id}"
+        notes = f"{_NF_TRANSPORTE_PREFIX} sale_id={sale_id} — Custo de transporte — {ref_label}"
+        movement_type = MovementType.ENTRADA
+        category = FinancialCategory.VENDA
+    else:
+        ref_label = f"Ordem de compra #{order_id}"
+        notes = f"{_NF_TRANSPORTE_PREFIX} order_id={order_id} — Custo de transporte — {ref_label}"
+        movement_type = MovementType.SAIDA
+        category = FinancialCategory.COMPRA
+
+    invoice_items = [
+        {
+            "description": f"Custo de transporte — {ref_label}",
+            "quantity": Decimal("1"),
+            "unit_price": shipping_cost,
+            "subtotal": shipping_cost,
+        }
+    ]
+
+    invoice = fat_repo.create_invoice(
+        db,
+        client_id=client_id,
+        items=invoice_items,
+        total_amount=shipping_cost,
+        sale_id=sale_id,
+        due_date=date.today(),
+        notes=notes,
+        invoice_type="transporte",
+    )
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=movement_type,
+        category=category,
+        amount=Decimal("0"),
+        description=f"NF de transporte emitida: {invoice.number}",
         source_module="faturamento",
         reference_id=invoice.id,
     )

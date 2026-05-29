@@ -94,6 +94,7 @@ class PurchaseOrderCreate(BaseModel):
     order_type: str = Field(default="produto")
     service_description: Optional[str] = None
     total_amount: Optional[Decimal] = Field(default=None, ge=0)
+    shipping_cost: Optional[Decimal] = Field(default=None, ge=0)
 
     @model_validator(mode="after")
     def _validate_order_type(self) -> "PurchaseOrderCreate":
@@ -108,6 +109,8 @@ class PurchaseOrderCreate(BaseModel):
                 raise ValueError(
                     "total_amount é obrigatório e deve ser maior que zero para ordens de serviço"
                 )
+            # shipping_cost não se aplica a ordens de serviço
+            self.shipping_cost = None
         else:
             if not self.items:
                 raise ValueError(
@@ -142,6 +145,7 @@ class PurchaseOrderOut(BaseModel):
     supplier_name: str
     status: PurchaseOrderStatus
     total_amount: Decimal
+    shipping_cost: Decimal = Decimal("0")
     receipt_total_amount: Decimal = Decimal("0")
     financial_approval_note: Optional[str] = None
     ordered_at: datetime
@@ -167,6 +171,7 @@ class PurchaseOrderOut(BaseModel):
             supplier_name=order.supplier.name if order.supplier else "",
             status=order.status,
             total_amount=order.total_amount,
+            shipping_cost=Decimal(str(order.shipping_cost or 0)),
             receipt_total_amount=order.receipt_total_amount or Decimal("0"),
             financial_approval_note=order.financial_approval_note,
             ordered_at=order.ordered_at,
@@ -257,6 +262,7 @@ class PurchaseOrderWithReceipts(BaseModel):
     supplier_name: str
     status: PurchaseOrderStatus
     total_amount: Decimal
+    shipping_cost: Decimal = Decimal("0")
     receipt_total_amount: Decimal
     financial_approval_note: Optional[str] = None
     ordered_at: datetime
@@ -283,6 +289,7 @@ class PurchaseOrderWithReceipts(BaseModel):
             supplier_name=order.supplier.name if order.supplier else "",
             status=order.status,
             total_amount=order.total_amount,
+            shipping_cost=Decimal(str(order.shipping_cost or 0)),
             receipt_total_amount=order.receipt_total_amount,
             financial_approval_note=order.financial_approval_note,
             ordered_at=order.ordered_at,
