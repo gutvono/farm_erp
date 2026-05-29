@@ -93,15 +93,19 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
 
     if data.order_type == "servico":
         total_amount = Decimal(str(data.total_amount or 0))
+        shipping = Decimal("0")
     else:
-        total_amount = sum(
+        items_total = sum(
             Decimal(str(item.quantity)) * Decimal(str(item.unit_price))
             for item in data.items
         )
+        shipping = Decimal(str(data.shipping_cost or 0))
+        total_amount = items_total + shipping
 
     order = PurchaseOrder(
         supplier_id=data.supplier_id,
         total_amount=total_amount,
+        shipping_cost=shipping,
         ordered_at=ordered_at,
         notes=data.notes,
         order_type=data.order_type,
@@ -382,6 +386,7 @@ def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
                     PurchaseOrderStatus.EM_CONFERENCIA,
                 ]
             ),
+            PurchaseOrder.order_type == "produto",
         )
         .order_by(PurchaseOrder.ordered_at.desc())
         .all()

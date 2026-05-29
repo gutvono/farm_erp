@@ -39,6 +39,7 @@ const schema = z
     order_type: z.enum(["produto", "servico"]),
     service_description: z.string().optional(),
     total_amount: z.number().optional(),
+    shipping_cost: z.number().min(0).optional(),
     items: z.array(itemSchema),
   })
   .superRefine((data, ctx) => {
@@ -103,6 +104,7 @@ export function OrdemForm({
       order_type: "produto",
       service_description: "",
       total_amount: undefined,
+      shipping_cost: undefined,
       items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
     },
   })
@@ -113,13 +115,15 @@ export function OrdemForm({
   const supplierId = watch("supplier_id")
   const orderType = watch("order_type")
 
+  const shippingCost = orderType === "produto" ? Number(watch("shipping_cost")) || 0 : 0
+
   const totalAmount =
     orderType === "produto"
       ? watchedItems.reduce((acc, item) => {
           const q = Number(item.quantity) || 0
           const p = Number(item.unit_price) || 0
           return acc + q * p
-        }, 0)
+        }, 0) + shippingCost
       : Number(watch("total_amount")) || 0
 
   useEffect(() => {
@@ -130,6 +134,7 @@ export function OrdemForm({
         order_type: "produto",
         service_description: "",
         total_amount: undefined,
+        shipping_cost: undefined,
         items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
       })
     }
@@ -152,6 +157,8 @@ export function OrdemForm({
           supplier_id: data.supplier_id,
           notes: data.notes || undefined,
           order_type: "produto",
+          shipping_cost:
+            data.shipping_cost && data.shipping_cost > 0 ? data.shipping_cost : undefined,
           items: data.items.map((item) => ({
             stock_item_id: item.stock_item_id,
             quantity: item.quantity,
@@ -212,7 +219,10 @@ export function OrdemForm({
             <div className="flex gap-2">
               <button
                 type="button"
-                onClick={() => setValue("order_type", "produto")}
+                onClick={() => {
+                  setValue("order_type", "produto")
+                  setValue("items", [{ stock_item_id: "", quantity: 0, unit_price: 0 }])
+                }}
                 className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                   orderType === "produto"
                     ? "border-slate-900 bg-slate-900 text-white"
@@ -223,7 +233,11 @@ export function OrdemForm({
               </button>
               <button
                 type="button"
-                onClick={() => setValue("order_type", "servico")}
+                onClick={() => {
+                  setValue("order_type", "servico")
+                  setValue("items", [])
+                  setValue("shipping_cost", undefined)
+                }}
                 className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                   orderType === "servico"
                     ? "border-slate-900 bg-slate-900 text-white"
@@ -362,6 +376,29 @@ export function OrdemForm({
                     </div>
                   )
                 })}
+              </div>
+
+              <div className="space-y-1 pt-2">
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="shipping_cost">Valor do Transporte (R$)</Label>
+                  <span className="text-xs text-slate-500">
+                    Gera uma NF de transporte separada
+                  </span>
+                </div>
+                <Input
+                  id="shipping_cost"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  {...register("shipping_cost", {
+                    setValueAs: (v) => {
+                      if (v === "" || v === null || v === undefined) return undefined
+                      const n = Number(v)
+                      return Number.isNaN(n) ? undefined : n
+                    },
+                  })}
+                  placeholder="0.00"
+                />
               </div>
             </div>
           )}

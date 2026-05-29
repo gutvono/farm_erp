@@ -42,9 +42,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/compras/ordens/{id}/enviar-aprovacao` | `em_andamento` → `aguardando_aprovacao_financeiro` |
 | `POST` | `/api/compras/ordens/{id}/aprovar` | `aguardando_aprovacao_financeiro` → `aprovada` (body define `payment_method` + parcelamento) |
 | `POST` | `/api/compras/ordens/{id}/recusar` | `aguardando_aprovacao_financeiro` → `cancelada` (body: `{ "note": "..." }`, salvo em `financial_approval_note`) |
-| `POST` | `/api/compras/ordens/{id}/iniciar-conferencia` | `aprovada` → `em_conferencia` (cria 1 `purchase_order_receipt` por item, status `pendente`) |
+| `POST` | `/api/compras/ordens/{id}/iniciar-conferencia` | `aprovada` → `em_conferencia` (cria 1 `purchase_order_receipt` por item, status `pendente`). **Apenas ordens de produto** — retorna `400` se `order_type == "servico"` |
 | `POST` | `/api/compras/ordens/{id}/finalizar-conferencia` | `em_conferencia` → `aguardando_pagamento` (registra qtd aceita/recusada por item, calcula `receipt_total_amount`, gera a conta a pagar) |
-| `GET` | `/api/compras/recebimentos` | Lista ordens elegíveis a recebimento (status `aprovada` ou `em_conferencia`) |
+| `GET` | `/api/compras/recebimentos` | Lista ordens **de produto** (`order_type == "produto"`) elegíveis a recebimento (status `aprovada` ou `em_conferencia`). Ordens de serviço nunca aparecem aqui |
 | `GET` | `/api/compras/recebimentos/{id}` | Detalhe da ordem com `receipts` |
 
 > A conclusão da ordem (`aguardando_pagamento` → `concluida`) acontece **automaticamente** quando o Financeiro paga a conta a pagar vinculada (`payable.purchase_order_id`). Não existe endpoint manual para essa transição.
@@ -72,6 +72,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "notes": "opcional",
   "ordered_at": "2026-04-15T10:00:00Z",
   "order_type": "produto",
+  "shipping_cost": 80.00,
   "items": [
     {
       "stock_item_id": "uuid",
@@ -98,6 +99,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `order_type`: `"produto"` (default) ou `"servico"`
 - Ordens de produto exigem **mínimo 1 item**; `total_amount` calculado automaticamente como soma dos subtotais (`subtotal = quantity × unit_price`)
 - Ordens de serviço exigem `service_description` (obrigatório) e `total_amount` > 0; `items` pode ser lista vazia
+- `shipping_cost`: opcional (`>= 0`), **aplica-se apenas a ordens de produto**. Em ordens de serviço o campo é forçado a `None`/`0` no validator, mesmo que enviado. Quando `> 0`, é somado ao `total_amount` da ordem e dispara a emissão de uma NF de transporte no pagamento (ver "Ao Pagar a Conta a Pagar")
 - `ordered_at` opcional (default: now)
 - **Parcelamento (`installments`, `first_due_date`, `installment_interval_days`) não fica mais na criação** — o financeiro define no momento da aprovação
 
@@ -143,7 +145,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `rejection_reason` é **obrigatório** quando `quantity_rejected > 0`
 
 ### PurchaseOrderOut / PurchaseOrderWithReceipts
-- `PurchaseOrderOut`: inclui `supplier_name`, `items` (com `stock_item_name` e `subtotal`), `receipt_total_amount`, `financial_approval_note`, `order_type`, `service_description`, `payment_method`
+- `PurchaseOrderOut`: inclui `supplier_name`, `items` (com `stock_item_name` e `subtotal`), `shipping_cost` (default `0`), `receipt_total_amount`, `financial_approval_note`, `order_type`, `service_description`, `payment_method`
 - `PurchaseOrderWithReceipts`: mesmos campos + lista `receipts` (com `quantity_ordered`, `quantity_accepted`, `quantity_rejected`, `rejection_reason`, `status`, `unit_price`)
 
 ## Regras de Negócio
@@ -171,7 +173,7 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 - `concluida` e `cancelada` são **status finais**.
 - Tentar usar o endpoint legado `PATCH /ordens/{id}/status` com um status diferente de `cancelada` retorna `400` com instrução para usar os endpoints dedicados.
 - Soft delete permitido apenas em ordens com status `em_andamento`.
-- `iniciar-conferencia` cria automaticamente um `purchase_order_receipt` por item da ordem com status `pendente`.
+- `iniciar-conferencia` cria automaticamente um `purchase_order_receipt` por item da ordem com status `pendente`. É **restrito a ordens de produto**: chamá-lo numa ordem de serviço retorna `400` (serviços seguem por `/concluir-servico`).
 
 ### Ao Enviar para Aprovação (`/enviar-aprovacao`)
 - Origem: `em_andamento`
@@ -198,6 +200,7 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 - Origem: `em_conferencia`
 - **Ordens de serviço** (`order_type == "servico"`) pulam a conferência item a item: vão direto para `aguardando_pagamento` e geram a conta a pagar com `order.total_amount` e o `payment_method` da ordem. (O endpoint dedicado é `/concluir-servico`; finalize_receipt mantém o mesmo comportamento como fallback caso uma ordem de serviço esteja em `em_conferencia`.)
 - **Ordens de produto:** atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas e calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
+- O valor a pagar é `receipt_total_amount + shipping_cost`. Como o frete é devido mesmo que todos os itens sejam recusados, a conta a pagar é gerada sempre que `receipt_total_amount + shipping_cost > 0` (não apenas quando `receipt_total_amount > 0`).
 - Quando há valor a pagar, gera **conta(s) a pagar** dependendo do `payment_method` armazenado na aprovação:
   - **Não parcelado (`a_vista`/`pix`/`boleto`):** uma única conta a pagar. Vencimento = `first_due_date` da ordem se definido, caso contrário `today + 30d`. `payment_method` é propagado para a conta.
   - **Parcelado (`payment_method == "parcelado"`, `installments >= 2`):** N contas a pagar. O valor é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number`, `installment_total` e `payment_method = "parcelado"`.
@@ -222,7 +225,8 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
    ```
 2. **NF de Recebimento** — se houve qualquer item aceito: `fat_service.criar_nota_recebimento(db, order.id)`.
 3. **NF de Devolução** — se houve qualquer item com `quantity_rejected > 0`: `fat_service.criar_nota_devolucao(db, order.id)`.
-4. **Conclusão** — status → `concluida`, `received_at` = `now()`.
+4. **NF de Transporte** — se `order.shipping_cost > 0`: `fat_service.criar_nota_transporte(db, shipping_cost=order.shipping_cost, order_id=order.id, client_id=None)`. Sempre à vista (1 item, `quantity=1`, `unit_price=shipping_cost`), `movement_type=SAIDA`, `category=COMPRA`.
+5. **Conclusão** — status → `concluida`, `received_at` = `now()`.
 
 ### Validações na Criação
 - `supplier_id` deve existir e não estar deletado (404 se não encontrado)
@@ -248,7 +252,8 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 | `id` | UUID PK |
 | `supplier_id` | UUID FK → suppliers |
 | `status` | enum `purchase_order_status` (`em_andamento` / `aguardando_aprovacao_financeiro` / `aprovada` / `em_conferencia` / `aguardando_pagamento` / `concluida` / `cancelada`) |
-| `total_amount` | NUMERIC(12,2) |
+| `total_amount` | NUMERIC(12,2) — inclui `shipping_cost` (ordens de produto) |
+| `shipping_cost` | NUMERIC(12,2) (nullable, default 0) — custo de transporte (apenas ordens de produto) |
 | `receipt_total_amount` | NUMERIC(10,2) — soma dos itens aceitos na conferência |
 | `financial_approval_note` | TEXT (nullable — motivo da recusa pelo financeiro) |
 | `ordered_at` | TIMESTAMPTZ |
@@ -286,3 +291,11 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 | `rejection_reason` | TEXT (nullable — obrigatório se `quantity_rejected > 0`) |
 | `status` | enum `purchase_order_receipt_status` (`pendente` / `conferido`) |
 | `created_at`, `updated_at` | TIMESTAMPTZ |
+
+## Migrations
+
+`0007_add_shipping_cost` (arquivo `alembic/versions/20260528_0007_add_shipping_cost.py`):
+- Adiciona `purchase_orders.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (custo de transporte, apenas ordens de produto).
+- Adiciona `sales.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (a mesma migration cobre Comercial e Compras).
+
+Reversível via `downgrade()` (drop das duas colunas).

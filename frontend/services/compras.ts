@@ -214,12 +214,23 @@ export async function createOrdem(data: {
   order_type?: "produto" | "servico"
   service_description?: string
   total_amount?: number
+  shipping_cost?: number
   items: { stock_item_id: string; quantity: number; unit_price: number; description?: string }[]
 }): Promise<PurchaseOrder> {
   const response = await apiFetch<ApiResponse<RawOrder>>("/api/compras/ordens", {
     method: "POST",
     body: JSON.stringify(data),
   })
+  // TODO BACKEND DEV: o endpoint POST /api/compras/ordens deve aceitar o campo opcional
+  // shipping_cost (number >= 0). Quando presente e > 0, o service de backend deve:
+  // 1. Persistir shipping_cost na tabela purchase_orders (nova coluna NUMERIC(12,2), default 0)
+  // 2. Incluir shipping_cost no total_amount da ordem OU rastreá-lo separadamente (decisão do dev)
+  // 3. Na função complete_order_after_payment (chamada pelo Financeiro ao pagar a conta a pagar),
+  //    após gerar a NF de recebimento, verificar se purchase_order.shipping_cost > 0 e chamar
+  //    fat_service.criar_nota_transporte(db, order_id=order.id, shipping_cost=order.shipping_cost)
+  //    — função nova no faturamento service — que cria uma Invoice com invoice_type="transporte",
+  //    client_id=NULL (padrão das NFs de compras), sale_id=NULL, 1 item com
+  //    description="Custo de transporte — Ordem #{order.id}", quantity=1, unit_price=shipping_cost.
   return parseOrder(response.data)
 }
 

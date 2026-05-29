@@ -183,12 +183,22 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
                 payment_method=payment_method_value,
             )
 
+    # NF de transporte (somente se houver custo de frete)
+    shipping_cost = Decimal(str(sale.shipping_cost or 0))
+    if shipping_cost > 0:
+        faturamento_service.criar_nota_transporte(
+            db,
+            shipping_cost=shipping_cost,
+            sale_id=sale.id,
+            client_id=sale.client_id,
+        )
+
     # 7. Register financial movement (entrada/venda, R$0 placeholder)
     fin_service.registrar_movimento(
         db,
         movement_type=MovementType.ENTRADA,
         category=FinancialCategory.VENDA,
-        amount=Decimal(sale.total_amount) if installments <= 1 else Decimal("0"),
+        amount=Decimal("0"),
         description=f"Venda — {client.name}",
         source_module="comercial",
         reference_id=sale.id,

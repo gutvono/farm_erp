@@ -47,17 +47,21 @@ const STATUS_COLORS: Record<InvoiceStatus, string> = {
   cancelada: "bg-slate-100 text-slate-600",
 }
 
-function detectNfType(notes: string | null): "venda" | "recebimento" | "devolucao" | null {
+type NfType = "venda" | "recebimento" | "devolucao" | "transporte"
+
+function detectNfType(notes: string | null): NfType | null {
   if (!notes) return null
   if (notes.includes("[NF-RECEBIMENTO]")) return "recebimento"
   if (notes.includes("[NF-DEVOLUCAO]")) return "devolucao"
+  if (notes.includes("[NF-TRANSPORTE]")) return "transporte"
   return null
 }
 
-function getNfType(invoice: Invoice): "venda" | "recebimento" | "devolucao" | null {
+function getNfType(invoice: Invoice): NfType | null {
   if (invoice.invoice_type === "venda") return "venda"
   if (invoice.invoice_type === "recebimento") return "recebimento"
   if (invoice.invoice_type === "devolucao") return "devolucao"
+  if (invoice.invoice_type === "transporte") return "transporte"
   if (invoice.sale_id && invoice.invoice_type === "normal") return "venda"
   return detectNfType(invoice.notes)
 }
@@ -81,7 +85,93 @@ function calcTax(base: number, rate: number) {
   return (base * rate) / 100
 }
 
-async function generatePdf(invoice: Invoice, nfType: "venda" | "recebimento" | "devolucao") {
+function extractSaleIdFromNotes(notes: string | null): string | null {
+  if (!notes) return null
+  const match = notes.match(/sale_id=([0-9a-f-]{36})/i)
+  return match ? match[1] : null
+}
+
+async function generateTransportePdf(invoice: Invoice) {
+  const { jsPDF } = await import("jspdf")
+  const doc = new jsPDF()
+
+  doc.setFontSize(16)
+  doc.setFont("helvetica", "bold")
+  doc.text("NOTA FISCAL DE TRANSPORTE", 105, 18, { align: "center" })
+
+  doc.setFontSize(9)
+  doc.setFont("helvetica", "normal")
+  doc.text(`NF-e Nº: ${invoice.number}`, 15, 30)
+  doc.text(`Emissão: ${formatDate(invoice.issue_date)}`, 80, 30)
+
+  const orderId = extractOrderIdFromNotes(invoice.notes)
+  const saleId = extractSaleIdFromNotes(invoice.notes) ?? invoice.sale_id
+  let y = 37
+  if (orderId) {
+    doc.text(`Ref. Ordem: ${orderId}`, 15, y)
+    y += 7
+  } else if (saleId) {
+    doc.text(`Ref. Venda: ${saleId}`, 15, y)
+    y += 7
+  }
+  if (invoice.client_name) {
+    doc.text(`Destinatário: ${invoice.client_name}`, 15, y)
+    y += 7
+  }
+
+  y += 2
+  doc.line(15, y, 195, y)
+  y += 5
+
+  doc.setFont("helvetica", "bold")
+  doc.setFontSize(8)
+  doc.text("Descrição", 15, y)
+  doc.text("Qtd", 120, y, { align: "right" })
+  doc.text("V.Unit.", 150, y, { align: "right" })
+  doc.text("Subtotal", 190, y, { align: "right" })
+  y += 2
+  doc.line(15, y, 195, y)
+  y += 5
+
+  doc.setFont("helvetica", "normal")
+  for (const item of invoice.items) {
+    const lines = doc.splitTextToSize(item.description, 100) as string[]
+    doc.text(lines, 15, y)
+    doc.text(String(item.quantity), 120, y, { align: "right" })
+    doc.text(formatCurrency(item.unit_price), 150, y, { align: "right" })
+    doc.text(formatCurrency(item.subtotal), 190, y, { align: "right" })
+    y += lines.length * 5 + 2
+  }
+
+  y += 2
+  doc.line(15, y, 195, y)
+  y += 5
+
+  doc.setFont("helvetica", "bold")
+  doc.text("TOTAL NF-e:", 150, y, { align: "right" })
+  doc.text(formatCurrency(invoice.total_amount), 190, y, { align: "right" })
+
+  if (invoice.notes) {
+    y += 10
+    doc.setFont("helvetica", "bold")
+    doc.setFontSize(9)
+    doc.text("Observações", 15, y)
+    y += 4
+    doc.setFont("helvetica", "normal")
+    doc.setFontSize(8)
+    const noteLines = doc.splitTextToSize(invoice.notes, 180) as string[]
+    doc.text(noteLines, 15, y)
+  }
+
+  doc.save(`${invoice.number}.pdf`)
+}
+
+async function generatePdf(invoice: Invoice, nfType: NfType) {
+  if (nfType === "transporte") {
+    await generateTransportePdf(invoice)
+    return
+  }
+
   const { jsPDF } = await import("jspdf")
   const doc = new jsPDF()
 
@@ -310,6 +400,11 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                     )}
                   </>
                 )}
+                {nfType === "transporte" && (
+                  <Badge className="bg-amber-50 text-amber-700 border border-amber-200">
+                    Transporte
+                  </Badge>
+                )}
 
                 {invoice.sale_id && !isNfFiscal && (
                   <Badge variant="outline" className="text-xs">
@@ -324,6 +419,8 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de recebimento</p>
               ) : nfType === "devolucao" ? (
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de devolução</p>
+              ) : nfType === "transporte" ? (
+                <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de transporte</p>
               ) : null}
 
               <p className="text-sm text-slate-500">

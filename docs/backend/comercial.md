@@ -71,12 +71,14 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "installments": 1,
   "first_due_date": null,
   "installment_interval_days": 30,
-  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto"
+  "payment_method": "a_vista" | "parcelado" | "pix" | "boleto",
+  "shipping_cost": 150.00
 }
 ```
 
 - Mínimo de 1 item
-- `total_amount` calculado automaticamente (soma dos subtotais)
+- `total_amount` calculado automaticamente (soma dos subtotais **+ `shipping_cost`**)
+- `shipping_cost`: opcional (`>= 0`), custo de transporte. Quando `> 0`, é somado ao `total_amount` e dispara a emissão de uma NF de transporte (ver "Ao Criar uma Venda")
 - `subtotal` por item = `quantity × unit_price`
 - `sold_at` opcional (default: now)
 - Status inicial sempre `realizada`
@@ -91,7 +93,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```
 
 ### SaleOut — campos principais
-- Inclui `client_name`, `items` (com `stock_item_name` e `subtotal`) e `payment_method`
+- Inclui `client_name`, `items` (com `stock_item_name` e `subtotal`), `payment_method` e `shipping_cost` (default `0`)
 
 ## Regras de Negócio
 
@@ -140,9 +142,12 @@ Executado em sequência no `service.create_sale()`:
    - **À vista:** uma conta com `due_date = today + 30d`.
    - **Parcelado:** uma conta por parcela, cada uma vinculada à sua fatura (`invoice_id`), com `installment_number`, `installment_total` e `due_date` espelhando o vencimento da fatura.
 
-6. **Movimentação Financeira** (entrada/venda):
-   - **À vista:** valor cheio (`sale.total_amount`).
-   - **Parcelado:** uma única movimentação placeholder de R$0 (rastreabilidade).
+6. **NF de Transporte** (somente se `shipping_cost > 0`) — via `faturamento_service.criar_nota_transporte(...)` com `sale_id`, `client_id`, sempre à vista (1 item, `quantity=1`, `unit_price=shipping_cost`), independente de a venda ser parcelada. Emitida após a(s) fatura(s) de itens.
+
+7. **Movimentação Financeira** (rastreabilidade):
+   - **À vista e Parcelado:** movimentação placeholder de R$0.
+   - O valor real é registrado exclusivamente no recebimento da Conta a Receber
+     (via `financeiro.receive_payment`).
 
 ### Inadimplência de Clientes
 - Controlada pelo campo `is_delinquent` (Boolean) em `Client`
@@ -171,7 +176,8 @@ Executado em sequência no `service.create_sale()`:
 | `id` | UUID PK |
 | `client_id` | UUID FK → clients |
 | `status` | enum (`realizada` / `entregue` / `cancelada`) |
-| `total_amount` | NUMERIC(12,2) |
+| `total_amount` | NUMERIC(12,2) — inclui `shipping_cost` |
+| `shipping_cost` | NUMERIC(12,2) (nullable, default 0) — custo de transporte |
 | `sold_at` | TIMESTAMPTZ |
 | `delivered_at` | TIMESTAMPTZ (nullable) |
 | `notes` | TEXT (nullable) |
@@ -192,6 +198,14 @@ Executado em sequência no `service.create_sale()`:
 | `unit_price` | NUMERIC(12,2) |
 | `subtotal` | NUMERIC(12,2) — calculado na criação |
 | `created_at`, `updated_at` | TIMESTAMPTZ |
+
+## Migrations
+
+`0007_add_shipping_cost` (arquivo `alembic/versions/20260528_0007_add_shipping_cost.py`):
+- Adiciona `sales.shipping_cost NUMERIC(12,2) nullable, server_default '0'`.
+- Adiciona `purchase_orders.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (a mesma migration cobre Comercial e Compras).
+
+Reversível via `downgrade()` (drop das duas colunas).
 
 ## Campos Importantes vs. Spec
 

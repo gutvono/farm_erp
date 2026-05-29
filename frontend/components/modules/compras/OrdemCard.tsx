@@ -24,7 +24,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { enviarParaAprovacao, deleteOrdem } from "@/services/compras"
+import { enviarParaAprovacao, deleteOrdem, concluirServico } from "@/services/compras"
 import { PurchaseOrder, PurchaseOrderStatus } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
@@ -59,6 +59,8 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [deleteOpen, setDeleteOpen] = useState(false)
+  const [concludingService, setConcludingService] = useState(false)
+  const [concludeServiceOpen, setConcludeServiceOpen] = useState(false)
 
   async function confirmSendApproval() {
     setSendingApproval(true)
@@ -71,6 +73,20 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
     } finally {
       setSendingApproval(false)
       setApprovalDialogOpen(false)
+    }
+  }
+
+  async function confirmConcluirServico() {
+    setConcludingService(true)
+    try {
+      await concluirServico(order.id)
+      toast.success("Serviço concluído — aguardando pagamento")
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao concluir serviço")
+    } finally {
+      setConcludingService(false)
+      setConcludeServiceOpen(false)
     }
   }
 
@@ -174,6 +190,16 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                 </div>
               )}
 
+              {order.status === "aprovada" && order.order_type === "servico" && (
+                <Button
+                  size="sm"
+                  onClick={() => setConcludeServiceOpen(true)}
+                  disabled={concludingService}
+                >
+                  Concluir Serviço
+                </Button>
+              )}
+
               <Button variant="ghost" size="icon" onClick={() => setExpanded((v) => !v)}>
                 {expanded ? (
                   <ChevronUp className="h-4 w-4" />
@@ -264,6 +290,25 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
             <AlertDialogCancel>Voltar</AlertDialogCancel>
             <AlertDialogAction onClick={confirmSendApproval} disabled={sendingApproval}>
               {sendingApproval ? "Enviando..." : "Enviar para aprovação"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* AlertDialog: concluir serviço */}
+      <AlertDialog open={concludeServiceOpen} onOpenChange={setConcludeServiceOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Confirmar conclusão do serviço?</AlertDialogTitle>
+            <AlertDialogDescription>
+              O serviço de <strong>{order.supplier_name}</strong> será marcado como concluído e
+              enviado para pagamento. Esta ação não pode ser desfeita.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Voltar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmConcluirServico} disabled={concludingService}>
+              {concludingService ? "Concluindo..." : "Confirmar conclusão"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

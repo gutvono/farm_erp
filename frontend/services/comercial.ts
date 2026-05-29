@@ -180,12 +180,22 @@ export async function createVenda(data: {
   installments?: number
   first_due_date?: string
   installment_interval_days?: number
+  shipping_cost?: number
   items: { stock_item_id: string; quantity: number; unit_price: number }[]
 }): Promise<Sale> {
   const response = await apiFetch<ApiResponse<RawSale>>("/api/comercial/vendas", {
     method: "POST",
     body: JSON.stringify(data),
   })
+  // TODO BACKEND DEV: o endpoint POST /api/comercial/vendas deve aceitar o campo opcional
+  // shipping_cost (number >= 0). Quando presente e > 0, o service de backend deve:
+  // 1. Persistir shipping_cost na tabela sales (nova coluna NUMERIC(12,2), default 0)
+  // 2. Incluir shipping_cost no total_amount da venda OU rastreá-lo separadamente (decisão do dev)
+  // 3. Chamar fat_service.criar_nota_transporte(db, sale_id, shipping_cost) — função nova no
+  //    faturamento service — que cria uma Invoice com invoice_type="transporte", client_id=sale.client_id,
+  //    sale_id=sale.id, 1 item com description="Custo de transporte", quantity=1,
+  //    unit_price=shipping_cost. NF sempre à vista (não parcelada), mesmo que a venda seja parcelada.
+  // 4. Registrar financial_movement ENTRADA/VENDA separado para o transporte (amount=0, rastreabilidade)
   return parseSale(response.data)
 }
 

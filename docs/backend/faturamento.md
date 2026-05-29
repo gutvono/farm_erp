@@ -175,6 +175,22 @@ Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de um
 
 > Prefixos: `_NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"` e `_NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"` no `service.py`. O vínculo recebimento ↔ devolução é feito buscando o prefixo + `order_id=<uuid>` no campo `notes` — não há FK dedicada, intencionalmente, para evitar alterar o schema de `invoices` por causa do fluxo de compras.
 
+## Função Pública — `criar_nota_transporte` (frete)
+
+Emite uma NF de transporte representando o custo de frete (`shipping_cost`) de uma venda ou de uma ordem de compra de produto. Sempre **à vista** (1 item, `quantity=1`, `unit_price=shipping_cost`), mesmo quando a venda/ordem é parcelada.
+
+### `criar_nota_transporte(db, shipping_cost, sale_id=None, order_id=None, client_id=None) → Invoice`
+- `invoice_type`: `"transporte"`
+- 1 item fixo: `description="Custo de transporte — <ref>"`, `quantity=1`, `unit_price=shipping_cost`, `subtotal=shipping_cost`
+- `total_amount`: `shipping_cost`
+- `due_date`: `date.today()`
+- **Para vendas** (chamada pelo Comercial na criação da venda): `sale_id=<venda.id>`, `client_id=<venda.client_id>`, `movement_type=ENTRADA`, `category=VENDA`
+- **Para compras** (chamada por `complete_order_after_payment`): `order_id=<ordem.id>`, `client_id=NULL`, `movement_type=SAIDA`, `category=COMPRA`
+- `notes`: `"[NF-TRANSPORTE] sale_id=<uuid> — Custo de transporte — Venda #<uuid>"` ou `"[NF-TRANSPORTE] order_id=<uuid> — Custo de transporte — Ordem de compra #<uuid>"`
+- Registra `financial_movement` `amount=0` para rastreabilidade.
+
+> Prefixo: `_NF_TRANSPORTE_PREFIX = "[NF-TRANSPORTE]"` no `service.py`. A NF de transporte só é emitida quando `shipping_cost > 0`.
+
 ## Database Schema
 
 ### `invoices`
@@ -189,7 +205,7 @@ Chamadas por `compras.complete_order_after_payment` quando a conta a pagar de um
 | `total_amount` | NUMERIC(12,2) |
 | `status` | enum (`emitida` / `paga` / `cancelada`) |
 | `notes` | TEXT (nullable) |
-| `invoice_type` | VARCHAR(50) default `'venda'` — discriminador: `venda` / `recebimento` / `devolucao` |
+| `invoice_type` | VARCHAR(50) default `'venda'` — discriminador: `venda` / `recebimento` / `devolucao` / `transporte` |
 | `installment_number` | INT (nullable) — 1-based |
 | `installment_total` | INT (nullable) |
 | `parent_invoice_id` | UUID FK → invoices ON DELETE SET NULL (aponta para a 1ª fatura da cadeia parcelada) |
