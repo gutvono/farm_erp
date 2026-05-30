@@ -19,14 +19,10 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    op.add_column(
-        "sales",
-        sa.Column("shipping_cost", sa.Numeric(12, 2), nullable=True, server_default="0"),
-    )
-    op.add_column(
-        "purchase_orders",
-        sa.Column("shipping_cost", sa.Numeric(12, 2), nullable=True, server_default="0"),
-    )
+    # Idempotente contra o create_all da 0001.
+    for tbl in ("sales", "purchase_orders"):
+        op.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS shipping_cost NUMERIC(12,2) DEFAULT 0")
+        op.execute(f"ALTER TABLE {tbl} ALTER COLUMN shipping_cost SET DEFAULT 0")
 
 
 def downgrade() -> None:

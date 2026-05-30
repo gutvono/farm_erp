@@ -438,6 +438,24 @@ export interface ProductionHarvest {
   harvested_at: string
 }
 
+export interface ProductionOrderWorker {
+  id: string
+  employee_id: string
+  employee_name: string
+  salary_snapshot: number
+  is_responsible: boolean
+}
+
+export interface ProductionOrderService {
+  id: string
+  supplier_id: string
+  supplier_name: string
+  description: string
+  amount: number
+  due_date: string
+  accounts_payable_id: string | null
+}
+
 export interface ProductionOrder {
   id: string
   plot_id: string
@@ -448,8 +466,6 @@ export interface ProductionOrder {
   start_date: string | null
   expected_end_date: string | null
   executed_at: string | null
-  responsible_employee_id: string | null
-  responsible_employee_name: string | null
   total_sacas: number
   especial_sacas: number
   superior_sacas: number
@@ -462,6 +478,8 @@ export interface ProductionOrder {
   notes: string | null
   inputs: ProductionInput[]
   harvests: ProductionHarvest[]
+  workers: ProductionOrderWorker[]
+  services: ProductionOrderService[]
   created_at: string
   updated_at: string
 }

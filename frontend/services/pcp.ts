@@ -155,6 +155,24 @@ function parseHarvest(raw: RawProductionHarvest): ProductionHarvest {
   }
 }
 
+interface RawProductionOrderWorker {
+  id: string
+  employee_id: string
+  employee_name: string
+  salary_snapshot: string | number
+  is_responsible: boolean
+}
+
+interface RawProductionOrderService {
+  id: string
+  supplier_id: string
+  supplier_name: string
+  description: string
+  amount: string | number
+  due_date: string
+  accounts_payable_id: string | null
+}
+
 interface RawProductionOrder {
   id: string
   plot_id: string
@@ -165,8 +183,6 @@ interface RawProductionOrder {
   start_date: string | null
   expected_end_date: string | null
   executed_at: string | null
-  responsible_employee_id: string | null
-  responsible_employee_name: string | null
   total_sacas: string | number
   especial_sacas: string | number
   superior_sacas: string | number
@@ -179,6 +195,8 @@ interface RawProductionOrder {
   notes: string | null
   inputs: RawProductionInput[]
   harvests: RawProductionHarvest[]
+  workers: RawProductionOrderWorker[]
+  services: RawProductionOrderService[]
   created_at: string
   updated_at: string
 }
@@ -194,8 +212,6 @@ function parseOrder(raw: RawProductionOrder): ProductionOrder {
     start_date: raw.start_date,
     expected_end_date: raw.expected_end_date,
     executed_at: raw.executed_at,
-    responsible_employee_id: raw.responsible_employee_id,
-    responsible_employee_name: raw.responsible_employee_name,
     total_sacas: toNumber(raw.total_sacas),
     especial_sacas: toNumber(raw.especial_sacas),
     superior_sacas: toNumber(raw.superior_sacas),
@@ -208,6 +224,22 @@ function parseOrder(raw: RawProductionOrder): ProductionOrder {
     notes: raw.notes,
     inputs: (raw.inputs ?? []).map(parseInput),
     harvests: (raw.harvests ?? []).map(parseHarvest),
+    workers: (raw.workers ?? []).map((w) => ({
+      id: w.id,
+      employee_id: w.employee_id,
+      employee_name: w.employee_name,
+      salary_snapshot: toNumber(w.salary_snapshot),
+      is_responsible: w.is_responsible,
+    })),
+    services: (raw.services ?? []).map((s) => ({
+      id: s.id,
+      supplier_id: s.supplier_id,
+      supplier_name: s.supplier_name,
+      description: s.description,
+      amount: toNumber(s.amount),
+      due_date: s.due_date,
+      accounts_payable_id: s.accounts_payable_id,
+    })),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -314,15 +346,23 @@ export async function createOrdem(data: {
   planned_date?: string
   start_date?: string
   expected_end_date?: string
-  responsible_employee_id?: string
   notes?: string
   inputs: { stock_item_id: string; quantity: number }[]
+  workers?: { employee_id: string; is_responsible: boolean }[]
+  services?: { supplier_id: string; description: string; amount: number; due_date: string }[]
 }): Promise<ProductionOrder> {
   const response = await apiFetch<ApiResponse<RawProductionOrder>>("/api/pcp/ordens", {
     method: "POST",
     body: JSON.stringify(data),
   })
   return parseOrder(response.data)
+}
+
+export async function getFuncionariosEmProducao(): Promise<string[]> {
+  const response = await apiFetch<ApiResponse<string[]>>(
+    "/api/pcp/ordens/funcionarios-em-producao"
+  )
+  return response.data
 }
 
 export async function registrarColheita(

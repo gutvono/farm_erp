@@ -188,14 +188,49 @@ class HarvestOut(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class ProductionOrderWorkerCreate(BaseModel):
+    employee_id: UUID
+    is_responsible: bool = False
+
+
+class ProductionOrderWorkerOut(BaseModel):
+    id: UUID
+    employee_id: UUID
+    employee_name: str
+    salary_snapshot: Decimal
+    is_responsible: bool
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+class ProductionOrderServiceCreate(BaseModel):
+    supplier_id: UUID
+    description: str = Field(min_length=1, max_length=500)
+    amount: Decimal = Field(gt=0)
+    due_date: date
+
+
+class ProductionOrderServiceOut(BaseModel):
+    id: UUID
+    supplier_id: UUID
+    supplier_name: str
+    description: str
+    amount: Decimal
+    due_date: date
+    accounts_payable_id: Optional[UUID] = None
+
+    model_config = ConfigDict(from_attributes=True)
+
+
 class ProductionOrderCreate(BaseModel):
     plot_id: UUID
     planned_date: Optional[date] = None
     start_date: Optional[date] = None
     expected_end_date: Optional[date] = None
-    responsible_employee_id: Optional[UUID] = None
     notes: Optional[str] = None
     inputs: list[ProductionInputCreate] = Field(default_factory=list)
+    workers: list[ProductionOrderWorkerCreate] = Field(default_factory=list)
+    services: list[ProductionOrderServiceCreate] = Field(default_factory=list)
 
 
 class ProductionOrderOut(BaseModel):
@@ -206,8 +241,6 @@ class ProductionOrderOut(BaseModel):
     planned_date: Optional[date] = None
     start_date: Optional[date] = None
     expected_end_date: Optional[date] = None
-    responsible_employee_id: Optional[UUID] = None
-    responsible_employee_name: Optional[str] = None
     executed_at: Optional[datetime] = None
     total_sacas: Decimal
     especial_sacas: Decimal
@@ -222,6 +255,8 @@ class ProductionOrderOut(BaseModel):
     notes: Optional[str] = None
     inputs: list[ProductionInputOut]
     harvests: list[HarvestOut] = Field(default_factory=list)
+    workers: list[ProductionOrderWorkerOut] = Field(default_factory=list)
+    services: list[ProductionOrderServiceOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -234,7 +269,8 @@ class ProductionOrderOut(BaseModel):
         plot_name: str,
         inputs: list[ProductionInputOut],
         harvests: list[HarvestOut],
-        responsible_employee_name: Optional[str] = None,
+        workers: list["ProductionOrderWorkerOut"] = None,
+        services: list["ProductionOrderServiceOut"] = None,
     ) -> "ProductionOrderOut":
         final_statuses = {
             ProductionOrderStatus.CONCLUIDA,
@@ -253,8 +289,6 @@ class ProductionOrderOut(BaseModel):
             planned_date=order.planned_date,
             start_date=order.start_date,
             expected_end_date=order.expected_end_date,
-            responsible_employee_id=order.responsible_employee_id,
-            responsible_employee_name=responsible_employee_name,
             executed_at=order.executed_at,
             total_sacas=order.total_sacas,
             especial_sacas=order.especial_sacas,
@@ -269,6 +303,8 @@ class ProductionOrderOut(BaseModel):
             notes=order.notes,
             inputs=inputs,
             harvests=harvests,
+            workers=workers or [],
+            services=services or [],
             created_at=order.created_at,
             updated_at=order.updated_at,
         )

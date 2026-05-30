@@ -151,6 +151,17 @@ def create_order(
     )
 
 
+# IMPORTANTE: rota estática registrada ANTES de /ordens/{order_id} — caso
+# contrário o FastAPI trataria "funcionarios-em-producao" como um order_id.
+@router.get("/ordens/funcionarios-em-producao", response_model=SuccessResponse)
+def funcionarios_em_producao(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    ids = pcp_service.listar_funcionarios_em_producao(db)
+    return success("Funcionários em produção ativa", [str(i) for i in ids])
+
+
 @router.get("/ordens/{order_id}", response_model=SuccessResponse)
 def get_order(
     order_id: UUID,

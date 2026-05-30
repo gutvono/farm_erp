@@ -122,14 +122,27 @@ ON CONFLICT (id) DO NOTHING;
 -- 9. PRODUCTION ORDER (1 concluída) - Talhão A, safra 2026/1
 -- Total 100 sacas: 19 especial + 52 superior + 29 tradicional, custo R$ 8.500
 -- -----------------------------------------------------------------------------
-INSERT INTO production_orders (id, plot_id, executed_at, total_sacas, especial_sacas, superior_sacas, tradicional_sacas, total_cost, status, notes) VALUES
-('77777777-7777-7777-7777-777777777001', '66666666-6666-6666-6666-666666666001', '2026-01-15 08:00:00-03', 100.000, 19.000, 52.000, 29.000, 8500.00, 'concluida', 'Safra 2026/1 - talhão A')
+INSERT INTO production_orders (id, plot_id, order_number, start_date, expected_end_date, executed_at, total_sacas, especial_sacas, superior_sacas, tradicional_sacas, total_cost, status, notes) VALUES
+('77777777-7777-7777-7777-777777777001', '66666666-6666-6666-6666-666666666001', 'OP-0001', '2025-11-01', '2026-01-20', '2026-01-15 08:00:00-03', 100.000, 19.000, 52.000, 29.000, 8500.00, 'concluida', 'Safra 2026/1 - talhão A')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO production_inputs (id, production_order_id, stock_item_id, quantity, unit_cost, subtotal) VALUES
 ('77777777-7777-7777-7777-777777777011', '77777777-7777-7777-7777-777777777001', '55555555-5555-5555-5555-555555555011', 400.000, 12.00, 4800.00),
 ('77777777-7777-7777-7777-777777777012', '77777777-7777-7777-7777-777777777001', '55555555-5555-5555-5555-555555555012', 150.000,  8.00, 1200.00),
 ('77777777-7777-7777-7777-777777777013', '77777777-7777-7777-7777-777777777001', '55555555-5555-5555-5555-555555555013', 100.000, 25.00, 2500.00)
+ON CONFLICT (id) DO NOTHING;
+
+-- Trabalhadores alocados na ordem (Maria Santos responsável; Carlos Oliveira operador)
+-- salary_snapshot = base_salary do funcionário no momento da alocação.
+INSERT INTO production_order_workers (id, production_order_id, employee_id, salary_snapshot, is_responsible) VALUES
+('77777777-7777-7777-7777-777777777021', '77777777-7777-7777-7777-777777777001', '44444444-4444-4444-4444-444444444002', 3500.00, TRUE),
+('77777777-7777-7777-7777-777777777022', '77777777-7777-7777-7777-777777777001', '44444444-4444-4444-4444-444444444003', 2200.00, FALSE)
+ON CONFLICT (id) DO NOTHING;
+
+-- Serviço externo contratado (colheita mecanizada terceirizada).
+-- accounts_payable_id = NULL: ordem já concluída, dado apenas para teste visual.
+INSERT INTO production_order_services (id, production_order_id, supplier_id, description, amount, due_date, accounts_payable_id) VALUES
+('77777777-7777-7777-7777-777777777031', '77777777-7777-7777-7777-777777777001', '33333333-3333-3333-3333-333333333003', 'Colheita mecanizada terceirizada - talhão A', 3500.00, '2026-01-20', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- Atividades no talhão
@@ -322,7 +335,7 @@ ON CONFLICT (id) DO NOTHING;
 --   8 funcionários (3 CLT, 3 PJ, 2 Temp)
 --   9 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira)
 --   2 talhões, 3 atividades
---   1 ordem de produção concluída (100 sacas)
+--   1 ordem de produção concluída (100 sacas), 2 trabalhadores, 1 serviço externo
 --   1 ordem de compra concluída
 --   2 vendas (1 entregue, 1 realizada)
 --   2 faturas

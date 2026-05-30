@@ -7,6 +7,7 @@ from uuid import UUID
 from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
+from app.modules.compras.model import Supplier
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
 from app.modules.estoque.model import StockItem
@@ -33,6 +34,8 @@ from app.modules.pcp.schemas import (
     ProductionInputOut,
     ProductionOrderCreate,
     ProductionOrderOut,
+    ProductionOrderServiceOut,
+    ProductionOrderWorkerOut,
     ProductionResult,
 )
 from app.shared.enums import (
@@ -77,24 +80,21 @@ def _quantize2(value: Decimal) -> Decimal:
     return Decimal(str(value)).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
 
 
-def _get_employee(db: Session, employee_id: Optional[UUID]) -> Optional[Employee]:
-    if not employee_id:
-        return None
-    return folha_repo.get_employee(db, employee_id)
-
-
-def _calcular_custo_mao_obra(
-    employee: Optional[Employee],
+def _calcular_custo_workers(
+    workers,
     start: Optional[Any],
     end: Optional[Any],
 ) -> Decimal:
-    """Salário base / 22 dias úteis × dias trabalhados. Mínimo 1 dia."""
-    if not employee or not start or not end:
+    """SUM(salary_snapshot / 22 × max(1, dias)) para todos os workers."""
+    if not start or not end:
         return Decimal("0")
     dias = (end - start).days or 1
     if dias < 0:
         return Decimal("0")
-    return _quantize2(Decimal(str(employee.base_salary)) / Decimal("22") * Decimal(dias))
+    total = Decimal("0")
+    for w in workers:
+        total += Decimal(str(w.salary_snapshot)) / Decimal("22") * Decimal(dias)
+    return _quantize2(total)
 
 
 def _serialize_inputs(db: Session, order: ProductionOrder) -> list[ProductionInputOut]:
@@ -185,11 +185,7 @@ def list_activities(
 def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
     _get_plot_or_404(db, data.plot_id)
 
-    if data.responsible_employee_id and not folha_repo.get_employee(
-        db, data.responsible_employee_id
-    ):
-        raise HTTPException(status_code=404, detail="Funcionário responsável não encontrado")
-
+    # Validate inputs (stock items)
     stock_ids = [pi.stock_item_id for pi in data.inputs]
     smap = _stock_map(db, stock_ids)
     for pi in data.inputs:
@@ -200,21 +196,78 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
                 detail=f"Item de estoque não encontrado: {pi.stock_item_id}",
             )
 
+    # Validate workers
+    responsaveis = [w for w in data.workers if w.is_responsible]
+    if len(responsaveis) > 1:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas um funcionário pode ser marcado como responsável",
+        )
+
+    blocked_ids = set(pcp_repo.get_employee_ids_in_active_productions(db))
+    employee_objects: list[Employee] = []
+    for w in data.workers:
+        emp = folha_repo.get_employee(db, w.employee_id)
+        if not emp:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Funcionário não encontrado: {w.employee_id}",
+            )
+        if w.employee_id in blocked_ids:
+            raise HTTPException(
+                status_code=409,
+                detail=f"Funcionário {emp.name} já está em uma ordem de produção ativa",
+            )
+        employee_objects.append(emp)
+
+    # Validate services (suppliers)
+    for s in data.services:
+        supplier = (
+            db.query(Supplier)
+            .filter(Supplier.id == s.supplier_id, Supplier.deleted_at.is_(None))
+            .first()
+        )
+        if not supplier:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Fornecedor não encontrado: {s.supplier_id}",
+            )
+
     input_cost_map = {s.id: Decimal(str(s.unit_cost)) for s in smap.values()}
 
-    order = pcp_repo.create_order(db, data, input_cost_map)
+    workers_data = [
+        {
+            "employee_id": w.employee_id,
+            "salary_snapshot": Decimal(str(emp.base_salary)),
+            "is_responsible": w.is_responsible,
+        }
+        for w, emp in zip(data.workers, employee_objects)
+    ]
+    services_data = [
+        {
+            "supplier_id": s.supplier_id,
+            "description": s.description,
+            "amount": Decimal(str(s.amount)),
+            "due_date": s.due_date,
+        }
+        for s in data.services
+    ]
 
-    # Calculate estimated_cost: insumos + mão de obra estimada
-    custo_insumos = Decimal("0")
-    for pi in order.inputs:
-        custo_insumos += Decimal(str(pi.subtotal))
-
-    employee = _get_employee(db, data.responsible_employee_id)
-    custo_mao_obra = _calcular_custo_mao_obra(
-        employee, data.start_date, data.expected_end_date
+    order = pcp_repo.create_order(
+        db, data, input_cost_map, workers_data, services_data
     )
 
-    estimated = _quantize2(custo_insumos + custo_mao_obra)
+    # Calculate estimated_cost: insumos + workers + serviços
+    custo_insumos = sum(
+        (Decimal(str(pi.subtotal)) for pi in order.inputs), Decimal("0")
+    )
+    custo_workers = _calcular_custo_workers(
+        order.workers, data.start_date, data.expected_end_date
+    )
+    custo_servicos = sum(
+        (Decimal(str(s.amount)) for s in order.services), Decimal("0")
+    )
+    estimated = _quantize2(custo_insumos + custo_workers + custo_servicos)
     pcp_repo.update_order(db, order.id, estimated_cost=estimated)
 
     return pcp_repo.get_order_with_harvests(db, order.id)
@@ -232,6 +285,10 @@ def list_orders(
 
 def get_order(db: Session, order_id: UUID) -> ProductionOrder:
     return _get_order_or_404(db, order_id)
+
+
+def listar_funcionarios_em_producao(db: Session) -> list[UUID]:
+    return pcp_repo.get_employee_ids_in_active_productions(db)
 
 
 def soft_delete_order(db: Session, order_id: UUID) -> ProductionOrder:
@@ -264,6 +321,24 @@ def iniciar_producao(db: Session, order_id: UUID) -> ProductionOrder:
         from datetime import date
         order.start_date = date.today()
     db.commit()
+
+    # Cria contas a pagar para cada serviço externo da ordem
+    order_reloaded = pcp_repo.get_order_with_harvests(db, order_id)
+    for svc in order_reloaded.services:
+        if svc.accounts_payable_id is not None:
+            continue  # já criado (segurança)
+        ap = fin_service.criar_conta_pagar(
+            db,
+            description=f"Serviço externo — Ordem {order_reloaded.order_number}: {svc.description}",
+            amount=Decimal(str(svc.amount)),
+            due_date=svc.due_date,
+            supplier_id=svc.supplier_id,
+            source_module="pcp",
+            reference_id=order_reloaded.id,
+        )
+        pcp_repo.set_service_accounts_payable(db, svc.id, ap.id)
+    db.commit()
+
     return pcp_repo.get_order_with_harvests(db, order_id)
 
 
@@ -484,22 +559,27 @@ def registrar_colheita(
     # 7. Se finalizou: calcula realized_cost e registra movimento financeiro
     if is_final:
         reloaded = pcp_repo.get_order_with_harvests(db, order.id)
-        custo_insumos = Decimal("0")
-        for pi in reloaded.inputs:
-            item = estoque_repo.get_item(db, pi.stock_item_id)
-            if item:
-                custo_insumos += Decimal(str(pi.quantity)) * Decimal(str(item.unit_cost))
-
-        employee = _get_employee(db, reloaded.responsible_employee_id)
+        custo_insumos = sum(
+            (
+                Decimal(str(pi.quantity))
+                * Decimal(str(estoque_repo.get_item(db, pi.stock_item_id).unit_cost))
+                for pi in reloaded.inputs
+                if estoque_repo.get_item(db, pi.stock_item_id)
+            ),
+            Decimal("0"),
+        )
         executed_date = (
             reloaded.executed_at.date()
             if reloaded.executed_at
             else datetime.now(timezone.utc).date()
         )
-        custo_mao_obra = _calcular_custo_mao_obra(
-            employee, reloaded.start_date, executed_date
+        custo_workers = _calcular_custo_workers(
+            reloaded.workers, reloaded.start_date, executed_date
         )
-        realized = _quantize2(custo_insumos + custo_mao_obra)
+        custo_servicos = sum(
+            (Decimal(str(s.amount)) for s in reloaded.services), Decimal("0")
+        )
+        realized = _quantize2(custo_insumos + custo_workers + custo_servicos)
 
         pcp_repo.update_order(db, reloaded.id, realized_cost=realized)
 
@@ -555,19 +635,52 @@ def produzir_safra(db: Session, order_id: UUID) -> ProductionResult:
 def _serialize_order_model(db: Session, order: ProductionOrder) -> ProductionOrderOut:
     plot = db.query(Plot).filter(Plot.id == order.plot_id).first()
     plot_name = plot.name if plot else ""
-    employee_name: Optional[str] = None
-    if order.responsible_employee_id:
-        employee = folha_repo.get_employee(db, order.responsible_employee_id)
-        if employee:
-            employee_name = employee.name
     inputs_out = _serialize_inputs(db, order)
     harvests_out = _serialize_harvests(order)
+
+    workers_out = [
+        ProductionOrderWorkerOut(
+            id=w.id,
+            employee_id=w.employee_id,
+            employee_name=w.employee.name if w.employee else "",
+            salary_snapshot=w.salary_snapshot,
+            is_responsible=w.is_responsible,
+        )
+        for w in order.workers
+    ]
+
+    # supplier_name resolvido por query (não há relationship em ProductionOrderService)
+    supplier_ids = [s.supplier_id for s in order.services]
+    suppliers_map = (
+        {
+            s.id: s
+            for s in db.query(Supplier).filter(Supplier.id.in_(supplier_ids)).all()
+        }
+        if supplier_ids
+        else {}
+    )
+    services_out = [
+        ProductionOrderServiceOut(
+            id=s.id,
+            supplier_id=s.supplier_id,
+            supplier_name=suppliers_map[s.supplier_id].name
+            if s.supplier_id in suppliers_map
+            else "",
+            description=s.description,
+            amount=s.amount,
+            due_date=s.due_date,
+            accounts_payable_id=s.accounts_payable_id,
+        )
+        for s in order.services
+    ]
+
     return ProductionOrderOut.from_model(
         order,
         plot_name=plot_name,
         inputs=inputs_out,
         harvests=harvests_out,
-        responsible_employee_name=employee_name,
+        workers=workers_out,
+        services=services_out,
     )
 
 
