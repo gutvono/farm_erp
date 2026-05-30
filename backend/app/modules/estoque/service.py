@@ -126,9 +126,20 @@ def create_movement(db: Session, data: StockMovementCreate) -> StockMovement:
             source_module="estoque",
             reference_id=movement.id,
         )
-        # Weighted average cost: recompute after the entry is persisted.
-        novo_custo = estoque_repo.calcular_custo_medio(db, data.stock_item_id)
-        if novo_custo > 0:
+        # Custo médio móvel (moving weighted average): recalculado após a
+        # entrada ser persistida. O repository.create_movement já incrementou
+        # quantity_on_hand, então o saldo anterior à entrada é
+        # (quantity_on_hand - quantity). cmp_antes é o unit_cost atual do item
+        # (ainda não atualizado nesta chamada).
+        qty_antes = Decimal(str(item.quantity_on_hand)) - quantity
+        if qty_antes < 0:
+            qty_antes = Decimal("0")
+        cmp_antes = Decimal(str(item.unit_cost))
+        total_qty = qty_antes + quantity
+        if total_qty > 0:
+            novo_custo = (
+                (qty_antes * cmp_antes + quantity * unit_cost) / total_qty
+            ).quantize(Decimal("0.01"))
             item.unit_cost = novo_custo
             db.add(item)
             db.commit()
@@ -225,16 +236,23 @@ def registrar_saida(
     db: Session,
     stock_item_id: UUID,
     quantity: Decimal,
+    unit_cost: Decimal = Decimal("0"),
     description: str = "",
     source_module: str = "manual",
     reference_id: Optional[UUID] = None,
 ) -> StockMovement:
-    """Register stock withdrawal. Called by Comercial and PCP."""
+    """Register stock withdrawal. Called by Comercial and PCP.
+
+    O parâmetro ``unit_cost`` permite registrar o CMP do item no movimento de
+    saída (usado pelo Comercial para viabilizar o cálculo de CMV). O default é
+    R$0, preservando o comportamento de saídas internas do PCP (custo rastreado
+    na ordem de produção) e chamadas manuais.
+    """
     data = StockMovementCreate(
         stock_item_id=stock_item_id,
         movement_type=MovementType.SAIDA,
         quantity=quantity,
-        unit_cost=Decimal("0"),
+        unit_cost=unit_cost,
         description=description or "Saída de estoque",
         source_module=source_module,
         reference_id=reference_id,

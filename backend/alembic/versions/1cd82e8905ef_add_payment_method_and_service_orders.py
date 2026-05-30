@@ -24,36 +24,21 @@ payment_method_enum = sa.Enum(
 
 
 def upgrade() -> None:
-    # Create the enum type once; all columns reuse it.
+    # Idempotente contra o create_all da 0001. Create the enum type once; all
+    # columns reuse it.
     payment_method_enum.create(op.get_bind(), checkfirst=True)
 
-    op.add_column(
-        'accounts_payable',
-        sa.Column('payment_method', sa.Enum(name='payment_method', create_type=False), nullable=True),
-    )
-    op.add_column(
-        'accounts_receivable',
-        sa.Column('payment_method', sa.Enum(name='payment_method', create_type=False), nullable=True),
-    )
-    op.add_column(
-        'purchase_orders',
-        sa.Column('order_type', sa.String(length=10), nullable=False, server_default='produto'),
-    )
-    op.add_column(
-        'purchase_orders',
-        sa.Column('service_description', sa.Text(), nullable=True),
-    )
-    op.add_column(
-        'purchase_orders',
-        sa.Column('payment_method', sa.Enum(name='payment_method', create_type=False), nullable=True),
-    )
-    op.add_column(
-        'sales',
-        sa.Column('payment_method', sa.Enum(name='payment_method', create_type=False), nullable=True),
-    )
+    for tbl in ("accounts_payable", "accounts_receivable", "purchase_orders", "sales"):
+        op.execute(f"ALTER TABLE {tbl} ADD COLUMN IF NOT EXISTS payment_method payment_method")
 
-    # Remove the server_default so future inserts must set explicitly
-    op.alter_column('purchase_orders', 'order_type', server_default=None)
+    op.execute("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS service_description TEXT")
+
+    # order_type NOT NULL; default 'produto' apenas para backfill, depois removido
+    # (inserts devem informar o tipo explicitamente).
+    op.execute("ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS order_type VARCHAR(10) DEFAULT 'produto'")
+    op.execute("UPDATE purchase_orders SET order_type = 'produto' WHERE order_type IS NULL")
+    op.execute("ALTER TABLE purchase_orders ALTER COLUMN order_type SET NOT NULL")
+    op.execute("ALTER TABLE purchase_orders ALTER COLUMN order_type DROP DEFAULT")
 
 
 def downgrade() -> None:

@@ -12,6 +12,8 @@ from app.modules.pcp.model import (
     ProductionHarvest,
     ProductionInput,
     ProductionOrder,
+    ProductionOrderService,
+    ProductionOrderWorker,
 )
 from app.modules.pcp.schemas import (
     PlotActivityCreate,
@@ -155,10 +157,14 @@ def create_order(
     db: Session,
     data: ProductionOrderCreate,
     input_cost_map: dict[UUID, Decimal],
+    workers_data: list[dict],
+    services_data: list[dict],
 ) -> ProductionOrder:
     """
     Create a ProductionOrder with PLANEJADA status.
     `input_cost_map` maps stock_item_id → unit_cost (resolved by service layer).
+    `workers_data`: [{employee_id, salary_snapshot, is_responsible}]
+    `services_data`: [{supplier_id, description, amount, due_date}]
     """
     order_number = gerar_numero_ordem(db)
     order = ProductionOrder(
@@ -167,7 +173,6 @@ def create_order(
         planned_date=data.planned_date,
         start_date=data.start_date,
         expected_end_date=data.expected_end_date,
-        responsible_employee_id=data.responsible_employee_id,
         executed_at=None,
         total_sacas=Decimal("0"),
         especial_sacas=Decimal("0"),
@@ -198,10 +203,35 @@ def create_order(
         )
         total_cost += subtotal
 
+    for w in workers_data:
+        db.add(
+            ProductionOrderWorker(
+                production_order_id=order.id,
+                employee_id=w["employee_id"],
+                salary_snapshot=w["salary_snapshot"],
+                is_responsible=w["is_responsible"],
+            )
+        )
+
+    for s in services_data:
+        db.add(
+            ProductionOrderService(
+                production_order_id=order.id,
+                supplier_id=s["supplier_id"],
+                description=s["description"],
+                amount=s["amount"],
+                due_date=s["due_date"],
+            )
+        )
+
+    db.flush()
+
     order.total_cost = total_cost
     db.commit()
     db.refresh(order)
     _ = order.inputs
+    _ = order.workers
+    _ = order.services
     return order
 
 
@@ -224,6 +254,8 @@ def list_orders(
     for o in orders:
         _ = o.inputs
         _ = o.harvests
+        _ = o.workers
+        _ = o.services
     return orders
 
 
@@ -252,6 +284,8 @@ def get_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
     )
     if order:
         _ = order.inputs
+        _ = order.workers
+        _ = order.services
     return order
 
 
@@ -267,6 +301,8 @@ def get_order_with_harvests(db: Session, order_id: UUID) -> Optional[ProductionO
     if order:
         _ = order.inputs
         _ = order.harvests
+        _ = order.workers
+        _ = order.services
     return order
 
 
@@ -298,6 +334,45 @@ def update_order(db: Session, order_id: UUID, **kwargs) -> Optional[ProductionOr
     db.refresh(order)
     _ = order.inputs
     return order
+
+
+def get_employee_ids_in_active_productions(db: Session) -> list[UUID]:
+    """
+    Retorna IDs de funcionários em ordens ativas (não concluídas/canceladas).
+    Usado para bloquear seleção no frontend.
+    """
+    active_statuses = [
+        ProductionOrderStatus.PLANEJADA,
+        ProductionOrderStatus.EM_PRODUCAO,
+        ProductionOrderStatus.EM_EXECUCAO,
+        ProductionOrderStatus.PAUSADA,
+    ]
+    rows = (
+        db.query(ProductionOrderWorker.employee_id)
+        .join(
+            ProductionOrder,
+            ProductionOrder.id == ProductionOrderWorker.production_order_id,
+        )
+        .filter(
+            ProductionOrder.status.in_(active_statuses),
+            ProductionOrder.deleted_at.is_(None),
+        )
+        .all()
+    )
+    return [r.employee_id for r in rows]
+
+
+def set_service_accounts_payable(
+    db: Session, service_id: UUID, accounts_payable_id: UUID
+) -> None:
+    service = (
+        db.query(ProductionOrderService)
+        .filter(ProductionOrderService.id == service_id)
+        .first()
+    )
+    if service:
+        service.accounts_payable_id = accounts_payable_id
+        db.add(service)
 
 
 def soft_delete_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:

@@ -1,4 +1,18 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text, func
+from sqlalchemy import (
+    Boolean,
+    Column,
+    Date,
+    DateTime,
+    ForeignKey,
+    ForeignKeyConstraint,
+    Index,
+    Integer,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSON, UUID
 from sqlalchemy.orm import relationship
@@ -55,19 +69,12 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     order_number = Column(String(20), unique=True, nullable=True, index=True)
     start_date = Column(Date, nullable=True)
     expected_end_date = Column(Date, nullable=True)
-    responsible_employee_id = Column(
-        UUID(as_uuid=True),
-        ForeignKey("employees.id", ondelete="SET NULL"),
-        nullable=True,
-        index=True,
-    )
     estimated_cost = Column(Numeric(12, 2), nullable=False, default=0)
     realized_cost = Column(Numeric(12, 2), nullable=False, default=0)
     harvest_progress = Column(Numeric(5, 2), nullable=False, default=0)
     notes = Column(Text, nullable=True)
 
     plot = relationship("Plot", back_populates="production_orders")
-    responsible_employee = relationship("Employee", foreign_keys=[responsible_employee_id])
     inputs = relationship(
         "ProductionInput",
         back_populates="production_order",
@@ -75,6 +82,16 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     )
     harvests = relationship(
         "ProductionHarvest",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
+    workers = relationship(
+        "ProductionOrderWorker",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
+    services = relationship(
+        "ProductionOrderService",
         back_populates="production_order",
         cascade="all, delete-orphan",
     )
@@ -100,6 +117,72 @@ class ProductionInput(UUIDMixin, TimestampMixin, Base):
     subtotal = Column(Numeric(12, 2), nullable=False, default=0)
 
     production_order = relationship("ProductionOrder", back_populates="inputs")
+
+
+class ProductionOrderWorker(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_order_workers"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["production_order_id"],
+            ["production_orders.id"],
+            name="fk_pow_order",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["employee_id"],
+            ["employees.id"],
+            name="fk_pow_employee",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "production_order_id", "employee_id", name="uq_pow_order_employee"
+        ),
+        Index("idx_pow_production_order", "production_order_id"),
+        Index("idx_pow_employee", "employee_id"),
+    )
+
+    production_order_id = Column(UUID(as_uuid=True), nullable=False)
+    employee_id = Column(UUID(as_uuid=True), nullable=False)
+    salary_snapshot = Column(Numeric(12, 2), nullable=False)
+    is_responsible = Column(Boolean, nullable=False, default=False)
+
+    production_order = relationship("ProductionOrder", back_populates="workers")
+    employee = relationship("Employee", foreign_keys=[employee_id])
+
+
+class ProductionOrderService(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_order_services"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["production_order_id"],
+            ["production_orders.id"],
+            name="fk_pos_order",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["supplier_id"],
+            ["suppliers.id"],
+            name="fk_pos_supplier",
+            ondelete="RESTRICT",
+        ),
+        ForeignKeyConstraint(
+            ["accounts_payable_id"],
+            ["accounts_payable.id"],
+            name="fk_pos_ap",
+            ondelete="SET NULL",
+        ),
+        Index("idx_pos_production_order", "production_order_id"),
+        Index("idx_pos_supplier", "supplier_id"),
+    )
+
+    production_order_id = Column(UUID(as_uuid=True), nullable=False)
+    supplier_id = Column(UUID(as_uuid=True), nullable=False)
+    description = Column(String(500), nullable=False)
+    amount = Column(Numeric(12, 2), nullable=False)
+    due_date = Column(Date, nullable=False)
+    accounts_payable_id = Column(UUID(as_uuid=True), nullable=True)
+
+    production_order = relationship("ProductionOrder", back_populates="services")
 
 
 class PlotActivity(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):

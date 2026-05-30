@@ -131,9 +131,12 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                 {currentOrder.expected_end_date && (
                   <span>Término previsto: {formatDate(currentOrder.expected_end_date)}</span>
                 )}
-                {currentOrder.responsible_employee_name && (
-                  <span>Resp.: {currentOrder.responsible_employee_name}</span>
-                )}
+                {(() => {
+                  const responsavel = currentOrder.workers.find((w) => w.is_responsible)
+                  return responsavel ? (
+                    <span>Resp.: {responsavel.employee_name}</span>
+                  ) : null
+                })()}
               </div>
 
               {/* Progress bar */}
@@ -233,6 +236,63 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                       <span className="font-medium">
                         {inp.quantity} {inp.unit}
                       </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Equipe */}
+            {currentOrder.workers.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Equipe</p>
+                <div className="space-y-1">
+                  {currentOrder.workers.map((w) => (
+                    <div
+                      key={w.id}
+                      className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                    >
+                      <div className="flex items-center gap-2">
+                        <span>{w.employee_name}</span>
+                        {w.is_responsible && (
+                          <span className="text-xs bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">
+                            Responsável
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-xs text-slate-400">
+                        Salário snapshot: {formatCurrency(w.salary_snapshot)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Serviços Externos */}
+            {currentOrder.services.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Serviços Externos</p>
+                <div className="space-y-1">
+                  {currentOrder.services.map((s) => (
+                    <div
+                      key={s.id}
+                      className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                    >
+                      <div className="min-w-0">
+                        <p className="font-medium truncate">{s.description}</p>
+                        <p className="text-xs text-slate-400">{s.supplier_name}</p>
+                      </div>
+                      <div className="text-right flex-shrink-0 ml-2">
+                        <p className="font-medium">{formatCurrency(s.amount)}</p>
+                        <p className="text-xs text-slate-400">
+                          {s.accounts_payable_id ? (
+                            <span className="text-green-600">AP gerada</span>
+                          ) : (
+                            <span className="text-yellow-600">Aguardando início</span>
+                          )}
+                        </p>
+                      </div>
                     </div>
                   ))}
                 </div>

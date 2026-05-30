@@ -49,7 +49,7 @@ nome do enum.
 | `users`, `clients`, `suppliers`, `employees` | ✅ | entidades cadastrais |
 | `stock_items`, `plots` | ✅ | cadastros base |
 | `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events` | ✅ | operações de negócio e catálogos |
-| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
+| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
 | `notifications` | ❌ | efêmeras por design |
 
@@ -350,7 +350,6 @@ Status (`production_order_status`): `planejada → em_producao → em_execucao |
 | `order_number` | `VARCHAR(20)` UNIQUE NULL | Número sequencial da ordem |
 | `start_date` | `DATE` NULL | Data de início |
 | `expected_end_date` | `DATE` NULL | Previsão de conclusão |
-| `responsible_employee_id` | FK `employees.id` NULL | Responsável pela colheita |
 | `executed_at` | `TIMESTAMPTZ` | Data da produção (preenchida ao concluir) |
 | `total_sacas` | `NUMERIC(12,3)` | Total produzido |
 | `especial_sacas`, `superior_sacas`, `tradicional_sacas` | `NUMERIC(12,3)` | Por qualidade |
@@ -375,6 +374,32 @@ Registra cada colheita parcial de uma ordem. Append-only — sem soft delete.
 
 #### `production_inputs`
 Insumos consumidos na produção (CASCADE).
+
+#### `production_order_workers`
+Funcionários alocados na ordem de produção, com snapshot de salário. Append-only — sem soft delete. Substitui o antigo `production_orders.responsible_employee_id`: a responsabilidade é controlada por `is_responsible`.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `production_order_id` | FK `production_orders.id` CASCADE (`fk_pow_order`) | Ordem pai |
+| `employee_id` | FK `employees.id` RESTRICT (`fk_pow_employee`) | Funcionário alocado |
+| `salary_snapshot` | `NUMERIC(12,2)` | Salário do funcionário no momento da alocação |
+| `is_responsible` | `BOOLEAN` default false | Indica o responsável pela ordem |
+
+Restrições: UNIQUE (`production_order_id`, `employee_id`) → `uq_pow_order_employee`. Índices: `idx_pow_production_order`, `idx_pow_employee`.
+
+#### `production_order_services`
+Serviços externos contratados para a ordem (equipes terceirizadas), com valor fixo e conta a pagar opcional. Append-only — sem soft delete.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `production_order_id` | FK `production_orders.id` CASCADE (`fk_pos_order`) | Ordem pai |
+| `supplier_id` | FK `suppliers.id` RESTRICT (`fk_pos_supplier`) | Fornecedor do serviço |
+| `description` | `VARCHAR(500)` | Descrição do serviço |
+| `amount` | `NUMERIC(12,2)` | Valor contratado |
+| `due_date` | `DATE` | Vencimento |
+| `accounts_payable_id` | FK `accounts_payable.id` SET NULL (`fk_pos_ap`) NULL | Conta a pagar vinculada (opcional) |
+
+Índices: `idx_pos_production_order`, `idx_pos_supplier`.
 
 #### `plot_activities`
 Atividades em talhões (plantio, adubação, poda, colheita etc.).
@@ -415,7 +440,9 @@ employees ──── payroll_entries ──── payroll_periods
                   └──── payroll_entry_items ──── payroll_events
 
 plots ──┬──── production_orders ──┬── production_inputs ──▶ stock_items
-        │                        └── production_harvests
+        │                        ├── production_harvests
+        │                        ├── production_order_workers ──▶ employees
+        │                        └── production_order_services ──▶ suppliers, accounts_payable (opcional)
         └──── plot_activities ──▶ employees (opcional)
 
 financial_movements (ledger, referencia opcional por source_module + reference_id)

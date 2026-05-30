@@ -29,17 +29,17 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # Remove a constraint UNIQUE (e seu índice de apoio) e o índice não-unique.
-    op.drop_constraint(
-        "payroll_events_description_key", "payroll_events", type_="unique"
+    # Idempotente contra o create_all da 0001 (que já cria o índice unique
+    # conforme o model, sem a constraint payroll_events_description_key).
+    # Remove a constraint UNIQUE (e seu índice de apoio) e o índice não-unique,
+    # depois recria como índice unique conforme o model.
+    op.execute(
+        "ALTER TABLE payroll_events DROP CONSTRAINT IF EXISTS payroll_events_description_key"
     )
-    op.drop_index("ix_payroll_events_description", table_name="payroll_events")
-    # Recria como índice unique, conforme o model.
-    op.create_index(
-        "ix_payroll_events_description",
-        "payroll_events",
-        ["description"],
-        unique=True,
+    op.execute("DROP INDEX IF EXISTS ix_payroll_events_description")
+    op.execute(
+        "CREATE UNIQUE INDEX IF NOT EXISTS ix_payroll_events_description "
+        "ON payroll_events (description)"
     )
 
 

@@ -36,8 +36,10 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/api/pcp/ordens` | Lista ordens (filtro: `status`) |
-| `POST` | `/api/pcp/ordens` | Cria ordem planejada com insumos e responsável; gera `order_number` e calcula `estimated_cost` |
-| `GET` | `/api/pcp/ordens/{id}` | Detalhe com inputs e histórico de colheitas |
+| `POST` | `/api/pcp/ordens` | Cria ordem planejada com insumos, funcionários e serviços externos; gera `order_number` e calcula `estimated_cost` |
+| `GET` | `/api/pcp/ordens/funcionarios-em-producao` | Lista UUIDs de funcionários vinculados a ordens ativas (para bloqueio no frontend). **Deve preceder `/ordens/{id}` no router** |
+| `GET` | `/api/pcp/ordens/{id}` | Detalhe com inputs, colheitas, funcionários e serviços |
+| `POST` | `/api/pcp/ordens/{id}/iniciar` | Inicia a produção (`planejada → em_execucao`); cria `accounts_payable` para cada serviço externo |
 | `POST` | `/api/pcp/ordens/{id}/colher` | Registra colheita parcial (`percentage_harvested` no body) |
 | `POST` | `/api/pcp/ordens/{id}/produzir` | Alias: colhe o percentual restante (mantido para compatibilidade) |
 | `DELETE` | `/api/pcp/ordens/{id}` | Soft delete (apenas `planejada`) |
@@ -85,11 +87,17 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "planned_date": "2026-05-20",
   "start_date": "2026-05-12",
   "expected_end_date": "2026-05-25",
-  "responsible_employee_id": "uuid (opcional)",
   "notes": "opcional",
   "inputs": [
     { "stock_item_id": "uuid", "quantity": 300.000 },
     { "stock_item_id": "uuid", "quantity": 100.000 }
+  ],
+  "workers": [
+    { "employee_id": "uuid", "is_responsible": true },
+    { "employee_id": "uuid", "is_responsible": false }
+  ],
+  "services": [
+    { "supplier_id": "uuid", "description": "Colheita manual", "amount": 3500.00, "due_date": "2026-06-25" }
   ]
 }
 ```
@@ -98,9 +106,29 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `order_number` gerado automaticamente no padrão `OP-{ANO}-{SEQ:03d}` (ex: `OP-2026-001`)
 - `unit_cost` e `subtotal` dos inputs são resolvidos a partir do `StockItem.unit_cost` no momento da criação
 - `total_cost` = soma dos subtotais dos inputs
-- `estimated_cost` = `total_cost` (insumos) + custo de mão de obra estimado:
-  - se houver `responsible_employee_id`, `start_date` e `expected_end_date`:
-    `(employee.base_salary / 22) × (expected_end_date - start_date)` dias
+
+**Funcionários internos (`workers`)** — opcional:
+- Cada worker referencia um `employee_id` da Folha; `salary_snapshot` é capturado a
+  partir de `employee.base_salary` no momento da criação (imutável depois)
+- No máximo **um** worker pode ter `is_responsible=true` (HTTP 400 se mais de um)
+- Cada `employee_id` deve existir (HTTP 404 caso contrário)
+- Um funcionário já vinculado a uma ordem **ativa** (status `planejada`,
+  `em_producao`, `em_execucao` ou `pausada`) não pode ser adicionado a outra
+  ordem ativa (HTTP 409 com o nome do funcionário)
+
+**Serviços externos (`services`)** — opcional:
+- Contratação de equipes/serviços terceirizados; cada serviço tem `supplier_id`,
+  `description`, `amount` (`> 0`) e `due_date`
+- O `supplier_id` deve existir e não estar deletado (HTTP 404 caso contrário)
+- A `accounts_payable` **não** é criada na criação da ordem — apenas quando a
+  produção é iniciada (`POST /ordens/{id}/iniciar`). Enquanto `planejada`, o
+  serviço existe só no PCP, sem reflexo financeiro
+
+**`estimated_cost`** = insumos + funcionários + serviços:
+- insumos = soma dos subtotais dos inputs
+- funcionários = `SUM(salary_snapshot / 22 × max(1, dias))` para todos os workers,
+  onde `dias = (expected_end_date - start_date)` (0 se faltar alguma data ou se negativo)
+- serviços = soma dos `amount` dos serviços externos
 
 ### HarvestCreate
 ```json
@@ -139,8 +167,6 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "planned_date": "2026-05-20",
   "start_date": "2026-05-12",
   "expected_end_date": "2026-05-25",
-  "responsible_employee_id": "uuid",
-  "responsible_employee_name": "Ana Pereira",
   "executed_at": null,
   "total_sacas": 0.000,
   "especial_sacas": 0.000,
@@ -155,12 +181,34 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "notes": null,
   "inputs": [ ... ],
   "harvests": [ ... ],
+  "workers": [
+    {
+      "id": "uuid",
+      "employee_id": "uuid",
+      "employee_name": "João Silva",
+      "salary_snapshot": 6000.00,
+      "is_responsible": true
+    }
+  ],
+  "services": [
+    {
+      "id": "uuid",
+      "supplier_id": "uuid",
+      "supplier_name": "AgroInsumos do Brasil S.A.",
+      "description": "Colheita manual",
+      "amount": 3500.00,
+      "due_date": "2026-06-25",
+      "accounts_payable_id": null
+    }
+  ],
   "created_at": "...",
   "updated_at": "..."
 }
 ```
 
 - `is_overdue` = `expected_end_date < hoje` e status não em `concluida | cancelada`
+- `workers` / `services`: listas dos funcionários internos e serviços externos da ordem
+- `services[].accounts_payable_id`: `null` enquanto `planejada`; preenchido após `/iniciar`
 
 ### ProductionResult
 Retorno do endpoint `/colher` (e `/produzir`):
@@ -221,9 +269,10 @@ Persiste um `ProductionHarvest` com:
 Quando `is_final=True`:
 - Custo de insumos: `SUM(input.quantity × stock_item.unit_cost)` — usa o `unit_cost`
   corrente, que pode ter sido recalculado por média ponderada após compras intermediárias.
-- Custo de mão de obra: se houver `responsible_employee_id` e `start_date`,
-  `(employee.base_salary / 22) × (executed_at.date() - start_date).days` (mín. 1 dia).
-- `realized_cost = insumos + mão de obra` (R$ 0,01 de precisão).
+- Custo de funcionários: `SUM(salary_snapshot / 22 × max(1, dias))` sobre os `workers`
+  da ordem, onde `dias = (executed_at.date() - start_date)` (0 se negativo ou sem datas).
+- Custo de serviços: soma dos `amount` dos serviços externos da ordem.
+- `realized_cost = insumos + funcionários + serviços` (R$ 0,01 de precisão).
 - Lança movimento financeiro `SAIDA / PRODUCAO` com `amount=realized_cost`.
 
 ### 8. Notificação de estoque baixo
@@ -303,6 +352,9 @@ Para cada ordem: `order_id`, `order_number`, `plot_name`, `status`,
 | Estoque | `registrar_saida` | Consumo de insumos |
 | Estoque | `registrar_entrada` | Entrada de café produzido |
 | Financeiro | `registrar_movimento` | Rastreabilidade: atividade, consumo agregado, produção agregada |
+| Financeiro | `criar_conta_pagar` | Ao **iniciar** a produção (`/iniciar`), cria uma `accounts_payable` por serviço externo (`supplier_id`, `amount`, `due_date`), com `source_module="pcp"` e `reference_id` = id da ordem; o `accounts_payable_id` gerado é gravado de volta no serviço (guard contra duplicidade) |
+| Folha | `get_employee` | Validação de funcionários e captura de `salary_snapshot` na criação da ordem |
+| Compras | `Supplier` (query direta) | Validação de fornecedor dos serviços externos e resolução de `supplier_name` |
 
 ## Database Schema
 
@@ -339,6 +391,31 @@ Para cada ordem: `order_id`, `order_number`, `plot_name`, `status`,
 | `quantity` | NUMERIC(12,3) |
 | `unit_cost` | NUMERIC(12,2) |
 | `subtotal` | NUMERIC(12,2) |
+| `created_at`, `updated_at` | TIMESTAMPTZ |
+
+### `production_order_workers`
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `production_order_id` | UUID FK → production_orders (cascade delete) |
+| `employee_id` | UUID FK → employees (RESTRICT) |
+| `salary_snapshot` | NUMERIC(12,2) — `base_salary` capturado na criação |
+| `is_responsible` | BOOLEAN default false |
+| `created_at`, `updated_at` | TIMESTAMPTZ |
+
+Constraint `uq_pow_order_employee` (`production_order_id`, `employee_id`) — um
+funcionário não se repete na mesma ordem.
+
+### `production_order_services`
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `production_order_id` | UUID FK → production_orders (cascade delete) |
+| `supplier_id` | UUID FK → suppliers (RESTRICT) |
+| `description` | VARCHAR(500) |
+| `amount` | NUMERIC(12,2) |
+| `due_date` | DATE |
+| `accounts_payable_id` | UUID FK → accounts_payable (SET NULL) nullable — preenchido ao iniciar |
 | `created_at`, `updated_at` | TIMESTAMPTZ |
 
 ### `plot_activities`

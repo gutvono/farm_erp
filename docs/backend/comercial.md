@@ -128,11 +128,18 @@ Executado em sequência no `service.create_sale()`:
        db,
        stock_item_id=item.stock_item_id,
        quantity=item.quantity,
+       unit_cost=Decimal(str(stock_item.unit_cost)),  # CMP atual do item
        description=f"Venda #{sale.id}",
        source_module="comercial",
        reference_id=sale.id,
    )
    ```
+   O `unit_cost` passado é o CMP (custo médio móvel) atual do item, para que a
+   saída carregue o custo e viabilize o cálculo de CMV (Custo da Mercadoria
+   Vendida). O `StockItem` é reaproveitado da validação de disponibilidade
+   (etapa 1), sem query redundante. A movimentação financeira da saída continua
+   em `amount=0` / `AJUSTE` — a receita é registrada apenas no recebimento da
+   Conta a Receber.
 
 4. **Fatura(s)** — depende de `installments`:
    - **`installments <= 1` (à vista, default — fluxo inalterado):** uma única fatura via `faturamento_service.criar_fatura(...)` com `invoice_type="venda"`, `due_date = today + 30d`.

@@ -40,6 +40,11 @@ def upgrade() -> None:
     op.execute(
         "ALTER TABLE purchase_orders ADD COLUMN IF NOT EXISTS receipt_total_amount NUMERIC(10, 2) NOT NULL DEFAULT 0"
     )
+    # Garante o default mesmo quando a coluna já foi criada pelo create_all da 0001
+    # (nesse caso o ADD COLUMN IF NOT EXISTS acima é no-op e não aplica o DEFAULT).
+    op.execute(
+        "ALTER TABLE purchase_orders ALTER COLUMN receipt_total_amount SET DEFAULT 0"
+    )
 
     # New enum type for receipt status — created via raw SQL for idempotency
     op.execute(
