@@ -5,7 +5,12 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.shared.enums import PaymentMethod, PurchaseOrderReceiptStatus, PurchaseOrderStatus
+from app.shared.enums import (
+    PaymentMethod,
+    PurchaseOrderReceiptStatus,
+    PurchaseOrderStatus,
+    QuotationStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -310,4 +315,175 @@ class PurchaseOrderWithReceipts(BaseModel):
             receipts=[PurchaseOrderReceiptItemOut.from_model(r) for r in order.receipts],
             created_at=order.created_at,
             updated_at=order.updated_at,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Quotations — entrada (Create / Update / Actions)
+# ---------------------------------------------------------------------------
+
+
+class QuotationItemCreate(BaseModel):
+    stock_item_id: UUID
+    quantity: Decimal = Field(gt=0)
+
+
+class QuotationCreate(BaseModel):
+    order_type: str = Field(default="produto")
+    service_description: Optional[str] = None
+    notes: Optional[str] = None
+    items: list[QuotationItemCreate] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_order_type(self) -> "QuotationCreate":
+        if self.order_type not in ("produto", "servico"):
+            raise ValueError("order_type deve ser 'produto' ou 'servico'")
+        if self.order_type == "servico":
+            if not self.service_description:
+                raise ValueError(
+                    "service_description é obrigatório para cotações de serviço"
+                )
+            if self.items:
+                raise ValueError(
+                    "Cotações de serviço não devem ter itens de estoque"
+                )
+        else:
+            if not self.items:
+                raise ValueError(
+                    "items é obrigatório para cotações de produto (mínimo 1 item)"
+                )
+        return self
+
+
+class QuotationProposalItemCreate(BaseModel):
+    quotation_item_id: UUID
+    unit_price: Decimal = Field(ge=0)
+
+
+class QuotationProposalCreate(BaseModel):
+    supplier_id: UUID
+    total_price: Optional[Decimal] = Field(default=None, ge=0)
+    notes: Optional[str] = None
+    proposal_items: list[QuotationProposalItemCreate] = Field(default_factory=list)
+
+
+class QuotationProposalUpdate(BaseModel):
+    supplier_id: Optional[UUID] = None
+    total_price: Optional[Decimal] = Field(default=None, ge=0)
+    notes: Optional[str] = None
+    proposal_items: Optional[list[QuotationProposalItemCreate]] = None
+
+
+class SelectWinnerRequest(BaseModel):
+    proposal_id: UUID
+
+
+class CancelQuotationRequest(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
+class RealizeOrderRequest(BaseModel):
+    shipping_cost: Optional[Decimal] = Field(default=None, ge=0)
+    ordered_at: Optional[datetime] = None
+    notes: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Quotations — saída (Out)
+# ---------------------------------------------------------------------------
+
+
+class QuotationItemOut(BaseModel):
+    id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    quantity: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, item) -> "QuotationItemOut":
+        return cls(
+            id=item.id,
+            stock_item_id=item.stock_item_id,
+            stock_item_name=item.stock_item.name if item.stock_item else "",
+            quantity=item.quantity,
+        )
+
+
+class QuotationProposalItemOut(BaseModel):
+    id: UUID
+    proposal_id: UUID
+    quotation_item_id: UUID
+    unit_price: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, item) -> "QuotationProposalItemOut":
+        return cls(
+            id=item.id,
+            proposal_id=item.proposal_id,
+            quotation_item_id=item.quotation_item_id,
+            unit_price=item.unit_price,
+        )
+
+
+class QuotationProposalOut(BaseModel):
+    id: UUID
+    quotation_id: UUID
+    supplier_id: UUID
+    supplier_name: str
+    total_price: Optional[Decimal] = None
+    notes: Optional[str] = None
+    proposal_items: list[QuotationProposalItemOut]
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, proposal) -> "QuotationProposalOut":
+        return cls(
+            id=proposal.id,
+            quotation_id=proposal.quotation_id,
+            supplier_id=proposal.supplier_id,
+            supplier_name=proposal.supplier.name if proposal.supplier else "",
+            total_price=proposal.total_price,
+            notes=proposal.notes,
+            proposal_items=[
+                QuotationProposalItemOut.from_model(i) for i in proposal.proposal_items
+            ],
+        )
+
+
+class QuotationOut(BaseModel):
+    id: UUID
+    order_type: str
+    status: QuotationStatus
+    service_description: Optional[str] = None
+    notes: Optional[str] = None
+    cancellation_note: Optional[str] = None
+    winning_proposal_id: Optional[UUID] = None
+    purchase_order_id: Optional[UUID] = None
+    items: list[QuotationItemOut]
+    proposals: list[QuotationProposalOut]
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True, use_enum_values=True)
+
+    @classmethod
+    def from_model(cls, quotation) -> "QuotationOut":
+        return cls(
+            id=quotation.id,
+            order_type=quotation.order_type or "produto",
+            status=quotation.status,
+            service_description=quotation.service_description,
+            notes=quotation.notes,
+            cancellation_note=quotation.cancellation_note,
+            winning_proposal_id=quotation.winning_proposal_id,
+            purchase_order_id=quotation.purchase_order_id,
+            items=[QuotationItemOut.from_model(i) for i in quotation.items],
+            proposals=[QuotationProposalOut.from_model(p) for p in quotation.proposals],
+            created_at=quotation.created_at,
+            updated_at=quotation.updated_at,
         )

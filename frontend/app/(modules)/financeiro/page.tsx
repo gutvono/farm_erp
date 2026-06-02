@@ -56,7 +56,15 @@ import {
   getMovimentacoes,
   getSaldo,
 } from "@/services/financeiro"
-import { getOrdens, aprovarOrdem, recusarOrdem, concluirServico } from "@/services/compras"
+import {
+  getOrdens,
+  aprovarOrdem,
+  recusarOrdem,
+  concluirServico,
+  getCotacoes,
+  aprovarCotacao,
+  cancelarCotacao,
+} from "@/services/compras"
 import {
   AccountsPayable,
   AccountsReceivable,
@@ -66,6 +74,8 @@ import {
   FinancialMovement,
   PayableStatus,
   PurchaseOrder,
+  Quotation,
+  QuotationProposal,
   ReceivableStatus,
 } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -120,6 +130,15 @@ export default function FinanceiroPage() {
   const [rejectTarget, setRejectTarget] = useState<PurchaseOrder | null>(null)
   const [rejectNote, setRejectNote] = useState("")
   const [rejecting, setRejecting] = useState(false)
+
+  // Cotações aguardando aprovação
+  const [cotacoesPendentes, setCotacoesPendentes] = useState<Quotation[]>([])
+  const [cotacoesLoading, setCotacoesLoading] = useState(false)
+  const [approveQuotationTarget, setApproveQuotationTarget] = useState<Quotation | null>(null)
+  const [approvingQuotation, setApprovingQuotation] = useState(false)
+  const [rejectQuotationTarget, setRejectQuotationTarget] = useState<Quotation | null>(null)
+  const [rejectQuotationNote, setRejectQuotationNote] = useState("")
+  const [rejectingQuotation, setRejectingQuotation] = useState(false)
 
   const loadOverview = useCallback(async () => {
     setBalanceLoading(true)
@@ -205,6 +224,20 @@ export default function FinanceiroPage() {
     }
   }, [])
 
+  const loadCotacoesPendentes = useCallback(async () => {
+    setCotacoesLoading(true)
+    try {
+      const data = await getCotacoes("aguardando_aprovacao_financeiro")
+      setCotacoesPendentes(data)
+    } catch (err) {
+      const message =
+        err instanceof Error ? err.message : "Erro ao carregar cotações pendentes"
+      toast.error(message)
+    } finally {
+      setCotacoesLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadOverview()
     loadMovements()
@@ -213,6 +246,7 @@ export default function FinanceiroPage() {
   useEffect(() => { loadPayables() }, [loadPayables])
   useEffect(() => { loadReceivables() }, [loadReceivables])
   useEffect(() => { loadPendingOrders() }, [loadPendingOrders])
+  useEffect(() => { loadCotacoesPendentes() }, [loadCotacoesPendentes])
 
   function handlePayableClick(conta: AccountsPayable) {
     setSelectedPayable(conta)
@@ -300,6 +334,51 @@ export default function FinanceiroPage() {
     }
   }
 
+  function winningProposal(quotation: Quotation): QuotationProposal | undefined {
+    return quotation.proposals.find((p) => p.id === quotation.winning_proposal_id)
+  }
+
+  function quotationTotal(quotation: Quotation): number {
+    const proposal = winningProposal(quotation)
+    if (!proposal) return 0
+    if (quotation.order_type === "servico") return proposal.total_price ?? 0
+    return quotation.items.reduce((acc, item) => {
+      const pi = proposal.proposal_items.find((x) => x.quotation_item_id === item.id)
+      return acc + item.quantity * (pi ? pi.unit_price : 0)
+    }, 0)
+  }
+
+  async function handleConfirmApproveQuotation() {
+    if (!approveQuotationTarget) return
+    setApprovingQuotation(true)
+    try {
+      await aprovarCotacao(approveQuotationTarget.id)
+      toast.success("Cotação aprovada")
+      setApproveQuotationTarget(null)
+      await Promise.all([loadCotacoesPendentes(), loadPendingOrders()])
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao aprovar cotação")
+    } finally {
+      setApprovingQuotation(false)
+    }
+  }
+
+  async function handleConfirmRejectQuotation() {
+    if (!rejectQuotationTarget || !rejectQuotationNote.trim()) return
+    setRejectingQuotation(true)
+    try {
+      await cancelarCotacao(rejectQuotationTarget.id, rejectQuotationNote.trim())
+      toast.success("Cotação recusada")
+      setRejectQuotationTarget(null)
+      setRejectQuotationNote("")
+      await loadCotacoesPendentes()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao recusar cotação")
+    } finally {
+      setRejectingQuotation(false)
+    }
+  }
+
   return (
     <RootLayout title="Financeiro">
       <div className="space-y-6">
@@ -315,9 +394,9 @@ export default function FinanceiroPage() {
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
             <TabsTrigger value="approvals" className="relative">
               Aprovações
-              {pendingOrders.length > 0 && (
+              {pendingOrders.length + cotacoesPendentes.length > 0 && (
                 <span className="ml-1.5 rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
-                  {pendingOrders.length}
+                  {pendingOrders.length + cotacoesPendentes.length}
                 </span>
               )}
             </TabsTrigger>
@@ -396,9 +475,9 @@ export default function FinanceiroPage() {
           {/* ── Aba Aprovações ── */}
           <TabsContent value="approvals" className="space-y-4">
             <div className="flex items-center justify-between">
-              <p className="text-sm text-slate-500">
-                Ordens de compra aguardando aprovação financeira
-              </p>
+              <h3 className="text-sm font-semibold text-slate-700">
+                Ordens de Compra Pendentes
+              </h3>
             </div>
 
             {pendingLoading ? (
@@ -471,6 +550,103 @@ export default function FinanceiroPage() {
                     </CardHeader>
                   </Card>
                 ))}
+              </div>
+            )}
+
+            {/* ── Cotações Aguardando Aprovação ── */}
+            <div className="flex items-center gap-2 pt-4">
+              <h3 className="text-sm font-semibold text-slate-700">
+                Cotações Aguardando Aprovação
+              </h3>
+              {cotacoesPendentes.length > 0 && (
+                <span className="rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
+                  {cotacoesPendentes.length}
+                </span>
+              )}
+            </div>
+
+            {cotacoesLoading ? (
+              <p className="text-sm text-slate-500">Carregando...</p>
+            ) : cotacoesPendentes.length === 0 ? (
+              <p className="text-sm text-slate-500">
+                Nenhuma cotação aguardando aprovação
+              </p>
+            ) : (
+              <div className="space-y-3">
+                {cotacoesPendentes.map((q) => {
+                  const proposal = winningProposal(q)
+                  const isService = q.order_type === "servico"
+                  return (
+                    <Card key={q.id} className="border-yellow-200">
+                      <CardHeader className="pb-3">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 flex-wrap">
+                              <Badge
+                                className={
+                                  isService
+                                    ? "bg-indigo-100 text-indigo-700"
+                                    : "bg-blue-100 text-blue-800"
+                                }
+                              >
+                                {isService ? "Serviço" : "Produto"}
+                              </Badge>
+                              <Badge className="bg-yellow-100 text-yellow-800">
+                                Aguardando aprovação
+                              </Badge>
+                            </div>
+                            <p className="text-sm text-slate-500 mt-0.5">
+                              {formatDate(q.created_at)} ·{" "}
+                              <span className="font-medium text-slate-700">
+                                Vencedor: {proposal?.supplier_name ?? "—"}
+                              </span>{" "}
+                              ·{" "}
+                              <span className="font-medium text-slate-700">
+                                {formatCurrency(quotationTotal(q))}
+                              </span>
+                            </p>
+                            {isService ? (
+                              q.service_description && (
+                                <p className="text-xs text-slate-500 mt-1">
+                                  {q.service_description}
+                                </p>
+                              )
+                            ) : (
+                              <div className="mt-2 space-y-0.5">
+                                {q.items.map((item) => (
+                                  <p key={item.id} className="text-xs text-slate-500">
+                                    {item.stock_item_name} × {item.quantity}
+                                  </p>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+
+                          <div className="flex items-center gap-2 flex-shrink-0">
+                            <Button
+                              size="sm"
+                              className="bg-green-600 hover:bg-green-700"
+                              onClick={() => setApproveQuotationTarget(q)}
+                            >
+                              Aprovar
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              className="border-red-300 text-red-600 hover:bg-red-50"
+                              onClick={() => {
+                                setRejectQuotationNote("")
+                                setRejectQuotationTarget(q)
+                              }}
+                            >
+                              Recusar
+                            </Button>
+                          </div>
+                        </div>
+                      </CardHeader>
+                    </Card>
+                  )
+                })}
               </div>
             )}
           </TabsContent>
@@ -744,6 +920,91 @@ export default function FinanceiroPage() {
                 onClick={handleConfirmReject}
               >
                 {rejecting ? "Recusando..." : "Confirmar recusa"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: aprovar cotação */}
+      <Dialog
+        open={approveQuotationTarget !== null}
+        onOpenChange={(open) => !open && setApproveQuotationTarget(null)}
+      >
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Confirmar aprovação da cotação?</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-1">
+            <p className="text-sm text-slate-600">
+              Fornecedor vencedor:{" "}
+              <strong>
+                {approveQuotationTarget
+                  ? winningProposal(approveQuotationTarget)?.supplier_name ?? "—"
+                  : "—"}
+              </strong>{" "}
+              ·{" "}
+              {formatCurrency(
+                approveQuotationTarget ? quotationTotal(approveQuotationTarget) : 0
+              )}
+            </p>
+            <p className="text-sm text-slate-500">
+              Após a aprovação, o setor de compras poderá realizar o pedido e gerar a
+              ordem de compra.
+            </p>
+            <div className="flex justify-end gap-2 pt-2">
+              <Button variant="outline" onClick={() => setApproveQuotationTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                onClick={handleConfirmApproveQuotation}
+                disabled={approvingQuotation}
+                className="bg-green-600 hover:bg-green-700"
+              >
+                {approvingQuotation ? "Aprovando..." : "Confirmar aprovação"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: recusar cotação */}
+      <Dialog
+        open={rejectQuotationTarget !== null}
+        onOpenChange={(open) => !open && setRejectQuotationTarget(null)}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Recusar cotação</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600">
+              Fornecedor vencedor:{" "}
+              <strong>
+                {rejectQuotationTarget
+                  ? winningProposal(rejectQuotationTarget)?.supplier_name ?? "—"
+                  : "—"}
+              </strong>
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor="reject-quotation-note">Motivo da recusa *</Label>
+              <Input
+                id="reject-quotation-note"
+                value={rejectQuotationNote}
+                onChange={(e) => setRejectQuotationNote(e.target.value)}
+                placeholder="Descreva o motivo..."
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setRejectQuotationTarget(null)}>
+                Cancelar
+              </Button>
+              <Button
+                className="bg-red-600 hover:bg-red-700"
+                disabled={!rejectQuotationNote.trim() || rejectingQuotation}
+                onClick={handleConfirmRejectQuotation}
+              >
+                {rejectingQuotation ? "Recusando..." : "Confirmar recusa"}
               </Button>
             </div>
           </div>
