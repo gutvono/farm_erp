@@ -31,6 +31,8 @@ TABLES_TO_CLEAR = [
     "notifications",
     "plot_activities",
     "production_inputs",
+    "production_order_workers",
+    "production_order_services",
     "production_orders",
     "plots",
     "payroll_entries",
@@ -39,6 +41,14 @@ TABLES_TO_CLEAR = [
     "sales",
     "invoice_items",
     "invoices",
+    # Cotações — filhas antes das pais. quotation_items.stock_item_id e
+    # quotation_proposals.supplier_id são RESTRICT, então precisam ser limpas
+    # antes de stock_items/suppliers.
+    "quotation_proposal_items",
+    "quotation_proposals",
+    "quotation_items",
+    "quotations",
+    "purchase_order_receipts",
     "purchase_order_items",
     "purchase_orders",
     "stock_movements",
