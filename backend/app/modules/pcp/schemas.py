@@ -222,6 +222,91 @@ class ProductionOrderServiceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+class ProductionEquipmentCreate(BaseModel):
+    stock_item_id: UUID
+    quantity: int = Field(gt=0)
+
+
+class ProductionEquipmentOut(BaseModel):
+    id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    unit: str
+    quantity: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(
+        cls, pe, stock_item_name: str, unit: str
+    ) -> "ProductionEquipmentOut":
+        return cls(
+            id=pe.id,
+            stock_item_id=pe.stock_item_id,
+            stock_item_name=stock_item_name,
+            unit=unit,
+            quantity=pe.quantity,
+        )
+
+
+class ProductionVehicleCreate(BaseModel):
+    stock_item_id: UUID
+    quantity: int = Field(gt=0)
+
+
+class ProductionVehicleOut(BaseModel):
+    id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    unit: str
+    quantity: int
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(
+        cls, pv, stock_item_name: str, unit: str
+    ) -> "ProductionVehicleOut":
+        return cls(
+            id=pv.id,
+            stock_item_id=pv.stock_item_id,
+            stock_item_name=stock_item_name,
+            unit=unit,
+            quantity=pv.quantity,
+        )
+
+
+class ProductionPackagingCreate(BaseModel):
+    stock_item_id: UUID
+    quantity: int = Field(gt=0)
+
+
+class ProductionPackagingOut(BaseModel):
+    id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    unit: str
+    quantity: int
+    unit_cost: Decimal
+    subtotal: Decimal
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(
+        cls, pk, stock_item_name: str, unit: str
+    ) -> "ProductionPackagingOut":
+        return cls(
+            id=pk.id,
+            stock_item_id=pk.stock_item_id,
+            stock_item_name=stock_item_name,
+            unit=unit,
+            quantity=pk.quantity,
+            unit_cost=pk.unit_cost,
+            subtotal=pk.subtotal,
+        )
+
+
 class ProductionOrderCreate(BaseModel):
     plot_id: UUID
     planned_date: Optional[date] = None
@@ -231,6 +316,9 @@ class ProductionOrderCreate(BaseModel):
     inputs: list[ProductionInputCreate] = Field(default_factory=list)
     workers: list[ProductionOrderWorkerCreate] = Field(default_factory=list)
     services: list[ProductionOrderServiceCreate] = Field(default_factory=list)
+    equipments: list[ProductionEquipmentCreate] = Field(default_factory=list)
+    vehicles: list[ProductionVehicleCreate] = Field(default_factory=list)
+    packagings: list[ProductionPackagingCreate] = Field(default_factory=list)
 
 
 class ProductionOrderOut(BaseModel):
@@ -257,6 +345,9 @@ class ProductionOrderOut(BaseModel):
     harvests: list[HarvestOut] = Field(default_factory=list)
     workers: list[ProductionOrderWorkerOut] = Field(default_factory=list)
     services: list[ProductionOrderServiceOut] = Field(default_factory=list)
+    equipments: list[ProductionEquipmentOut] = Field(default_factory=list)
+    vehicles: list[ProductionVehicleOut] = Field(default_factory=list)
+    packagings: list[ProductionPackagingOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
 
@@ -271,6 +362,9 @@ class ProductionOrderOut(BaseModel):
         harvests: list[HarvestOut],
         workers: list["ProductionOrderWorkerOut"] = None,
         services: list["ProductionOrderServiceOut"] = None,
+        equipments: list["ProductionEquipmentOut"] = None,
+        vehicles: list["ProductionVehicleOut"] = None,
+        packagings: list["ProductionPackagingOut"] = None,
     ) -> "ProductionOrderOut":
         final_statuses = {
             ProductionOrderStatus.CONCLUIDA,
@@ -305,6 +399,9 @@ class ProductionOrderOut(BaseModel):
             harvests=harvests,
             workers=workers or [],
             services=services or [],
+            equipments=equipments or [],
+            vehicles=vehicles or [],
+            packagings=packagings or [],
             created_at=order.created_at,
             updated_at=order.updated_at,
         )

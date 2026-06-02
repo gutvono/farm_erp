@@ -25,6 +25,7 @@ const CATEGORY_LABELS: Record<StockCategory, string> = {
   insumo: "Insumo",
   equipamento: "Equipamento",
   veiculo: "Veículo",
+  embalagem: "Embalagem",
   outro: "Outro",
 }
 
@@ -33,6 +34,7 @@ const CATEGORY_COLORS: Record<StockCategory, string> = {
   insumo: "bg-green-100 text-green-800",
   equipamento: "bg-blue-100 text-blue-800",
   veiculo: "bg-purple-100 text-purple-800",
+  embalagem: "bg-pink-100 text-pink-800",
   outro: "bg-slate-100 text-slate-700",
 }
 

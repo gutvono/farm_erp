@@ -19,9 +19,21 @@ import { OrdemProducaoForm } from "@/components/modules/pcp/OrdemProducaoForm"
 import { RelatoriosPCP } from "@/components/modules/pcp/RelatoriosPCP"
 import { TalhaoCard } from "@/components/modules/pcp/TalhaoCard"
 import { TalhaoForm } from "@/components/modules/pcp/TalhaoForm"
-import { getAtividades, getOrdens, getTalhoes } from "@/services/pcp"
+import {
+  getAtividades,
+  getEquipamentosEmUso,
+  getOrdens,
+  getTalhoes,
+  getVeiculosEmUso,
+} from "@/services/pcp"
 import { getItens } from "@/services/estoque"
-import { Plot, PlotActivity, ProductionOrder, StockItem } from "@/types/index"
+import {
+  Plot,
+  PlotActivity,
+  ProductionOrder,
+  ResourceAvailability,
+  StockItem,
+} from "@/types/index"
 import { formatDate, formatCurrency } from "@/lib/utils"
 
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -61,8 +73,13 @@ export default function PCPPage() {
   const [atividadePlotFilter, setAtividadePlotFilter] = useState("all")
   const [atividadeFormOpen, setAtividadeFormOpen] = useState(false)
 
-  // Insumos (para OrdemProducaoForm)
+  // Recursos (para OrdemProducaoForm)
   const [insumos, setInsumos] = useState<StockItem[]>([])
+  const [equipamentos, setEquipamentos] = useState<StockItem[]>([])
+  const [veiculos, setVeiculos] = useState<StockItem[]>([])
+  const [embalagens, setEmbalagens] = useState<StockItem[]>([])
+  const [equipamentosEmUso, setEquipamentosEmUso] = useState<ResourceAvailability[]>([])
+  const [veiculosEmUso, setVeiculosEmUso] = useState<ResourceAvailability[]>([])
 
   const loadOrdens = useCallback(async () => {
     setOrdensLoading(true)
@@ -106,9 +123,18 @@ export default function PCPPage() {
   useEffect(() => { loadPlots() }, [loadPlots])
   useEffect(() => { loadAtividades() }, [loadAtividades])
 
+  const loadAvailability = useCallback(() => {
+    getEquipamentosEmUso().then(setEquipamentosEmUso).catch(() => {})
+    getVeiculosEmUso().then(setVeiculosEmUso).catch(() => {})
+  }, [])
+
   useEffect(() => {
     getItens({ category: "insumo" }).then(setInsumos).catch(() => {})
-  }, [])
+    getItens({ category: "equipamento" }).then(setEquipamentos).catch(() => {})
+    getItens({ category: "veiculo" }).then(setVeiculos).catch(() => {})
+    getItens({ category: "embalagem" }).then(setEmbalagens).catch(() => {})
+    loadAvailability()
+  }, [loadAvailability])
 
   function handleEditPlot(plot: Plot) {
     setEditingPlot(plot)
@@ -278,7 +304,15 @@ export default function PCPPage() {
         onOpenChange={setOrdemFormOpen}
         plots={plots}
         insumos={insumos}
-        onSuccess={loadOrdens}
+        equipamentos={equipamentos}
+        veiculos={veiculos}
+        embalagens={embalagens}
+        equipamentosEmUso={equipamentosEmUso}
+        veiculosEmUso={veiculosEmUso}
+        onSuccess={() => {
+          loadOrdens()
+          loadAvailability()
+        }}
       />
 
       <TalhaoForm

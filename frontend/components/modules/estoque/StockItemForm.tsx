@@ -27,9 +27,12 @@ import { StockCategory, StockItem, StockUnit } from "@/types/index"
 const schema = z.object({
   sku: z.string().min(1, "SKU é obrigatório"),
   name: z.string().min(1, "Nome é obrigatório"),
-  category: z.enum(["cafe", "insumo", "equipamento", "veiculo", "outro"], {
-    error: "Categoria é obrigatória",
-  }),
+  category: z.enum(
+    ["cafe", "insumo", "equipamento", "veiculo", "embalagem", "outro"],
+    {
+      error: "Categoria é obrigatória",
+    }
+  ),
   unit: z.enum(["saca", "litro", "kg", "unidade"], {
     error: "Unidade é obrigatória",
   }),
@@ -46,6 +49,7 @@ const CATEGORIES: { value: StockCategory; label: string }[] = [
   { value: "insumo", label: "Insumo" },
   { value: "equipamento", label: "Equipamento" },
   { value: "veiculo", label: "Veículo" },
+  { value: "embalagem", label: "Embalagem" },
   { value: "outro", label: "Outro" },
 ]
 

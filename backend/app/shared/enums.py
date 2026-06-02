@@ -19,6 +19,7 @@ class StockCategory(str, enum.Enum):
     INSUMO = "insumo"
     VEICULO = "veiculo"
     EQUIPAMENTO = "equipamento"
+    EMBALAGEM = "embalagem"
     OUTRO = "outro"
 
 

@@ -242,6 +242,70 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
               </div>
             )}
 
+            {/* Embalagens */}
+            {currentOrder.packagings.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Embalagens</p>
+                <div className="space-y-1">
+                  {currentOrder.packagings.map((pk) => (
+                    <div
+                      key={pk.id}
+                      className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                    >
+                      <span>{pk.stock_item_name}</span>
+                      <span className="font-medium">
+                        {pk.quantity} {pk.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Equipamentos */}
+            {currentOrder.equipments.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">
+                  Equipamentos Reservados
+                </p>
+                <div className="space-y-1">
+                  {currentOrder.equipments.map((eq) => (
+                    <div
+                      key={eq.id}
+                      className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                    >
+                      <span>{eq.stock_item_name}</span>
+                      <span className="font-medium">
+                        {eq.quantity} {eq.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Veículos */}
+            {currentOrder.vehicles.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">
+                  Veículos Reservados
+                </p>
+                <div className="space-y-1">
+                  {currentOrder.vehicles.map((vh) => (
+                    <div
+                      key={vh.id}
+                      className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                    >
+                      <span>{vh.stock_item_name}</span>
+                      <span className="font-medium">
+                        {vh.quantity} {vh.unit}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Equipe */}
             {currentOrder.workers.length > 0 && (
               <div>

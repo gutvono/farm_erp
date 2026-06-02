@@ -151,8 +151,8 @@ def create_order(
     )
 
 
-# IMPORTANTE: rota estática registrada ANTES de /ordens/{order_id} — caso
-# contrário o FastAPI trataria "funcionarios-em-producao" como um order_id.
+# IMPORTANTE: rotas estáticas registradas ANTES de /ordens/{order_id} — caso
+# contrário o FastAPI trataria o slug estático como um order_id.
 @router.get("/ordens/funcionarios-em-producao", response_model=SuccessResponse)
 def funcionarios_em_producao(
     db: Session = Depends(get_db),
@@ -160,6 +160,24 @@ def funcionarios_em_producao(
 ) -> SuccessResponse:
     ids = pcp_service.listar_funcionarios_em_producao(db)
     return success("Funcionários em produção ativa", [str(i) for i in ids])
+
+
+@router.get("/ordens/equipamentos-em-uso", response_model=SuccessResponse)
+def equipamentos_em_uso(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = pcp_service.listar_equipamentos_em_uso(db)
+    return success("Equipamentos em uso em ordens ativas", data)
+
+
+@router.get("/ordens/veiculos-em-uso", response_model=SuccessResponse)
+def veiculos_em_uso(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = pcp_service.listar_veiculos_em_uso(db)
+    return success("Veículos em uso em ordens ativas", data)
 
 
 @router.get("/ordens/{order_id}", response_model=SuccessResponse)

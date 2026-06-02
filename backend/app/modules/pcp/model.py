@@ -1,5 +1,6 @@
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Column,
     Date,
     DateTime,
@@ -95,6 +96,21 @@ class ProductionOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         back_populates="production_order",
         cascade="all, delete-orphan",
     )
+    equipments = relationship(
+        "ProductionEquipment",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
+    vehicles = relationship(
+        "ProductionVehicle",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
+    packagings = relationship(
+        "ProductionPackaging",
+        back_populates="production_order",
+        cascade="all, delete-orphan",
+    )
 
 
 class ProductionInput(UUIDMixin, TimestampMixin, Base):
@@ -183,6 +199,98 @@ class ProductionOrderService(UUIDMixin, TimestampMixin, Base):
     accounts_payable_id = Column(UUID(as_uuid=True), nullable=True)
 
     production_order = relationship("ProductionOrder", back_populates="services")
+
+
+class ProductionEquipment(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_equipments"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["production_order_id"],
+            ["production_orders.id"],
+            name="fk_pe_order",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["stock_item_id"],
+            ["stock_items.id"],
+            name="fk_pe_stock_item",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "production_order_id", "stock_item_id", name="uq_pe_order_item"
+        ),
+        CheckConstraint("quantity > 0", name="ck_pe_quantity_positive"),
+        Index("idx_pe_production_order", "production_order_id"),
+        Index("idx_pe_stock_item", "stock_item_id"),
+    )
+
+    production_order_id = Column(UUID(as_uuid=True), nullable=False)
+    stock_item_id = Column(UUID(as_uuid=True), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    production_order = relationship("ProductionOrder", back_populates="equipments")
+
+
+class ProductionVehicle(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_vehicles"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["production_order_id"],
+            ["production_orders.id"],
+            name="fk_pv_order",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["stock_item_id"],
+            ["stock_items.id"],
+            name="fk_pv_stock_item",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "production_order_id", "stock_item_id", name="uq_pv_order_item"
+        ),
+        CheckConstraint("quantity > 0", name="ck_pv_quantity_positive"),
+        Index("idx_pv_production_order", "production_order_id"),
+        Index("idx_pv_stock_item", "stock_item_id"),
+    )
+
+    production_order_id = Column(UUID(as_uuid=True), nullable=False)
+    stock_item_id = Column(UUID(as_uuid=True), nullable=False)
+    quantity = Column(Integer, nullable=False)
+
+    production_order = relationship("ProductionOrder", back_populates="vehicles")
+
+
+class ProductionPackaging(UUIDMixin, TimestampMixin, Base):
+    __tablename__ = "production_packagings"
+    __table_args__ = (
+        ForeignKeyConstraint(
+            ["production_order_id"],
+            ["production_orders.id"],
+            name="fk_pk_order",
+            ondelete="CASCADE",
+        ),
+        ForeignKeyConstraint(
+            ["stock_item_id"],
+            ["stock_items.id"],
+            name="fk_pk_stock_item",
+            ondelete="RESTRICT",
+        ),
+        UniqueConstraint(
+            "production_order_id", "stock_item_id", name="uq_pk_order_item"
+        ),
+        CheckConstraint("quantity > 0", name="ck_pk_quantity_positive"),
+        Index("idx_pk_production_order", "production_order_id"),
+        Index("idx_pk_stock_item", "stock_item_id"),
+    )
+
+    production_order_id = Column(UUID(as_uuid=True), nullable=False)
+    stock_item_id = Column(UUID(as_uuid=True), nullable=False)
+    quantity = Column(Integer, nullable=False)
+    unit_cost = Column(Numeric(12, 2), nullable=False, default=0)
+    subtotal = Column(Numeric(12, 2), nullable=False, default=0)
+
+    production_order = relationship("ProductionOrder", back_populates="packagings")
 
 
 class PlotActivity(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):

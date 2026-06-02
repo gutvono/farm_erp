@@ -9,11 +9,14 @@ from sqlalchemy.orm import Session
 from app.modules.pcp.model import (
     Plot,
     PlotActivity,
+    ProductionEquipment,
     ProductionHarvest,
     ProductionInput,
     ProductionOrder,
     ProductionOrderService,
     ProductionOrderWorker,
+    ProductionPackaging,
+    ProductionVehicle,
 )
 from app.modules.pcp.schemas import (
     PlotActivityCreate,
@@ -159,12 +162,18 @@ def create_order(
     input_cost_map: dict[UUID, Decimal],
     workers_data: list[dict],
     services_data: list[dict],
+    equipments_data: list[dict],
+    vehicles_data: list[dict],
+    packagings_data: list[dict],
 ) -> ProductionOrder:
     """
     Create a ProductionOrder with PLANEJADA status.
     `input_cost_map` maps stock_item_id → unit_cost (resolved by service layer).
     `workers_data`: [{employee_id, salary_snapshot, is_responsible}]
     `services_data`: [{supplier_id, description, amount, due_date}]
+    `equipments_data`: [{stock_item_id, quantity}]
+    `vehicles_data`: [{stock_item_id, quantity}]
+    `packagings_data`: [{stock_item_id, quantity, unit_cost, subtotal}]
     """
     order_number = gerar_numero_ordem(db)
     order = ProductionOrder(
@@ -224,6 +233,36 @@ def create_order(
             )
         )
 
+    for eq in equipments_data:
+        db.add(
+            ProductionEquipment(
+                production_order_id=order.id,
+                stock_item_id=eq["stock_item_id"],
+                quantity=eq["quantity"],
+            )
+        )
+
+    for vh in vehicles_data:
+        db.add(
+            ProductionVehicle(
+                production_order_id=order.id,
+                stock_item_id=vh["stock_item_id"],
+                quantity=vh["quantity"],
+            )
+        )
+
+    for pk in packagings_data:
+        db.add(
+            ProductionPackaging(
+                production_order_id=order.id,
+                stock_item_id=pk["stock_item_id"],
+                quantity=pk["quantity"],
+                unit_cost=pk["unit_cost"],
+                subtotal=pk["subtotal"],
+            )
+        )
+        total_cost += pk["subtotal"]
+
     db.flush()
 
     order.total_cost = total_cost
@@ -232,6 +271,9 @@ def create_order(
     _ = order.inputs
     _ = order.workers
     _ = order.services
+    _ = order.equipments
+    _ = order.vehicles
+    _ = order.packagings
     return order
 
 
@@ -256,6 +298,9 @@ def list_orders(
         _ = o.harvests
         _ = o.workers
         _ = o.services
+        _ = o.equipments
+        _ = o.vehicles
+        _ = o.packagings
     return orders
 
 
@@ -286,6 +331,9 @@ def get_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
         _ = order.inputs
         _ = order.workers
         _ = order.services
+        _ = order.equipments
+        _ = order.vehicles
+        _ = order.packagings
     return order
 
 
@@ -303,6 +351,9 @@ def get_order_with_harvests(db: Session, order_id: UUID) -> Optional[ProductionO
         _ = order.harvests
         _ = order.workers
         _ = order.services
+        _ = order.equipments
+        _ = order.vehicles
+        _ = order.packagings
     return order
 
 
@@ -336,17 +387,19 @@ def update_order(db: Session, order_id: UUID, **kwargs) -> Optional[ProductionOr
     return order
 
 
+ACTIVE_PRODUCTION_STATUSES = [
+    ProductionOrderStatus.PLANEJADA,
+    ProductionOrderStatus.EM_PRODUCAO,
+    ProductionOrderStatus.EM_EXECUCAO,
+    ProductionOrderStatus.PAUSADA,
+]
+
+
 def get_employee_ids_in_active_productions(db: Session) -> list[UUID]:
     """
     Retorna IDs de funcionários em ordens ativas (não concluídas/canceladas).
     Usado para bloquear seleção no frontend.
     """
-    active_statuses = [
-        ProductionOrderStatus.PLANEJADA,
-        ProductionOrderStatus.EM_PRODUCAO,
-        ProductionOrderStatus.EM_EXECUCAO,
-        ProductionOrderStatus.PAUSADA,
-    ]
     rows = (
         db.query(ProductionOrderWorker.employee_id)
         .join(
@@ -354,12 +407,53 @@ def get_employee_ids_in_active_productions(db: Session) -> list[UUID]:
             ProductionOrder.id == ProductionOrderWorker.production_order_id,
         )
         .filter(
-            ProductionOrder.status.in_(active_statuses),
+            ProductionOrder.status.in_(ACTIVE_PRODUCTION_STATUSES),
             ProductionOrder.deleted_at.is_(None),
         )
         .all()
     )
     return [r.employee_id for r in rows]
+
+
+def _get_committed_quantities(
+    db: Session,
+    table_model,
+    exclude_order_id: Optional[UUID] = None,
+) -> dict[UUID, int]:
+    """
+    Retorna dict {stock_item_id: total_quantity_comprometida} em ordens ativas
+    (não concluídas, não canceladas, não deletadas).
+    """
+    query = (
+        db.query(
+            table_model.stock_item_id,
+            func.sum(table_model.quantity).label("total"),
+        )
+        .join(
+            ProductionOrder,
+            ProductionOrder.id == table_model.production_order_id,
+        )
+        .filter(
+            ProductionOrder.status.in_(ACTIVE_PRODUCTION_STATUSES),
+            ProductionOrder.deleted_at.is_(None),
+        )
+    )
+    if exclude_order_id:
+        query = query.filter(ProductionOrder.id != exclude_order_id)
+    rows = query.group_by(table_model.stock_item_id).all()
+    return {row.stock_item_id: int(row.total or 0) for row in rows}
+
+
+def get_committed_equipments(
+    db: Session, exclude_order_id: Optional[UUID] = None
+) -> dict[UUID, int]:
+    return _get_committed_quantities(db, ProductionEquipment, exclude_order_id)
+
+
+def get_committed_vehicles(
+    db: Session, exclude_order_id: Optional[UUID] = None
+) -> dict[UUID, int]:
+    return _get_committed_quantities(db, ProductionVehicle, exclude_order_id)
 
 
 def set_service_accounts_payable(

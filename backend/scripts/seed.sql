@@ -79,7 +79,7 @@ INSERT INTO payroll_events (
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos = 9)
+-- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos + 3 embalagens = 12)
 -- quantity_on_hand reflete o estado pós produção/compra já representado no seed.
 -- -----------------------------------------------------------------------------
 INSERT INTO stock_items (id, sku, name, category, unit, minimum_stock, unit_cost, quantity_on_hand, description) VALUES
@@ -94,7 +94,11 @@ INSERT INTO stock_items (id, sku, name, category, unit, minimum_stock, unit_cost
 ('55555555-5555-5555-5555-555555555014', 'INS-CALC', 'Calcário Dolomítico',                 'insumo',      'kg',     200.000,   3.00, 300.000,   'Correção de acidez do solo'),
 -- Equipamentos / veículos
 ('55555555-5555-5555-5555-555555555021', 'EQP-TRA01', 'Trator New Holland T6',              'veiculo',     'unidade',  1.000, 185000.00, 1.000,  'Trator 140cv com implementos'),
-('55555555-5555-5555-5555-555555555022', 'EQP-COL01', 'Colheitadeira Jacto Máster',         'equipamento', 'unidade',  1.000, 250000.00, 1.000,  'Colheitadeira automotriz para café')
+('55555555-5555-5555-5555-555555555022', 'EQP-COL01', 'Colheitadeira Jacto Máster',         'equipamento', 'unidade',  1.000, 250000.00, 1.000,  'Colheitadeira automotriz para café'),
+-- Embalagens
+('55555555-5555-5555-5555-555555555031', 'EMB-SACA60', 'Saca de juta 60kg',                 'embalagem',   'unidade', 50.000,   8.50,  500.000,  'Saca padrão para café beneficiado'),
+('55555555-5555-5555-5555-555555555032', 'EMB-BIGBAG', 'Big bag 600kg',                     'embalagem',   'unidade', 10.000,  45.00,   80.000,  'Big bag para granel'),
+('55555555-5555-5555-5555-555555555033', 'EMB-CAIXA',  'Caixa papelão 10kg',                'embalagem',   'unidade',100.000,   3.20, 1000.000,  'Caixa para café torrado/embalado')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -333,7 +337,7 @@ ON CONFLICT (id) DO NOTHING;
 --   3 clientes (1 inadimplente)
 --   3 fornecedores
 --   8 funcionários (3 CLT, 3 PJ, 2 Temp)
---   9 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira)
+--   12 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira, 3 embalagens)
 --   2 talhões, 3 atividades
 --   1 ordem de produção concluída (100 sacas), 2 trabalhadores, 1 serviço externo
 --   1 ordem de compra concluída

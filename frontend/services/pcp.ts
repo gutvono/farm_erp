@@ -12,11 +12,15 @@ import {
   Plot,
   PlotActivity,
   ProducaoPorTalhaoItem,
+  ProductionEquipment,
   ProductionHarvest,
   ProductionInput,
   ProductionOrder,
   ProductionOrderStatus,
+  ProductionPackaging,
   ProductionResult,
+  ProductionVehicle,
+  ResourceAvailability,
 } from "@/types/index"
 
 function toNumber(value: unknown): number {
@@ -173,6 +177,41 @@ interface RawProductionOrderService {
   accounts_payable_id: string | null
 }
 
+interface RawProductionEquipment {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+}
+
+interface RawProductionVehicle {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+}
+
+interface RawProductionPackaging {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+  unit_cost: string | number
+  subtotal: string | number
+}
+
+interface RawResourceAvailability {
+  stock_item_id: string
+  name: string
+  unit: string
+  total: number
+  committed: number
+  available: number
+}
+
 interface RawProductionOrder {
   id: string
   plot_id: string
@@ -197,6 +236,9 @@ interface RawProductionOrder {
   harvests: RawProductionHarvest[]
   workers: RawProductionOrderWorker[]
   services: RawProductionOrderService[]
+  equipments: RawProductionEquipment[]
+  vehicles: RawProductionVehicle[]
+  packagings: RawProductionPackaging[]
   created_at: string
   updated_at: string
 }
@@ -240,6 +282,35 @@ function parseOrder(raw: RawProductionOrder): ProductionOrder {
       due_date: s.due_date,
       accounts_payable_id: s.accounts_payable_id,
     })),
+    equipments: (raw.equipments ?? []).map(
+      (eq): ProductionEquipment => ({
+        id: eq.id,
+        stock_item_id: eq.stock_item_id,
+        stock_item_name: eq.stock_item_name,
+        unit: eq.unit,
+        quantity: toNumber(eq.quantity),
+      })
+    ),
+    vehicles: (raw.vehicles ?? []).map(
+      (vh): ProductionVehicle => ({
+        id: vh.id,
+        stock_item_id: vh.stock_item_id,
+        stock_item_name: vh.stock_item_name,
+        unit: vh.unit,
+        quantity: toNumber(vh.quantity),
+      })
+    ),
+    packagings: (raw.packagings ?? []).map(
+      (pk): ProductionPackaging => ({
+        id: pk.id,
+        stock_item_id: pk.stock_item_id,
+        stock_item_name: pk.stock_item_name,
+        unit: pk.unit,
+        quantity: toNumber(pk.quantity),
+        unit_cost: toNumber(pk.unit_cost),
+        subtotal: toNumber(pk.subtotal),
+      })
+    ),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -350,6 +421,9 @@ export async function createOrdem(data: {
   inputs: { stock_item_id: string; quantity: number }[]
   workers?: { employee_id: string; is_responsible: boolean }[]
   services?: { supplier_id: string; description: string; amount: number; due_date: string }[]
+  equipments?: { stock_item_id: string; quantity: number }[]
+  vehicles?: { stock_item_id: string; quantity: number }[]
+  packagings?: { stock_item_id: string; quantity: number }[]
 }): Promise<ProductionOrder> {
   const response = await apiFetch<ApiResponse<RawProductionOrder>>("/api/pcp/ordens", {
     method: "POST",
@@ -363,6 +437,33 @@ export async function getFuncionariosEmProducao(): Promise<string[]> {
     "/api/pcp/ordens/funcionarios-em-producao"
   )
   return response.data
+}
+
+function parseResourceAvailability(
+  raw: RawResourceAvailability
+): ResourceAvailability {
+  return {
+    stock_item_id: raw.stock_item_id,
+    name: raw.name,
+    unit: raw.unit,
+    total: toNumber(raw.total),
+    committed: toNumber(raw.committed),
+    available: toNumber(raw.available),
+  }
+}
+
+export async function getEquipamentosEmUso(): Promise<ResourceAvailability[]> {
+  const response = await apiFetch<ApiResponse<RawResourceAvailability[]>>(
+    "/api/pcp/ordens/equipamentos-em-uso"
+  )
+  return response.data.map(parseResourceAvailability)
+}
+
+export async function getVeiculosEmUso(): Promise<ResourceAvailability[]> {
+  const response = await apiFetch<ApiResponse<RawResourceAvailability[]>>(
+    "/api/pcp/ordens/veiculos-em-uso"
+  )
+  return response.data.map(parseResourceAvailability)
 }
 
 export async function registrarColheita(

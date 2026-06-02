@@ -27,6 +27,7 @@ const CATEGORY_LABELS: Record<StockCategory, string> = {
   insumo: "Insumo",
   equipamento: "Equipamento",
   veiculo: "Veículo",
+  embalagem: "Embalagem",
   outro: "Outro",
 }
 

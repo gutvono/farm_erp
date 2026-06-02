@@ -25,7 +25,13 @@ import {
 import { createOrdem, getFuncionariosEmProducao } from "@/services/pcp"
 import { getFuncionarios } from "@/services/folha"
 import { getFornecedores } from "@/services/compras"
-import { Employee, Plot, StockItem, Supplier } from "@/types/index"
+import {
+  Employee,
+  Plot,
+  ResourceAvailability,
+  StockItem,
+  Supplier,
+} from "@/types/index"
 
 const inputSchema = z.object({
   stock_item_id: z.string().min(1, "Selecione um insumo"),
@@ -44,6 +50,30 @@ const serviceSchema = z.object({
   due_date: z.string().min(1, "Data de vencimento obrigatória"),
 })
 
+const equipmentSchema = z.object({
+  stock_item_id: z.string().min(1, "Selecione um equipamento"),
+  quantity: z
+    .number()
+    .int("Apenas inteiros")
+    .positive("Qtd > 0"),
+})
+
+const vehicleSchema = z.object({
+  stock_item_id: z.string().min(1, "Selecione um veículo"),
+  quantity: z
+    .number()
+    .int("Apenas inteiros")
+    .positive("Qtd > 0"),
+})
+
+const packagingSchema = z.object({
+  stock_item_id: z.string().min(1, "Selecione uma embalagem"),
+  quantity: z
+    .number()
+    .int("Apenas inteiros")
+    .positive("Qtd > 0"),
+})
+
 const schema = z
   .object({
     plot_id: z.string().min(1, "Selecione um talhão"),
@@ -54,6 +84,9 @@ const schema = z
     inputs: z.array(inputSchema).min(1, "Adicione pelo menos 1 insumo"),
     workers: z.array(workerSchema),
     services: z.array(serviceSchema),
+    equipments: z.array(equipmentSchema),
+    vehicles: z.array(vehicleSchema),
+    packagings: z.array(packagingSchema),
   })
   .refine(
     (data) => data.workers.filter((w) => w.is_responsible).length <= 1,
@@ -67,6 +100,11 @@ interface OrdemProducaoFormProps {
   onOpenChange: (open: boolean) => void
   plots: Plot[]
   insumos: StockItem[]
+  equipamentos: StockItem[]
+  veiculos: StockItem[]
+  embalagens: StockItem[]
+  equipamentosEmUso: ResourceAvailability[]
+  veiculosEmUso: ResourceAvailability[]
   onSuccess: () => void
 }
 
@@ -75,6 +113,11 @@ export function OrdemProducaoForm({
   onOpenChange,
   plots,
   insumos,
+  equipamentos,
+  veiculos,
+  embalagens,
+  equipamentosEmUso,
+  veiculosEmUso,
   onSuccess,
 }: OrdemProducaoFormProps) {
   const [loading, setLoading] = useState(false)
@@ -101,6 +144,9 @@ export function OrdemProducaoForm({
       inputs: [{ stock_item_id: "", quantity: 0 }],
       workers: [],
       services: [],
+      equipments: [],
+      vehicles: [],
+      packagings: [],
     },
   })
 
@@ -115,6 +161,21 @@ export function OrdemProducaoForm({
     append: appendService,
     remove: removeService,
   } = useFieldArray({ control, name: "services" })
+  const {
+    fields: equipFields,
+    append: appendEquip,
+    remove: removeEquip,
+  } = useFieldArray({ control, name: "equipments" })
+  const {
+    fields: vehFields,
+    append: appendVeh,
+    remove: removeVeh,
+  } = useFieldArray({ control, name: "vehicles" })
+  const {
+    fields: pkgFields,
+    append: appendPkg,
+    remove: removePkg,
+  } = useFieldArray({ control, name: "packagings" })
 
   const plotId = watch("plot_id")
   const watchedInputs = watch("inputs")
@@ -130,6 +191,9 @@ export function OrdemProducaoForm({
         inputs: [{ stock_item_id: "", quantity: 0 }],
         workers: [],
         services: [],
+        equipments: [],
+        vehicles: [],
+        packagings: [],
       })
       getFuncionarios({ is_active: true }).then(setEmployees).catch(() => {})
       getFornecedores().then(setSuppliers).catch(() => {})
@@ -159,6 +223,18 @@ export function OrdemProducaoForm({
           description: s.description,
           amount: s.amount,
           due_date: s.due_date,
+        })),
+        equipments: data.equipments.map((eq) => ({
+          stock_item_id: eq.stock_item_id,
+          quantity: eq.quantity,
+        })),
+        vehicles: data.vehicles.map((vh) => ({
+          stock_item_id: vh.stock_item_id,
+          quantity: vh.quantity,
+        })),
+        packagings: data.packagings.map((pk) => ({
+          stock_item_id: pk.stock_item_id,
+          quantity: pk.quantity,
         })),
       })
       toast.success("Ordem de produção criada com sucesso")
@@ -289,6 +365,325 @@ export function OrdemProducaoForm({
                   </div>
                 </div>
               ))}
+            </div>
+          </div>
+
+          {/* Embalagens */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Embalagens (opcional)</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => appendPkg({ stock_item_id: "", quantity: 1 })}
+              >
+                <Plus className="h-3 w-3 mr-1" /> Adicionar embalagem
+              </Button>
+            </div>
+
+            <div className="space-y-2">
+              {pkgFields.map((field, idx) => {
+                const watchedPkgs = watch("packagings")
+                const selectedInOtherRows = watchedPkgs
+                  .filter((_, i) => i !== idx)
+                  .map((p) => p.stock_item_id)
+                  .filter(Boolean)
+                return (
+                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-8 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Embalagem</Label>}
+                      <Select
+                        value={watchedPkgs[idx]?.stock_item_id ?? ""}
+                        onValueChange={(v) =>
+                          setValue(`packagings.${idx}.stock_item_id`, v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione a embalagem" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {embalagens.map((s) => {
+                            const duplicated = selectedInOtherRows.includes(s.id)
+                            return (
+                              <SelectItem
+                                key={s.id}
+                                value={s.id}
+                                disabled={duplicated}
+                                className={duplicated ? "opacity-40 cursor-not-allowed" : ""}
+                              >
+                                {s.name} ({s.quantity_on_hand} {s.unit} disp.)
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {errors.packagings?.[idx]?.stock_item_id && (
+                        <p className="text-xs text-red-500">
+                          {errors.packagings[idx]?.stock_item_id?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-3 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        {...register(`packagings.${idx}.quantity`, { valueAsNumber: true })}
+                      />
+                      {errors.packagings?.[idx]?.quantity && (
+                        <p className="text-xs text-red-500">
+                          {errors.packagings[idx]?.quantity?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-1">
+                      {idx === 0 && <div className="text-xs invisible">X</div>}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removePkg(idx)}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Equipamentos */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Equipamentos (opcional)</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => appendEquip({ stock_item_id: "", quantity: 1 })}
+              >
+                <Plus className="h-3 w-3 mr-1" /> Adicionar equipamento
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Equipamentos são reservados (não consomem estoque) e ficam indisponíveis
+              em outras ordens enquanto esta estiver ativa.
+            </p>
+
+            <div className="space-y-2">
+              {equipFields.map((field, idx) => {
+                const watchedEqs = watch("equipments")
+                const selectedInOtherRows = watchedEqs
+                  .filter((_, i) => i !== idx)
+                  .map((e) => e.stock_item_id)
+                  .filter(Boolean)
+                const selectedId = watchedEqs[idx]?.stock_item_id
+                const availability = selectedId
+                  ? equipamentosEmUso.find((r) => r.stock_item_id === selectedId)
+                  : undefined
+                const requested = watchedEqs[idx]?.quantity ?? 0
+                const exceedsAvailable =
+                  availability && requested > availability.available
+
+                return (
+                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-8 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Equipamento</Label>}
+                      <Select
+                        value={watchedEqs[idx]?.stock_item_id ?? ""}
+                        onValueChange={(v) =>
+                          setValue(`equipments.${idx}.stock_item_id`, v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o equipamento" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {equipamentos.map((s) => {
+                            const avail = equipamentosEmUso.find(
+                              (r) => r.stock_item_id === s.id
+                            )
+                            const available = avail
+                              ? avail.available
+                              : Number(s.quantity_on_hand)
+                            const total = avail ? avail.total : Number(s.quantity_on_hand)
+                            const duplicated = selectedInOtherRows.includes(s.id)
+                            const blocked = duplicated || available <= 0
+                            return (
+                              <SelectItem
+                                key={s.id}
+                                value={s.id}
+                                disabled={blocked}
+                                className={blocked ? "opacity-40 cursor-not-allowed" : ""}
+                              >
+                                {s.name} ({available}/{total} disp.)
+                                {available === 0 && " — totalmente em uso"}
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {errors.equipments?.[idx]?.stock_item_id && (
+                        <p className="text-xs text-red-500">
+                          {errors.equipments[idx]?.stock_item_id?.message}
+                        </p>
+                      )}
+                      {exceedsAvailable && (
+                        <p className="text-xs text-red-500">
+                          Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-3 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        {...register(`equipments.${idx}.quantity`, { valueAsNumber: true })}
+                      />
+                      {errors.equipments?.[idx]?.quantity && (
+                        <p className="text-xs text-red-500">
+                          {errors.equipments[idx]?.quantity?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-1">
+                      {idx === 0 && <div className="text-xs invisible">X</div>}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeEquip(idx)}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
+            </div>
+          </div>
+
+          {/* Veículos */}
+          <div className="space-y-2">
+            <div className="flex items-center justify-between">
+              <Label>Veículos (opcional)</Label>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => appendVeh({ stock_item_id: "", quantity: 1 })}
+              >
+                <Plus className="h-3 w-3 mr-1" /> Adicionar veículo
+              </Button>
+            </div>
+            <p className="text-xs text-slate-500">
+              Veículos são reservados (não consomem estoque) e ficam indisponíveis
+              em outras ordens enquanto esta estiver ativa.
+            </p>
+
+            <div className="space-y-2">
+              {vehFields.map((field, idx) => {
+                const watchedVehs = watch("vehicles")
+                const selectedInOtherRows = watchedVehs
+                  .filter((_, i) => i !== idx)
+                  .map((v) => v.stock_item_id)
+                  .filter(Boolean)
+                const selectedId = watchedVehs[idx]?.stock_item_id
+                const availability = selectedId
+                  ? veiculosEmUso.find((r) => r.stock_item_id === selectedId)
+                  : undefined
+                const requested = watchedVehs[idx]?.quantity ?? 0
+                const exceedsAvailable =
+                  availability && requested > availability.available
+
+                return (
+                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
+                    <div className="col-span-8 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Veículo</Label>}
+                      <Select
+                        value={watchedVehs[idx]?.stock_item_id ?? ""}
+                        onValueChange={(v) =>
+                          setValue(`vehicles.${idx}.stock_item_id`, v)
+                        }
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Selecione o veículo" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {veiculos.map((s) => {
+                            const avail = veiculosEmUso.find(
+                              (r) => r.stock_item_id === s.id
+                            )
+                            const available = avail
+                              ? avail.available
+                              : Number(s.quantity_on_hand)
+                            const total = avail ? avail.total : Number(s.quantity_on_hand)
+                            const duplicated = selectedInOtherRows.includes(s.id)
+                            const blocked = duplicated || available <= 0
+                            return (
+                              <SelectItem
+                                key={s.id}
+                                value={s.id}
+                                disabled={blocked}
+                                className={blocked ? "opacity-40 cursor-not-allowed" : ""}
+                              >
+                                {s.name} ({available}/{total} disp.)
+                                {available === 0 && " — totalmente em uso"}
+                              </SelectItem>
+                            )
+                          })}
+                        </SelectContent>
+                      </Select>
+                      {errors.vehicles?.[idx]?.stock_item_id && (
+                        <p className="text-xs text-red-500">
+                          {errors.vehicles[idx]?.stock_item_id?.message}
+                        </p>
+                      )}
+                      {exceedsAvailable && (
+                        <p className="text-xs text-red-500">
+                          Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-3 space-y-1">
+                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                      <Input
+                        type="number"
+                        step="1"
+                        min="1"
+                        {...register(`vehicles.${idx}.quantity`, { valueAsNumber: true })}
+                      />
+                      {errors.vehicles?.[idx]?.quantity && (
+                        <p className="text-xs text-red-500">
+                          {errors.vehicles[idx]?.quantity?.message}
+                        </p>
+                      )}
+                    </div>
+
+                    <div className="col-span-1">
+                      {idx === 0 && <div className="text-xs invisible">X</div>}
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        onClick={() => removeVeh(idx)}
+                      >
+                        <Trash2 className="h-4 w-4 text-red-500" />
+                      </Button>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
           </div>
 

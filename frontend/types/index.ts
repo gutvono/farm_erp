@@ -158,7 +158,13 @@ export interface DefaulterItem {
   due_date: string
 }
 
-export type StockCategory = "cafe" | "insumo" | "equipamento" | "veiculo" | "outro"
+export type StockCategory =
+  | "cafe"
+  | "insumo"
+  | "equipamento"
+  | "veiculo"
+  | "embalagem"
+  | "outro"
 export type StockUnit = "saca" | "litro" | "kg" | "unidade"
 export type StockMovementType = "entrada" | "saida"
 
@@ -456,6 +462,41 @@ export interface ProductionOrderService {
   accounts_payable_id: string | null
 }
 
+export interface ProductionEquipment {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+}
+
+export interface ProductionVehicle {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+}
+
+export interface ProductionPackaging {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  unit: string
+  quantity: number
+  unit_cost: number
+  subtotal: number
+}
+
+export interface ResourceAvailability {
+  stock_item_id: string
+  name: string
+  unit: string
+  total: number
+  committed: number
+  available: number
+}
+
 export interface ProductionOrder {
   id: string
   plot_id: string
@@ -480,6 +521,9 @@ export interface ProductionOrder {
   harvests: ProductionHarvest[]
   workers: ProductionOrderWorker[]
   services: ProductionOrderService[]
+  equipments: ProductionEquipment[]
+  vehicles: ProductionVehicle[]
+  packagings: ProductionPackaging[]
   created_at: string
   updated_at: string
 }

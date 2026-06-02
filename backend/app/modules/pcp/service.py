@@ -1,3 +1,4 @@
+import math
 import random
 from datetime import datetime, timezone
 from decimal import Decimal, ROUND_HALF_UP
@@ -31,12 +32,15 @@ from app.modules.pcp.schemas import (
     PlotCreate,
     PlotUpdate,
     ProducaoPorTalhaoItem,
+    ProductionEquipmentOut,
     ProductionInputOut,
     ProductionOrderCreate,
     ProductionOrderOut,
     ProductionOrderServiceOut,
     ProductionOrderWorkerOut,
+    ProductionPackagingOut,
     ProductionResult,
+    ProductionVehicleOut,
 )
 from app.shared.enums import (
     FinancialCategory,
@@ -185,15 +189,108 @@ def list_activities(
 def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
     _get_plot_or_404(db, data.plot_id)
 
+    # Coletar todos os stock_ids dos recursos vinculados à ordem
+    all_resource_ids = (
+        [pi.stock_item_id for pi in data.inputs]
+        + [eq.stock_item_id for eq in data.equipments]
+        + [vh.stock_item_id for vh in data.vehicles]
+        + [pk.stock_item_id for pk in data.packagings]
+    )
+    smap = _stock_map(db, all_resource_ids)
+
     # Validate inputs (stock items)
-    stock_ids = [pi.stock_item_id for pi in data.inputs]
-    smap = _stock_map(db, stock_ids)
     for pi in data.inputs:
         item = smap.get(pi.stock_item_id)
         if not item or item.deleted_at is not None:
             raise HTTPException(
                 status_code=404,
                 detail=f"Item de estoque não encontrado: {pi.stock_item_id}",
+            )
+
+    # Validate equipments (existência + categoria)
+    for eq in data.equipments:
+        item = smap.get(eq.stock_item_id)
+        if not item or item.deleted_at is not None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Equipamento não encontrado: {eq.stock_item_id}",
+            )
+        if item.category != StockCategory.EQUIPAMENTO:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item '{item.name}' não é da categoria Equipamento",
+            )
+
+    # Validate vehicles (existência + categoria)
+    for vh in data.vehicles:
+        item = smap.get(vh.stock_item_id)
+        if not item or item.deleted_at is not None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Veículo não encontrado: {vh.stock_item_id}",
+            )
+        if item.category != StockCategory.VEICULO:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item '{item.name}' não é da categoria Veículo",
+            )
+
+    # Validate packagings (existência + categoria)
+    for pk in data.packagings:
+        item = smap.get(pk.stock_item_id)
+        if not item or item.deleted_at is not None:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Embalagem não encontrada: {pk.stock_item_id}",
+            )
+        if item.category != StockCategory.EMBALAGEM:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Item '{item.name}' não é da categoria Embalagem",
+            )
+
+    # Bloqueio de disponibilidade — equipamentos
+    committed_eq = pcp_repo.get_committed_equipments(db)
+    demand_eq: dict[UUID, int] = {}
+    for eq in data.equipments:
+        demand_eq[eq.stock_item_id] = (
+            demand_eq.get(eq.stock_item_id, 0) + eq.quantity
+        )
+    for stock_id, demanda in demand_eq.items():
+        item = smap[stock_id]
+        total = int(item.quantity_on_hand)
+        em_uso = committed_eq.get(stock_id, 0)
+        disponivel = total - em_uso
+        if demanda > disponivel:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Equipamento '{item.name}' indisponível. "
+                    f"Existem {total} unidade(s), {em_uso} em uso em outras ordens ativas. "
+                    f"Disponível: {disponivel}, solicitado: {demanda}."
+                ),
+            )
+
+    # Bloqueio de disponibilidade — veículos
+    committed_vh = pcp_repo.get_committed_vehicles(db)
+    demand_vh: dict[UUID, int] = {}
+    for vh in data.vehicles:
+        demand_vh[vh.stock_item_id] = (
+            demand_vh.get(vh.stock_item_id, 0) + vh.quantity
+        )
+    for stock_id, demanda in demand_vh.items():
+        item = smap[stock_id]
+        total = int(item.quantity_on_hand)
+        em_uso = committed_vh.get(stock_id, 0)
+        disponivel = total - em_uso
+        if demanda > disponivel:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Veículo '{item.name}' indisponível. "
+                    f"Existem {total} unidade(s), {em_uso} em uso em outras ordens ativas. "
+                    f"Disponível: {disponivel}, solicitado: {demanda}."
+                ),
             )
 
     # Validate workers
@@ -233,7 +330,11 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
                 detail=f"Fornecedor não encontrado: {s.supplier_id}",
             )
 
-    input_cost_map = {s.id: Decimal(str(s.unit_cost)) for s in smap.values()}
+    input_cost_map = {
+        s.id: Decimal(str(s.unit_cost))
+        for s in smap.values()
+        if s.category == StockCategory.INSUMO
+    }
 
     workers_data = [
         {
@@ -252,12 +353,37 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
         }
         for s in data.services
     ]
+    equipments_data = [
+        {"stock_item_id": eq.stock_item_id, "quantity": eq.quantity}
+        for eq in data.equipments
+    ]
+    vehicles_data = [
+        {"stock_item_id": vh.stock_item_id, "quantity": vh.quantity}
+        for vh in data.vehicles
+    ]
+    packagings_data = [
+        {
+            "stock_item_id": pk.stock_item_id,
+            "quantity": pk.quantity,
+            "unit_cost": Decimal(str(smap[pk.stock_item_id].unit_cost)),
+            "subtotal": Decimal(pk.quantity)
+            * Decimal(str(smap[pk.stock_item_id].unit_cost)),
+        }
+        for pk in data.packagings
+    ]
 
     order = pcp_repo.create_order(
-        db, data, input_cost_map, workers_data, services_data
+        db,
+        data,
+        input_cost_map,
+        workers_data,
+        services_data,
+        equipments_data,
+        vehicles_data,
+        packagings_data,
     )
 
-    # Calculate estimated_cost: insumos + workers + serviços
+    # Calculate estimated_cost: insumos + workers + serviços + embalagens
     custo_insumos = sum(
         (Decimal(str(pi.subtotal)) for pi in order.inputs), Decimal("0")
     )
@@ -267,7 +393,12 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
     custo_servicos = sum(
         (Decimal(str(s.amount)) for s in order.services), Decimal("0")
     )
-    estimated = _quantize2(custo_insumos + custo_workers + custo_servicos)
+    custo_embalagens = sum(
+        (Decimal(str(pk.subtotal)) for pk in order.packagings), Decimal("0")
+    )
+    estimated = _quantize2(
+        custo_insumos + custo_workers + custo_servicos + custo_embalagens
+    )
     pcp_repo.update_order(db, order.id, estimated_cost=estimated)
 
     return pcp_repo.get_order_with_harvests(db, order.id)
@@ -289,6 +420,47 @@ def get_order(db: Session, order_id: UUID) -> ProductionOrder:
 
 def listar_funcionarios_em_producao(db: Session) -> list[UUID]:
     return pcp_repo.get_employee_ids_in_active_productions(db)
+
+
+def _listar_recursos_em_uso(
+    db: Session,
+    category: StockCategory,
+    committed: dict[UUID, int],
+) -> list[dict]:
+    items = (
+        db.query(StockItem)
+        .filter(
+            StockItem.category == category,
+            StockItem.deleted_at.is_(None),
+        )
+        .order_by(StockItem.name.asc())
+        .all()
+    )
+    result: list[dict] = []
+    for item in items:
+        total = int(item.quantity_on_hand)
+        em_uso = int(committed.get(item.id, 0))
+        result.append(
+            {
+                "stock_item_id": str(item.id),
+                "name": item.name,
+                "unit": item.unit.value if hasattr(item.unit, "value") else str(item.unit),
+                "total": total,
+                "committed": em_uso,
+                "available": total - em_uso,
+            }
+        )
+    return result
+
+
+def listar_equipamentos_em_uso(db: Session) -> list[dict]:
+    committed = pcp_repo.get_committed_equipments(db)
+    return _listar_recursos_em_uso(db, StockCategory.EQUIPAMENTO, committed)
+
+
+def listar_veiculos_em_uso(db: Session) -> list[dict]:
+    committed = pcp_repo.get_committed_vehicles(db)
+    return _listar_recursos_em_uso(db, StockCategory.VEICULO, committed)
 
 
 def soft_delete_order(db: Session, order_id: UUID) -> ProductionOrder:
@@ -432,7 +604,9 @@ def registrar_colheita(
     plot = _get_plot_or_404(db, order.plot_id)
 
     # 1. Valida disponibilidade dos insumos proporcionais
-    stock_ids = [pi.stock_item_id for pi in order.inputs]
+    stock_ids = [pi.stock_item_id for pi in order.inputs] + [
+        pk.stock_item_id for pk in order.packagings
+    ]
     smap = _stock_map(db, stock_ids)
     consumos_proporcionais: list[tuple[UUID, Decimal, StockItem]] = []
     for pi in order.inputs:
@@ -460,6 +634,32 @@ def registrar_colheita(
             )
         consumos_proporcionais.append((pi.stock_item_id, qty_proporcional, item))
 
+    # 1b. Valida disponibilidade das embalagens proporcionais (qty inteira)
+    consumos_embalagens: list[tuple[UUID, int, StockItem]] = []
+    for pk in order.packagings:
+        item = smap.get(pk.stock_item_id)
+        if not item:
+            raise HTTPException(
+                status_code=404,
+                detail=f"Embalagem não encontrada: {pk.stock_item_id}",
+            )
+        qty_int = math.ceil(
+            int(pk.quantity) * float(percentage) / 100.0
+        )
+        if qty_int <= 0:
+            continue
+        if not estoque_service.verificar_disponibilidade(
+            db, pk.stock_item_id, Decimal(qty_int)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail=(
+                    f"Estoque insuficiente para embalagem: {item.name}. "
+                    f"Disponível: {item.quantity_on_hand} {item.unit.value}"
+                ),
+            )
+        consumos_embalagens.append((pk.stock_item_id, qty_int, item))
+
     order_label = order.order_number or str(order.id)
 
     # 2. Consome insumos proporcionalmente
@@ -478,6 +678,24 @@ def registrar_colheita(
             "name": item.name,
             "quantity": float(qty),
             "unit": item.unit.value if hasattr(item.unit, "value") else str(item.unit),
+        })
+
+    # 2b. Consome embalagens (quantidade inteira arredondada para cima)
+    for stock_item_id, qty_int, item in consumos_embalagens:
+        estoque_service.registrar_saida(
+            db,
+            stock_item_id=stock_item_id,
+            quantity=Decimal(qty_int),
+            description=f"Colheita {percentage}% — Ordem {order_label} (embalagem)",
+            source_module="pcp",
+            reference_id=order.id,
+        )
+        inputs_consumed_snapshot.append({
+            "stock_item_id": str(stock_item_id),
+            "name": item.name,
+            "quantity": qty_int,
+            "unit": item.unit.value if hasattr(item.unit, "value") else str(item.unit),
+            "type": "embalagem",
         })
 
     # Movimento agregado de consumo (rastreabilidade)
@@ -579,7 +797,12 @@ def registrar_colheita(
         custo_servicos = sum(
             (Decimal(str(s.amount)) for s in reloaded.services), Decimal("0")
         )
-        realized = _quantize2(custo_insumos + custo_workers + custo_servicos)
+        custo_embalagens = sum(
+            (Decimal(str(pk.subtotal)) for pk in reloaded.packagings), Decimal("0")
+        )
+        realized = _quantize2(
+            custo_insumos + custo_workers + custo_servicos + custo_embalagens
+        )
 
         pcp_repo.update_order(db, reloaded.id, realized_cost=realized)
 
@@ -674,6 +897,47 @@ def _serialize_order_model(db: Session, order: ProductionOrder) -> ProductionOrd
         for s in order.services
     ]
 
+    # Carrega stock_items dos novos recursos para nome/unit
+    resource_stock_ids = (
+        [eq.stock_item_id for eq in order.equipments]
+        + [vh.stock_item_id for vh in order.vehicles]
+        + [pk.stock_item_id for pk in order.packagings]
+    )
+    smap_resources = _stock_map(db, resource_stock_ids)
+
+    def _name(stock_id):
+        item = smap_resources.get(stock_id)
+        return item.name if item else ""
+
+    def _unit(stock_id):
+        item = smap_resources.get(stock_id)
+        return item.unit.value if item else ""
+
+    equipments_out = [
+        ProductionEquipmentOut.from_model(
+            eq,
+            stock_item_name=_name(eq.stock_item_id),
+            unit=_unit(eq.stock_item_id),
+        )
+        for eq in order.equipments
+    ]
+    vehicles_out = [
+        ProductionVehicleOut.from_model(
+            vh,
+            stock_item_name=_name(vh.stock_item_id),
+            unit=_unit(vh.stock_item_id),
+        )
+        for vh in order.vehicles
+    ]
+    packagings_out = [
+        ProductionPackagingOut.from_model(
+            pk,
+            stock_item_name=_name(pk.stock_item_id),
+            unit=_unit(pk.stock_item_id),
+        )
+        for pk in order.packagings
+    ]
+
     return ProductionOrderOut.from_model(
         order,
         plot_name=plot_name,
@@ -681,6 +945,9 @@ def _serialize_order_model(db: Session, order: ProductionOrder) -> ProductionOrd
         harvests=harvests_out,
         workers=workers_out,
         services=services_out,
+        equipments=equipments_out,
+        vehicles=vehicles_out,
+        packagings=packagings_out,
     )
 
 
