@@ -292,6 +292,74 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 | `status` | enum `purchase_order_receipt_status` (`pendente` / `conferido`) |
 | `created_at`, `updated_at` | TIMESTAMPTZ |
 
+## Cotações
+
+Sub-fluxo de **cotação de preços** (RFQ). A cotação reúne uma lista de itens (ou um serviço) e recebe **propostas** de vários fornecedores. Após selecionar a proposta vencedora e obter aprovação do financeiro, a cotação **gera automaticamente uma Ordem de Compra já em `aprovada`**, com os itens e preços da proposta vencedora — pulando o fluxo de envio/aprovação da ordem (não gera movimentações financeiras duplicadas).
+
+### Endpoints
+
+Todos exigem autenticação (`get_current_user`). Prefixo `/api/compras`.
+
+| Método | Rota | Body | Descrição |
+|--------|------|------|-----------|
+| `GET` | `/cotacoes` | — | Lista cotações (query: `status: QuotationStatus?`, `order_type: str?`, `skip`, `limit`) |
+| `POST` | `/cotacoes` | `QuotationCreate` | Cria cotação (201) |
+| `GET` | `/cotacoes/{quotation_id}` | — | Detalhe com itens e propostas |
+| `DELETE` | `/cotacoes/{quotation_id}` | — | Soft delete (só em `em_andamento`) |
+| `POST` | `/cotacoes/{quotation_id}/propostas` | `QuotationProposalCreate` | Adiciona proposta (201) |
+| `PUT` | `/cotacoes/{quotation_id}/propostas/{proposal_id}` | `QuotationProposalUpdate` | Edita proposta |
+| `DELETE` | `/cotacoes/{quotation_id}/propostas/{proposal_id}` | — | Remove proposta (não pode ser a vencedora) |
+| `POST` | `/cotacoes/{quotation_id}/selecionar-vencedor` | `SelectWinnerRequest` | Seleciona proposta vencedora |
+| `POST` | `/cotacoes/{quotation_id}/aprovar` | — | Financeiro aprova |
+| `POST` | `/cotacoes/{quotation_id}/cancelar` | `CancelQuotationRequest` | Cancela cotação |
+| `POST` | `/cotacoes/{quotation_id}/realizar-pedido` | `RealizeOrderRequest` | Gera a Ordem de Compra em `aprovada` |
+
+### Schemas (resumo)
+
+**Entrada**
+- `QuotationItemCreate`: `stock_item_id: UUID`, `quantity: Decimal > 0`.
+- `QuotationCreate`: `order_type: str = "produto"`, `service_description: str?`, `notes: str?`, `items: [QuotationItemCreate] = []`. Validação: `servico` exige `service_description` e sem itens; `produto` exige ≥ 1 item.
+- `QuotationProposalItemCreate`: `quotation_item_id: UUID`, `unit_price: Decimal ≥ 0`.
+- `QuotationProposalCreate`: `supplier_id: UUID`, `total_price: Decimal? ≥ 0`, `notes: str?`, `proposal_items: [QuotationProposalItemCreate] = []`. As regras cruzadas (produto exige itens; serviço exige `total_price`) são validadas no Service.
+- `QuotationProposalUpdate`: mesmos campos, todos opcionais (`proposal_items` regenera os itens quando presente).
+- `SelectWinnerRequest`: `proposal_id: UUID`.
+- `CancelQuotationRequest`: `note: str` (1–2000).
+- `RealizeOrderRequest`: `shipping_cost: Decimal? ≥ 0`, `ordered_at: datetime?`, `notes: str?`.
+
+**Saída**
+- `QuotationItemOut`: `id`, `stock_item_id`, `stock_item_name`, `quantity`.
+- `QuotationProposalItemOut`: `id`, `proposal_id`, `quotation_item_id`, `unit_price`.
+- `QuotationProposalOut`: `id`, `quotation_id`, `supplier_id`, `supplier_name`, `total_price?`, `notes?`, `proposal_items[]`.
+- `QuotationOut`: `id`, `order_type`, `status`, `service_description?`, `notes?`, `cancellation_note?`, `winning_proposal_id?`, `purchase_order_id?`, `items[]`, `proposals[]`, `created_at`, `updated_at`.
+
+### Status flow
+
+```
+em_andamento ──selecionar-vencedor──▶ aguardando_aprovacao_financeiro ──aprovar──▶ aprovado_financeiro ──realizar-pedido──▶ concluida
+     │                                                                                                                          ▲
+     └──────────────────────────────────────── cancelar ───────────────────────────────────────────────────────────▶ cancelada
+```
+
+- **`cancelar`** é possível em qualquer estado exceto os finais (`concluida` / `cancelada`).
+- **`realizar-pedido`** cria a `PurchaseOrder` (via `repository.create_order`), avança-a direto para `aprovada` com `repository._set_status` e grava `quotation.purchase_order_id`.
+
+### Regras de negócio
+
+- Criação/propostas/edição/remoção de propostas e seleção de vencedor só ocorrem com a cotação em `em_andamento`.
+- `create_quotation` (produto) valida que todo `stock_item_id` existe e não está deletado (404 por item).
+- Proposta de **produto** deve conter exatamente um `QuotationProposalItem` por `QuotationItem` da cotação; `quotation_item_id` que não pertença à cotação → 404; cobertura incompleta → 400.
+- Proposta de **serviço** exige `total_price`.
+- Fornecedor duplicado na mesma cotação viola `uq_qp_quotation_supplier` → **409** "Este fornecedor já tem uma proposta nesta cotação".
+- A proposta vencedora não pode ser removida.
+- `selecionar-vencedor`, `aprovar` e `realizar-pedido` registram `financial_movement` de R$ 0,00 (categoria `COMPRA`, `source_module="compras"`), seguindo o padrão de auditoria das ordens.
+- Ao realizar o pedido de produto, `shipping_cost` é repassado à ordem; o `total_amount` da ordem é `Σ(quantity × unit_price) + shipping`. Para serviço, `total_amount = winning_proposal.total_price`.
+
+### Integrações
+
+- **Estoque** (`estoque_repo.get_item`): valida itens na criação da cotação.
+- **Financeiro** (`fin_service.registrar_movimento`): movimentações de auditoria nas transições.
+- **Compras / Ordens de Compra** (`repository.create_order` + `_set_status`): a Ordem de Compra gerada segue daí o fluxo normal de conferência/recebimento/pagamento.
+
 ## Migrations
 
 `0007_add_shipping_cost` (arquivo `alembic/versions/20260528_0007_add_shipping_cost.py`):
@@ -299,3 +367,7 @@ Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`,
 - Adiciona `sales.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (a mesma migration cobre Comercial e Compras).
 
 Reversível via `downgrade()` (drop das duas colunas).
+
+`0010_add_quotations` (arquivo `alembic/versions/20260601_0010_add_quotations.py`):
+- Cria o enum `quotation_status` e as tabelas `quotations`, `quotation_items`, `quotation_proposals` e `quotation_proposal_items` do sub-fluxo de Cotações.
+- FKs circulares (`quotations.winning_proposal_id` → `quotation_proposals.id` e `quotations.purchase_order_id` → `purchase_orders.id`) adicionadas via `ALTER TABLE` após a criação das tabelas. Migration idempotente (guards `IF NOT EXISTS` / `pg_constraint`) e reversível.

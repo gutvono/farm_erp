@@ -292,6 +292,52 @@ export interface PurchaseOrderWithReceipts extends PurchaseOrder {
   receipts: PurchaseOrderReceiptItem[]
 }
 
+export type QuotationStatus =
+  | "em_andamento"
+  | "aguardando_aprovacao_financeiro"
+  | "aprovado_financeiro"
+  | "concluida"
+  | "cancelada"
+
+export interface QuotationProposalItem {
+  id: string
+  proposal_id: string
+  quotation_item_id: string
+  unit_price: number
+}
+
+export interface QuotationProposal {
+  id: string
+  quotation_id: string
+  supplier_id: string
+  supplier_name: string
+  total_price: number | null
+  notes: string | null
+  proposal_items: QuotationProposalItem[]
+}
+
+export interface QuotationItem {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity: number
+}
+
+export interface Quotation {
+  id: string
+  order_type: "produto" | "servico"
+  status: QuotationStatus
+  service_description: string | null
+  notes: string | null
+  cancellation_note: string | null
+  winning_proposal_id: string | null
+  purchase_order_id: string | null
+  items: QuotationItem[]
+  proposals: QuotationProposal[]
+  created_at: string
+  updated_at: string
+}
+
 // ── COMERCIAL ─────────────────────────────────────────────────────────────────
 
 export interface Client {

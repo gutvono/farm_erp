@@ -7,6 +7,11 @@ import {
   PurchaseOrderReceiptItem,
   PurchaseOrderStatus,
   PurchaseOrderWithReceipts,
+  Quotation,
+  QuotationItem,
+  QuotationProposal,
+  QuotationProposalItem,
+  QuotationStatus,
   Supplier,
 } from "@/types/index"
 
@@ -331,4 +336,206 @@ export async function getRecebimento(id: string): Promise<PurchaseOrderWithRecei
     `/api/compras/recebimentos/${id}`
   )
   return parseOrderWithReceipts(response.data)
+}
+
+// ── Cotações ────────────────────────────────────────────────────────────────
+
+interface RawQuotationProposalItem {
+  id: string
+  proposal_id: string
+  quotation_item_id: string
+  unit_price: string | number
+}
+
+interface RawQuotationProposal {
+  id: string
+  quotation_id: string
+  supplier_id: string
+  supplier_name: string
+  total_price: string | number | null
+  notes: string | null
+  proposal_items: RawQuotationProposalItem[]
+}
+
+interface RawQuotationItem {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  quantity: string | number
+}
+
+interface RawQuotation {
+  id: string
+  order_type: "produto" | "servico"
+  status: QuotationStatus
+  service_description: string | null
+  notes: string | null
+  cancellation_note: string | null
+  winning_proposal_id: string | null
+  purchase_order_id: string | null
+  items: RawQuotationItem[]
+  proposals: RawQuotationProposal[]
+  created_at: string
+  updated_at: string
+}
+
+function parseQuotationProposalItem(raw: RawQuotationProposalItem): QuotationProposalItem {
+  return {
+    id: raw.id,
+    proposal_id: raw.proposal_id,
+    quotation_item_id: raw.quotation_item_id,
+    unit_price: toNumber(raw.unit_price),
+  }
+}
+
+function parseQuotationProposal(raw: RawQuotationProposal): QuotationProposal {
+  return {
+    id: raw.id,
+    quotation_id: raw.quotation_id,
+    supplier_id: raw.supplier_id,
+    supplier_name: raw.supplier_name,
+    total_price: raw.total_price === null ? null : toNumber(raw.total_price),
+    notes: raw.notes,
+    proposal_items: (raw.proposal_items ?? []).map(parseQuotationProposalItem),
+  }
+}
+
+function parseQuotationItem(raw: RawQuotationItem): QuotationItem {
+  return {
+    id: raw.id,
+    stock_item_id: raw.stock_item_id,
+    stock_item_name: raw.stock_item_name,
+    quantity: toNumber(raw.quantity),
+  }
+}
+
+function parseQuotation(raw: RawQuotation): Quotation {
+  return {
+    id: raw.id,
+    order_type: raw.order_type ?? "produto",
+    status: raw.status,
+    service_description: raw.service_description,
+    notes: raw.notes,
+    cancellation_note: raw.cancellation_note,
+    winning_proposal_id: raw.winning_proposal_id,
+    purchase_order_id: raw.purchase_order_id,
+    items: (raw.items ?? []).map(parseQuotationItem),
+    proposals: (raw.proposals ?? []).map(parseQuotationProposal),
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
+}
+
+export async function getCotacoes(
+  status?: QuotationStatus,
+  order_type?: string
+): Promise<Quotation[]> {
+  const response = await apiFetch<ApiResponse<RawQuotation[]>>("/api/compras/cotacoes", {
+    params: { status, order_type },
+  })
+  return response.data.map(parseQuotation)
+}
+
+export async function getCotacao(id: string): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>(`/api/compras/cotacoes/${id}`)
+  return parseQuotation(response.data)
+}
+
+export async function createCotacao(data: {
+  order_type: "produto" | "servico"
+  service_description?: string
+  notes?: string
+  items: { stock_item_id: string; quantity: number }[]
+}): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>("/api/compras/cotacoes", {
+    method: "POST",
+    body: JSON.stringify(data),
+  })
+  return parseQuotation(response.data)
+}
+
+export async function deleteCotacao(id: string): Promise<void> {
+  await apiFetch(`/api/compras/cotacoes/${id}`, { method: "DELETE" })
+}
+
+export async function addProposta(
+  quotation_id: string,
+  data: {
+    supplier_id: string
+    total_price?: number
+    notes?: string
+    proposal_items: { quotation_item_id: string; unit_price: number }[]
+  }
+): Promise<QuotationProposal> {
+  const response = await apiFetch<ApiResponse<RawQuotationProposal>>(
+    `/api/compras/cotacoes/${quotation_id}/propostas`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseQuotationProposal(response.data)
+}
+
+export async function updateProposta(
+  quotation_id: string,
+  proposal_id: string,
+  data: Partial<{
+    total_price: number
+    notes: string
+    proposal_items: { quotation_item_id: string; unit_price: number }[]
+  }>
+): Promise<QuotationProposal> {
+  const response = await apiFetch<ApiResponse<RawQuotationProposal>>(
+    `/api/compras/cotacoes/${quotation_id}/propostas/${proposal_id}`,
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return parseQuotationProposal(response.data)
+}
+
+export async function deleteProposta(
+  quotation_id: string,
+  proposal_id: string
+): Promise<void> {
+  await apiFetch(`/api/compras/cotacoes/${quotation_id}/propostas/${proposal_id}`, {
+    method: "DELETE",
+  })
+}
+
+export async function selecionarVencedor(
+  quotation_id: string,
+  proposal_id: string
+): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>(
+    `/api/compras/cotacoes/${quotation_id}/selecionar-vencedor`,
+    { method: "POST", body: JSON.stringify({ proposal_id }) }
+  )
+  return parseQuotation(response.data)
+}
+
+export async function aprovarCotacao(quotation_id: string): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>(
+    `/api/compras/cotacoes/${quotation_id}/aprovar`,
+    { method: "POST" }
+  )
+  return parseQuotation(response.data)
+}
+
+export async function cancelarCotacao(
+  quotation_id: string,
+  note: string
+): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>(
+    `/api/compras/cotacoes/${quotation_id}/cancelar`,
+    { method: "POST", body: JSON.stringify({ note }) }
+  )
+  return parseQuotation(response.data)
+}
+
+export async function realizarPedido(
+  quotation_id: string,
+  data: { shipping_cost?: number; ordered_at?: string; notes?: string }
+): Promise<Quotation> {
+  const response = await apiFetch<ApiResponse<RawQuotation>>(
+    `/api/compras/cotacoes/${quotation_id}/realizar-pedido`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseQuotation(response.data)
 }
