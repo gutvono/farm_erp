@@ -80,6 +80,14 @@ class PurchaseOrderReceiptStatus(str, enum.Enum):
     CONFERIDO = "conferido"
 
 
+class QuotationStatus(str, enum.Enum):
+    EM_ANDAMENTO = "em_andamento"
+    AGUARDANDO_APROVACAO_FINANCEIRO = "aguardando_aprovacao_financeiro"
+    APROVADO_FINANCEIRO = "aprovado_financeiro"
+    CONCLUIDA = "concluida"
+    CANCELADA = "cancelada"
+
+
 class InvoiceStatus(str, enum.Enum):
     EMITIDA = "emitida"
     PAGA = "paga"

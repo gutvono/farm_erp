@@ -35,6 +35,10 @@ from app.modules.comercial.model import Client, Sale, SaleItem  # noqa: E402, F4
 from app.modules.compras.model import (  # noqa: E402, F401
     PurchaseOrder,
     PurchaseOrderItem,
+    Quotation,
+    QuotationItem,
+    QuotationProposal,
+    QuotationProposalItem,
     Supplier,
 )
 from app.modules.faturamento.model import Invoice, InvoiceItem  # noqa: E402, F401

@@ -20,6 +20,10 @@
 --   ff...  stock_movements (estoque)
 --   a0...  financial_movements (financeiro)
 --   ab...  notifications
+--   b0...  quotations (compras)
+--   b1...  quotation_items (compras)
+--   b2...  quotation_proposals (compras)
+--   b3...  quotation_proposal_items (compras)
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -280,7 +284,11 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 16. FINANCIAL MOVEMENTS (saldo inicial + eventos dos últimos 3 meses)
 -- Saldo inicial R$ 150.000 em 2026-01-01.
--- Saldo projetado (entradas - saídas): 150000 + 22000 - 7600 - 29300 - 31943.33 = 103156.67
+-- Entradas: 150000 (saldo inicial) + 22000 (recebimento AR-0001) = 172000
+-- Saídas:   59043.33 (folha 01+02) + 7600 (pagamento AP-0001) = 66643.33
+--           (registros de produção/compra/venda/ajuste e os 3 movimentos da
+--            Cotação 1 na seção 18g são R$0 e não afetam o saldo)
+-- Saldo projetado: 172000 - 66643.33 = 105356.67
 -- -----------------------------------------------------------------------------
 INSERT INTO financial_movements (id, movement_type, category, amount, description, source_module, reference_id, occurred_at) VALUES
 -- Saldo inicial
@@ -327,6 +335,83 @@ INSERT INTO notifications (id, type, title, message, module, link, is_read, user
 ('ab000000-0000-0000-0000-000000000003', 'info',    'Folha 03/2026 aberta',     'Lançamentos da competência 03/2026 estão abertos',          'folha',    '/folha',     TRUE,  '11111111-1111-1111-1111-111111111001')
 ON CONFLICT (id) DO NOTHING;
 
+-- -----------------------------------------------------------------------------
+-- 18. COTAÇÕES (sub-fluxo de Compras) — 3 cenários
+-- Cot 1 (produto, concluída) gerou a PO 88...8802; Cot 2 (produto) aguarda o
+-- financeiro; Cot 3 (serviço) ainda coletando propostas.
+-- FK circular: quotations.winning_proposal_id -> quotation_proposals e
+-- quotation_proposals.quotation_id -> quotations. Por isso inserimos as cotações
+-- com winning_proposal_id NULL e definimos o vencedor via UPDATE no final.
+-- -----------------------------------------------------------------------------
+
+-- 18a. PurchaseOrder gerada pela Cotação 1 (status "aprovada" = aguardando
+-- conferência; ainda não recebida, logo sem stock_movement / accounts_payable).
+INSERT INTO purchase_orders (id, supplier_id, status, total_amount, ordered_at, received_at, notes, order_type) VALUES
+('88888888-8888-8888-8888-888888888002', '33333333-3333-3333-3333-333333333001', 'aprovada', 3020.00, '2026-04-10 09:00:00-03', NULL, 'Gerada a partir da cotação b0000000-0000-0000-0000-b00000000001', 'produto')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO purchase_order_items (id, purchase_order_id, stock_item_id, description, quantity, unit_price, subtotal) VALUES
+('88888888-8888-8888-8888-888888888021', '88888888-8888-8888-8888-888888888002', '55555555-5555-5555-5555-555555555011', 'Fertilizante NPK 200kg', 200.000, 11.50, 2300.00),
+('88888888-8888-8888-8888-888888888022', '88888888-8888-8888-8888-888888888002', '55555555-5555-5555-5555-555555555013', 'Pesticida Fungicida 30L',  30.000, 24.00,  720.00)
+ON CONFLICT (id) DO NOTHING;
+
+-- 18b. Cotações (winning_proposal_id definido por UPDATE em 18f).
+INSERT INTO quotations (id, order_type, status, service_description, notes, cancellation_note, winning_proposal_id, purchase_order_id, deleted_at) VALUES
+('b0000000-0000-0000-0000-b00000000001', 'produto', 'concluida',                       NULL,                                                                          'Reposição de NPK e fungicida via cotação', NULL, NULL, '88888888-8888-8888-8888-888888888002', NULL),
+('b0000000-0000-0000-0000-b00000000002', 'produto', 'aguardando_aprovacao_financeiro', NULL,                                                                          'Cotação de adubo aguardando o financeiro',  NULL, NULL, NULL,                                   NULL),
+('b0000000-0000-0000-0000-b00000000003', 'servico', 'em_andamento',                    'Manutenção preventiva do trator New Holland T6 — revisão de 500h',           'Coletando propostas de manutenção',          NULL, NULL, NULL,                                   NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- 18c. Itens das cotações de produto (serviço não tem itens de estoque).
+INSERT INTO quotation_items (id, quotation_id, stock_item_id, quantity) VALUES
+-- Cotação 1: 200kg NPK + 30L Pesticida
+('b1000000-0000-0000-0000-b10000000011', 'b0000000-0000-0000-0000-b00000000001', '55555555-5555-5555-5555-555555555011', 200.000),
+('b1000000-0000-0000-0000-b10000000012', 'b0000000-0000-0000-0000-b00000000001', '55555555-5555-5555-5555-555555555013',  30.000),
+-- Cotação 2: 100kg Adubo Orgânico
+('b1000000-0000-0000-0000-b10000000021', 'b0000000-0000-0000-0000-b00000000002', '55555555-5555-5555-5555-555555555012', 100.000)
+ON CONFLICT (id) DO NOTHING;
+
+-- 18d. Propostas. total_price só é usado em cotações de serviço; nas de produto
+-- o valor é derivado dos quotation_proposal_items (total_price = NULL).
+INSERT INTO quotation_proposals (id, quotation_id, supplier_id, total_price, notes) VALUES
+-- Cotação 1: AgroInsumos (vencedora, R$3.020,00) x Fazenda São Pedro (R$3.180,00)
+('b2000000-0000-0000-0000-b20000000011', 'b0000000-0000-0000-0000-b00000000001', '33333333-3333-3333-3333-333333333001', NULL, 'Melhor preço — vencedora'),
+('b2000000-0000-0000-0000-b20000000012', 'b0000000-0000-0000-0000-b00000000001', '33333333-3333-3333-3333-333333333002', NULL, 'Proposta concorrente'),
+-- Cotação 2: AgroInsumos (vencedora, R$7,80/kg) x Máquinas Serra Verde (R$8,50/kg)
+('b2000000-0000-0000-0000-b20000000021', 'b0000000-0000-0000-0000-b00000000002', '33333333-3333-3333-3333-333333333001', NULL, 'Melhor preço — vencedora'),
+('b2000000-0000-0000-0000-b20000000022', 'b0000000-0000-0000-0000-b00000000002', '33333333-3333-3333-3333-333333333003', NULL, 'Proposta concorrente'),
+-- Cotação 3 (serviço): Máquinas Serra Verde, preço fechado de R$2.800,00
+('b2000000-0000-0000-0000-b20000000031', 'b0000000-0000-0000-0000-b00000000003', '33333333-3333-3333-3333-333333333003', 2800.00, 'Revisão de 500h, peças inclusas')
+ON CONFLICT (id) DO NOTHING;
+
+-- 18e. Preços unitários por item dentro de cada proposta de produto.
+INSERT INTO quotation_proposal_items (id, proposal_id, quotation_item_id, unit_price) VALUES
+-- Cotação 1 / AgroInsumos: NPK R$11,50 + Pesticida R$24,00 = R$3.020,00
+('b3000000-0000-0000-0000-b30000000111', 'b2000000-0000-0000-0000-b20000000011', 'b1000000-0000-0000-0000-b10000000011', 11.50),
+('b3000000-0000-0000-0000-b30000000112', 'b2000000-0000-0000-0000-b20000000011', 'b1000000-0000-0000-0000-b10000000012', 24.00),
+-- Cotação 1 / Fazenda São Pedro: NPK R$12,00 + Pesticida R$26,00 = R$3.180,00
+('b3000000-0000-0000-0000-b30000000121', 'b2000000-0000-0000-0000-b20000000012', 'b1000000-0000-0000-0000-b10000000011', 12.00),
+('b3000000-0000-0000-0000-b30000000122', 'b2000000-0000-0000-0000-b20000000012', 'b1000000-0000-0000-0000-b10000000012', 26.00),
+-- Cotação 2 / AgroInsumos: Adubo R$7,80
+('b3000000-0000-0000-0000-b30000000211', 'b2000000-0000-0000-0000-b20000000021', 'b1000000-0000-0000-0000-b10000000021',  7.80),
+-- Cotação 2 / Máquinas Serra Verde: Adubo R$8,50
+('b3000000-0000-0000-0000-b30000000221', 'b2000000-0000-0000-0000-b20000000022', 'b1000000-0000-0000-0000-b10000000021',  8.50)
+ON CONFLICT (id) DO NOTHING;
+
+-- 18f. Define a proposta vencedora (após as propostas existirem — FK circular).
+UPDATE quotations SET winning_proposal_id = 'b2000000-0000-0000-0000-b20000000011'
+WHERE id = 'b0000000-0000-0000-0000-b00000000001';
+UPDATE quotations SET winning_proposal_id = 'b2000000-0000-0000-0000-b20000000021'
+WHERE id = 'b0000000-0000-0000-0000-b00000000002';
+
+-- 18g. Movimentos financeiros de registro da Cotação 1 (R$0 — não afetam saldo;
+-- apenas histórico: criação, seleção de vencedor e aprovação do financeiro).
+INSERT INTO financial_movements (id, movement_type, category, amount, description, source_module, reference_id, occurred_at) VALUES
+('a0000000-0000-0000-0000-000000000070', 'saida', 'compra', 0.00, 'Cotação criada (registro) - reposição NPK e fungicida', 'compras', 'b0000000-0000-0000-0000-b00000000001', '2026-04-05 09:00:00-03'),
+('a0000000-0000-0000-0000-000000000071', 'saida', 'compra', 0.00, 'Cotação - proposta vencedora selecionada (AgroInsumos)', 'compras', 'b0000000-0000-0000-0000-b00000000001', '2026-04-08 10:00:00-03'),
+('a0000000-0000-0000-0000-000000000072', 'saida', 'compra', 0.00, 'Cotação aprovada pelo financeiro - pedido gerado',      'compras', 'b0000000-0000-0000-0000-b00000000001', '2026-04-09 11:00:00-03')
+ON CONFLICT (id) DO NOTHING;
+
 -- =============================================================================
 -- Resumo do seed:
 --   1 usuário admin
@@ -336,7 +421,7 @@ ON CONFLICT (id) DO NOTHING;
 --   9 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira)
 --   2 talhões, 3 atividades
 --   1 ordem de produção concluída (100 sacas), 2 trabalhadores, 1 serviço externo
---   1 ordem de compra concluída
+--   2 ordens de compra (1 concluída, 1 aprovada gerada pela Cotação 1)
 --   2 vendas (1 entregue, 1 realizada)
 --   2 faturas
 --   2 contas a pagar (1 paga, 1 em aberto)
@@ -344,7 +429,9 @@ ON CONFLICT (id) DO NOTHING;
 --   3 períodos de folha, 24 lançamentos
 --   7 eventos de folha
 --   17 movimentações de estoque
---   25 movimentações financeiras
+--   27 movimentações financeiras (24 originais + 3 registros R$0 da Cotação 1)
 --   3 notificações
--- Saldo atual previsto: R$ 103.156,67
+--   3 cotações (1 produto concluída, 1 produto aguardando financeiro, 1 serviço em andamento)
+--     3 itens de cotação, 5 propostas, 6 itens de proposta
+-- Saldo atual previsto: R$ 105.356,67
 -- =============================================================================

@@ -1,16 +1,27 @@
-from datetime import date, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
 from fastapi import HTTPException
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from app.modules.compras import repository as compras_repo
-from app.modules.compras.model import PurchaseOrder, Supplier
+from app.modules.compras.model import (
+    PurchaseOrder,
+    Quotation,
+    QuotationProposal,
+    Supplier,
+)
 from app.modules.compras.schemas import (
     PurchaseOrderCreate,
+    PurchaseOrderItemCreate,
     PurchaseOrderReceiptItem,
+    QuotationCreate,
+    QuotationProposalCreate,
+    QuotationProposalUpdate,
+    RealizeOrderRequest,
     SupplierCreate,
     SupplierUpdate,
 )
@@ -22,6 +33,7 @@ from app.shared.enums import (
     MovementType,
     PaymentMethod,
     PurchaseOrderStatus,
+    QuotationStatus,
 )
 
 
@@ -503,3 +515,338 @@ def soft_delete_order(db: Session, order_id: UUID) -> PurchaseOrder:
         )
 
     return compras_repo.soft_delete_order(db, order_id)
+
+
+# ---------------------------------------------------------------------------
+# Quotations
+# ---------------------------------------------------------------------------
+
+
+def _get_quotation_or_404(db: Session, quotation_id: UUID) -> Quotation:
+    quotation = compras_repo.get_quotation(db, quotation_id)
+    if not quotation:
+        raise HTTPException(status_code=404, detail="Cotação não encontrada")
+    return quotation
+
+
+def _get_proposal_or_404(db: Session, proposal_id: UUID) -> QuotationProposal:
+    proposal = compras_repo.get_proposal(db, proposal_id)
+    if not proposal:
+        raise HTTPException(status_code=404, detail="Proposta não encontrada")
+    return proposal
+
+
+def _validate_proposal_items_cover_quotation(
+    quotation: Quotation, proposal_items: list
+) -> None:
+    """Garante que há um item de proposta por item de cotação (nem a mais, nem
+    a menos), e que todos os quotation_item_id referenciados pertencem à
+    cotação."""
+    quotation_item_ids = {item.id for item in quotation.items}
+    payload_item_ids = set()
+    for pi in proposal_items:
+        if pi.quotation_item_id not in quotation_item_ids:
+            raise HTTPException(
+                status_code=404,
+                detail=(
+                    f"Item de cotação não encontrado: {pi.quotation_item_id}"
+                ),
+            )
+        payload_item_ids.add(pi.quotation_item_id)
+
+    missing = quotation_item_ids - payload_item_ids
+    if missing:
+        raise HTTPException(
+            status_code=400,
+            detail="A proposta deve conter preço para todos os itens da cotação",
+        )
+
+
+def create_quotation(db: Session, data: QuotationCreate) -> Quotation:
+    # Para produto, valida que todos os itens de estoque existem.
+    if data.order_type == "produto":
+        for item_data in data.items:
+            stock_item = estoque_repo.get_item(db, item_data.stock_item_id)
+            if not stock_item:
+                raise HTTPException(
+                    status_code=404,
+                    detail=f"Item de estoque não encontrado: {item_data.stock_item_id}",
+                )
+
+    return compras_repo.create_quotation(db, data)
+
+
+def list_quotations(
+    db: Session,
+    *,
+    status: Optional[QuotationStatus] = None,
+    order_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+) -> list[Quotation]:
+    return compras_repo.list_quotations(
+        db, status=status, order_type=order_type, skip=skip, limit=limit
+    )
+
+
+def get_quotation(db: Session, quotation_id: UUID) -> Quotation:
+    return _get_quotation_or_404(db, quotation_id)
+
+
+def soft_delete_quotation(db: Session, quotation_id: UUID) -> Quotation:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.EM_ANDAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações em andamento podem ser excluídas",
+        )
+    return compras_repo.soft_delete_quotation(db, quotation_id)
+
+
+def add_proposal(
+    db: Session, quotation_id: UUID, data: QuotationProposalCreate
+) -> QuotationProposal:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.EM_ANDAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações em andamento podem receber propostas",
+        )
+
+    _get_supplier_or_404(db, data.supplier_id)
+
+    order_type = quotation.order_type or "produto"
+    if order_type == "produto":
+        _validate_proposal_items_cover_quotation(quotation, data.proposal_items)
+    else:
+        if data.total_price is None:
+            raise HTTPException(
+                status_code=400,
+                detail="total_price é obrigatório para propostas de serviço",
+            )
+
+    try:
+        return compras_repo.add_proposal(db, quotation_id, data)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Este fornecedor já tem uma proposta nesta cotação",
+        )
+
+
+def update_proposal(
+    db: Session,
+    quotation_id: UUID,
+    proposal_id: UUID,
+    data: QuotationProposalUpdate,
+) -> QuotationProposal:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.EM_ANDAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações em andamento podem ter propostas editadas",
+        )
+
+    proposal = _get_proposal_or_404(db, proposal_id)
+    if proposal.quotation_id != quotation.id:
+        raise HTTPException(
+            status_code=404,
+            detail="Proposta não pertence a esta cotação",
+        )
+
+    if data.supplier_id is not None:
+        _get_supplier_or_404(db, data.supplier_id)
+
+    if data.proposal_items is not None:
+        _validate_proposal_items_cover_quotation(quotation, data.proposal_items)
+
+    try:
+        return compras_repo.update_proposal(db, proposal_id, data)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=409,
+            detail="Este fornecedor já tem uma proposta nesta cotação",
+        )
+
+
+def delete_proposal(db: Session, quotation_id: UUID, proposal_id: UUID) -> None:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.EM_ANDAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações em andamento podem ter propostas removidas",
+        )
+
+    proposal = _get_proposal_or_404(db, proposal_id)
+    if proposal.quotation_id != quotation.id:
+        raise HTTPException(
+            status_code=404,
+            detail="Proposta não pertence a esta cotação",
+        )
+
+    if quotation.winning_proposal_id == proposal_id:
+        raise HTTPException(
+            status_code=400,
+            detail="A proposta vencedora não pode ser removida",
+        )
+
+    compras_repo.delete_proposal(db, proposal_id)
+
+
+def select_winner(
+    db: Session, quotation_id: UUID, proposal_id: UUID
+) -> Quotation:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.EM_ANDAMENTO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações em andamento podem selecionar uma proposta vencedora",
+        )
+
+    proposal = _get_proposal_or_404(db, proposal_id)
+    if proposal.quotation_id != quotation.id:
+        raise HTTPException(
+            status_code=404,
+            detail="Proposta não pertence a esta cotação",
+        )
+
+    order_type = quotation.order_type or "produto"
+    if order_type == "produto":
+        _validate_proposal_items_cover_quotation(quotation, proposal.proposal_items)
+    else:
+        if proposal.total_price is None:
+            raise HTTPException(
+                status_code=400,
+                detail="A proposta vencedora de serviço deve ter total_price",
+            )
+
+    updated = compras_repo._set_quotation_status(
+        db,
+        quotation_id,
+        QuotationStatus.AGUARDANDO_APROVACAO_FINANCEIRO,
+        extra_fields={"winning_proposal_id": proposal_id},
+    )
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description="Cotação enviada para aprovação financeira",
+        source_module="compras",
+        reference_id=quotation.id,
+    )
+    return updated
+
+
+def approve_quotation(db: Session, quotation_id: UUID) -> Quotation:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.AGUARDANDO_APROVACAO_FINANCEIRO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações aguardando aprovação podem ser aprovadas",
+        )
+
+    updated = compras_repo._set_quotation_status(
+        db, quotation_id, QuotationStatus.APROVADO_FINANCEIRO
+    )
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description="Cotação aprovada pelo financeiro",
+        source_module="compras",
+        reference_id=quotation.id,
+    )
+    return updated
+
+
+def cancel_quotation(db: Session, quotation_id: UUID, note: str) -> Quotation:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    final_statuses = (QuotationStatus.CONCLUIDA, QuotationStatus.CANCELADA)
+    if quotation.status in final_statuses:
+        raise HTTPException(status_code=400, detail="Cotação já finalizada")
+
+    return compras_repo._set_quotation_status(
+        db,
+        quotation_id,
+        QuotationStatus.CANCELADA,
+        extra_fields={"cancellation_note": note},
+    )
+
+
+def realize_order(
+    db: Session, quotation_id: UUID, data: RealizeOrderRequest
+) -> Quotation:
+    quotation = _get_quotation_or_404(db, quotation_id)
+    if quotation.status != QuotationStatus.APROVADO_FINANCEIRO:
+        raise HTTPException(
+            status_code=400,
+            detail="Apenas cotações aprovadas pelo financeiro podem gerar pedido",
+        )
+
+    winning_proposal = compras_repo.get_proposal(db, quotation.winning_proposal_id)
+    if not winning_proposal:
+        raise HTTPException(
+            status_code=400,
+            detail="Cotação não possui proposta vencedora",
+        )
+
+    order_type = quotation.order_type or "produto"
+    ordered_at = data.ordered_at or datetime.now(timezone.utc)
+    notes = data.notes or f"Gerada a partir da cotação {quotation_id}"
+
+    if order_type == "produto":
+        price_by_item = {
+            pi.quotation_item_id: pi.unit_price
+            for pi in winning_proposal.proposal_items
+        }
+        items = [
+            PurchaseOrderItemCreate(
+                stock_item_id=item.stock_item_id,
+                quantity=Decimal(str(item.quantity)),
+                unit_price=Decimal(str(price_by_item.get(item.id, 0))),
+            )
+            for item in quotation.items
+        ]
+        po_create_data = PurchaseOrderCreate(
+            supplier_id=winning_proposal.supplier_id,
+            items=items,
+            ordered_at=ordered_at,
+            order_type="produto",
+            shipping_cost=Decimal(str(data.shipping_cost or 0)),
+            notes=notes,
+        )
+    else:
+        po_create_data = PurchaseOrderCreate(
+            supplier_id=winning_proposal.supplier_id,
+            ordered_at=ordered_at,
+            order_type="servico",
+            service_description=quotation.service_description,
+            total_amount=Decimal(str(winning_proposal.total_price or 0)),
+            notes=notes,
+        )
+
+    po = compras_repo.create_order(db, po_create_data)
+    # A ordem nasce em em_andamento; avança direto para aprovada sem passar pelo
+    # service (evita movimentações financeiras duplicadas do fluxo de ordens).
+    compras_repo._set_status(db, po.id, PurchaseOrderStatus.APROVADA)
+
+    updated = compras_repo._set_quotation_status(
+        db,
+        quotation_id,
+        QuotationStatus.CONCLUIDA,
+        extra_fields={"purchase_order_id": po.id},
+    )
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description=f"Ordem de compra gerada a partir da cotação {quotation_id}",
+        source_module="compras",
+        reference_id=po.id,
+    )
+    return updated

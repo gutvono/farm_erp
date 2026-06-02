@@ -10,17 +10,24 @@ from app.modules.auth.router import get_current_user
 from app.modules.compras import service as compras_service
 from app.modules.compras.schemas import (
     ApproveOrderRequest,
+    CancelQuotationRequest,
     PurchaseOrderCancelRequest,
     PurchaseOrderCreate,
     PurchaseOrderOut,
     PurchaseOrderReceiptFinalize,
     PurchaseOrderStatusUpdate,
     PurchaseOrderWithReceipts,
+    QuotationCreate,
+    QuotationOut,
+    QuotationProposalCreate,
+    QuotationProposalUpdate,
+    RealizeOrderRequest,
+    SelectWinnerRequest,
     SupplierCreate,
     SupplierOut,
     SupplierUpdate,
 )
-from app.shared.enums import PurchaseOrderStatus
+from app.shared.enums import PurchaseOrderStatus, QuotationStatus
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -279,4 +286,174 @@ def get_receipt(
     return success(
         "Recebimento obtido com sucesso",
         PurchaseOrderWithReceipts.from_model(order).model_dump(mode="json"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Quotations (Cotações)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/cotacoes", response_model=SuccessResponse)
+def list_quotations(
+    status: Optional[QuotationStatus] = None,
+    order_type: Optional[str] = None,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotations = compras_service.list_quotations(
+        db, status=status, order_type=order_type, skip=skip, limit=limit
+    )
+    data = [QuotationOut.from_model(q).model_dump(mode="json") for q in quotations]
+    return success("Cotações listadas com sucesso", data)
+
+
+@router.post("/cotacoes", response_model=SuccessResponse, status_code=201)
+def create_quotation(
+    body: QuotationCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.create_quotation(db, body)
+    return success(
+        "Cotação criada com sucesso",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.get("/cotacoes/{quotation_id}", response_model=SuccessResponse)
+def get_quotation(
+    quotation_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.get_quotation(db, quotation_id)
+    return success(
+        "Cotação obtida com sucesso",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.delete("/cotacoes/{quotation_id}", response_model=SuccessResponse)
+def delete_quotation(
+    quotation_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    compras_service.soft_delete_quotation(db, quotation_id)
+    return success("Cotação removida com sucesso")
+
+
+@router.post(
+    "/cotacoes/{quotation_id}/propostas",
+    response_model=SuccessResponse,
+    status_code=201,
+)
+def add_proposal(
+    quotation_id: UUID,
+    body: QuotationProposalCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    compras_service.add_proposal(db, quotation_id, body)
+    quotation = compras_service.get_quotation(db, quotation_id)
+    return success(
+        "Proposta adicionada com sucesso",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.put(
+    "/cotacoes/{quotation_id}/propostas/{proposal_id}",
+    response_model=SuccessResponse,
+)
+def update_proposal(
+    quotation_id: UUID,
+    proposal_id: UUID,
+    body: QuotationProposalUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    compras_service.update_proposal(db, quotation_id, proposal_id, body)
+    quotation = compras_service.get_quotation(db, quotation_id)
+    return success(
+        "Proposta atualizada com sucesso",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.delete(
+    "/cotacoes/{quotation_id}/propostas/{proposal_id}",
+    response_model=SuccessResponse,
+)
+def delete_proposal(
+    quotation_id: UUID,
+    proposal_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    compras_service.delete_proposal(db, quotation_id, proposal_id)
+    return success("Proposta removida com sucesso")
+
+
+@router.post(
+    "/cotacoes/{quotation_id}/selecionar-vencedor",
+    response_model=SuccessResponse,
+)
+def select_winner(
+    quotation_id: UUID,
+    body: SelectWinnerRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.select_winner(db, quotation_id, body.proposal_id)
+    return success(
+        "Vencedor selecionado",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.post("/cotacoes/{quotation_id}/aprovar", response_model=SuccessResponse)
+def approve_quotation(
+    quotation_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.approve_quotation(db, quotation_id)
+    return success(
+        "Cotação aprovada pelo financeiro",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.post("/cotacoes/{quotation_id}/cancelar", response_model=SuccessResponse)
+def cancel_quotation(
+    quotation_id: UUID,
+    body: CancelQuotationRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.cancel_quotation(db, quotation_id, body.note)
+    return success(
+        "Cotação cancelada",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
+    )
+
+
+@router.post(
+    "/cotacoes/{quotation_id}/realizar-pedido",
+    response_model=SuccessResponse,
+)
+def realize_order(
+    quotation_id: UUID,
+    body: RealizeOrderRequest,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    quotation = compras_service.realize_order(db, quotation_id, body)
+    return success(
+        "Pedido realizado com sucesso",
+        QuotationOut.from_model(quotation).model_dump(mode="json"),
     )
