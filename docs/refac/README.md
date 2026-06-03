@@ -129,7 +129,7 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 - A migration `0001` usa `create_all`; **toda migration posterior precisa ser
   idempotente** e reversível (`downgrade` testado). Após `upgrade head`, rodar
   `alembic check` → deve dizer *No new upgrade operations detected*.
-- **Head atual: `0011_add_sort_indexes`** (atualize conforme avança; confirme sempre com
+- **Head atual: `0013_job_positions`** (atualize conforme avança; confirme sempre com
   `alembic heads`).
 - **Regra aprendida (Demanda 0):** todo índice criado em migration **precisa ter espelho
   no model** (`__table_args__`, mesmo nome `idx_*`), senão `alembic check` acusa
@@ -196,7 +196,7 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 | 0 Infra | ✅ | ✅ | ✅ | ✅ | ✅ |
 | 1 Faturamento | ✅ | ✅ | ✅ | ✅ | ✅ | — cancelamento por estorno (4 tipos); removida a opção "Cancelada" do Select de status (sem estorno). Head: 0012_invoice_cancel_fields. PR #12 (junto com a 1.1). |
 | 1.1 Recebimento ERP | n/a | ✅ | ✅ | ✅ | ✅ | — NF de recebimento/devolução/transporte + entrada de estoque movem da etapa de PAGAMENTO para a CONFERÊNCIA (norma ERP). Pagamento só liquida a(s) conta(s) a pagar e conclui a ordem (parcelado: só na última). Cancelamento segue "dinheiro só se move no pagamento" (estorno financeiro só se já pago; senão cancela a AP em aberto). Corrige o bug do parcelado. **+Descoberta de NFs:** filtro `GET /faturas?order_id` + botão "Ver notas relacionadas" na ordem → Faturamento filtrado. **Smoke do core validado** (parcelado 3x: NF/estoque só na conferência, conclui na última parcela; cancelamento antes×depois do pagamento). Débito técnico: FK `purchase_order_id` em `invoices` (futuro). Sem schema novo (head 0012). Em prod (PR #12). |
-| 2 Folha cargos | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 2 Folha cargos | ✅ | ☐ | ☐ | ☐ | ☐ | — **DBA:** tabela `job_positions` (name unique, base_salary sugerido, soft delete) + `employees.position_id` FK NOT NULL (backfill por igualdade exata de `role`; "Colhedor"≠"Colhedora"). `role` mantida **nullable/DEPRECATED** — DROP físico fica para o passo Backend. Head: `0013_job_positions`. Migration idempotente+reversível (downgrade testado); `alembic check` limpo; `reset_db` ok. Seeds: 8 cargos + funcionários via `position_id`. |
 | 3 Estoque/Config | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 4 Financeiro | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 5 PCP | ☐ | ☐ | ☐ | ☐ | ☐ |

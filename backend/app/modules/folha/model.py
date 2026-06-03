@@ -8,6 +8,7 @@ from sqlalchemy import (
     Integer,
     Numeric,
     String,
+    Text,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
@@ -27,6 +28,27 @@ from app.shared.enums import (
 )
 
 
+class JobPosition(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Cargo cadastrável da folha (entidade de negócio → soft delete).
+
+    Substitui o antigo texto livre ``employees.role``. O ``base_salary`` é uma
+    SUGESTÃO usada para prefillar o salário do funcionário na criação; o valor
+    efetivo continua em ``employees.base_salary`` (pode divergir).
+    """
+
+    __tablename__ = "job_positions"
+
+    # unique=True + index=True → único índice unique ``ix_job_positions_name``
+    # (mesmo padrão de payroll_events.description; espelha a migration 0013).
+    name = Column(String(120), unique=True, nullable=False, index=True)
+    description = Column(Text, nullable=True)
+    base_salary = Column(Numeric(12, 2), nullable=False, default=0)
+    is_active = Column(Boolean, nullable=False, default=True)
+
+    def __repr__(self) -> str:
+        return f"<JobPosition {self.name}>"
+
+
 class Employee(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "employees"
 
@@ -34,7 +56,14 @@ class Employee(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     document = Column(String(32), unique=True, nullable=False, index=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(32), nullable=True)
-    role = Column(String(100), nullable=False)
+    # Cargo é FK (`position_id`). A antiga coluna texto `role` foi removida
+    # fisicamente na migration 0014_drop_employee_role (Demanda 2).
+    position_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("job_positions.id", name="fk_employees_position"),
+        nullable=False,
+        index=True,
+    )
     contract_type = Column(
         SAEnum(
             ContractType,
@@ -52,6 +81,7 @@ class Employee(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 
     payroll_entries = relationship("PayrollEntry", back_populates="employee")
+    position = relationship("JobPosition")
 
     def __repr__(self) -> str:
         return f"<Employee {self.name}>"

@@ -31,6 +31,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
+import { CargosTab } from "@/components/modules/folha/CargosTab"
 import { EntryRow } from "@/components/modules/folha/EntryRow"
 import { FuncionarioCard } from "@/components/modules/folha/FuncionarioCard"
 import { FuncionarioForm } from "@/components/modules/folha/FuncionarioForm"
@@ -185,6 +186,7 @@ export default function FolhaPage() {
           <TabsList>
             <TabsTrigger value="folha">Folha do Mês</TabsTrigger>
             <TabsTrigger value="funcionarios">Funcionários</TabsTrigger>
+            <TabsTrigger value="cargos">Cargos</TabsTrigger>
           </TabsList>
 
           {/* ── Aba Folha do Mês ── */}
@@ -379,6 +381,11 @@ export default function FolhaPage() {
                 ))}
               </div>
             )}
+          </TabsContent>
+
+          {/* ── Aba Cargos ── */}
+          <TabsContent value="cargos" className="space-y-4">
+            <CargosTab />
           </TabsContent>
         </Tabs>
       </div>
