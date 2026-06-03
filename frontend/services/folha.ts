@@ -17,7 +17,7 @@ import {
   PayrollPeriodStatus,
 } from "@/types/index"
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000"
+
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -33,8 +33,7 @@ function toNumberOrNull(value: unknown): number | null {
 function buildPhotoUrl(raw: string | null | undefined): string | null {
   if (!raw) return null
   if (raw.startsWith("http://") || raw.startsWith("https://")) return raw
-  const path = raw.startsWith("/") ? raw : `/${raw}`
-  return `${API_BASE_URL}${path}`
+  return raw.startsWith("/") ? raw : `/${raw}`
 }
 
 // ── Funcionários ─────────────────────────────────────────────────────────────
@@ -88,7 +87,7 @@ export async function getFuncionarios(params?: {
 }
 
 export async function createFuncionario(data: FormData): Promise<Employee> {
-  const response = await fetch(`${API_BASE_URL}/api/folha/funcionarios`, {
+  const response = await fetch("/api/folha/funcionarios", {
     method: "POST",
     credentials: "include",
     body: data,

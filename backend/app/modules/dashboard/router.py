@@ -18,6 +18,7 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
+@router.get("", response_model=SuccessResponse, include_in_schema=False)
 @router.get("/", response_model=SuccessResponse)
 def get_dashboard(
     db: Session = Depends(get_db),

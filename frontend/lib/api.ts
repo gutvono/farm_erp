@@ -1,9 +1,6 @@
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8000";
+// API calls use relative URLs — Next.js rewrites proxy them to the backend.
+// This avoids cross-origin cookie issues in all environments.
 
-// Debug temporário — confirmar que NEXT_PUBLIC_API_URL está correta em produção
-if (typeof window !== "undefined") {
-  console.log("[api] API_BASE_URL:", API_BASE_URL);
-}
 
 type FetchOptions = RequestInit & {
   params?: Record<string, string | number | boolean | undefined>;
@@ -15,7 +12,7 @@ export async function apiFetch<T = unknown>(
 ): Promise<T> {
   const { params, ...fetchOptions } = options;
 
-  let url = `${API_BASE_URL}${path}`;
+  let url = path;
 
   if (params) {
     const searchParams = new URLSearchParams();
@@ -42,8 +39,8 @@ export async function apiFetch<T = unknown>(
   const data = await response.json().catch(() => null);
 
   if (response.status === 401) {
-    const isLoginEndpoint = path === "/api/auth/login";
-    if (!isLoginEndpoint && typeof window !== "undefined") {
+    const isAuthCheck = path === "/api/auth/login" || path === "/api/auth/me";
+    if (!isAuthCheck && typeof window !== "undefined") {
       window.location.href = "/login";
     }
     const message = data?.detail ?? "Sessão expirada. Faça login novamente.";

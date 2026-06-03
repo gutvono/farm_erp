@@ -489,83 +489,92 @@ export function OrdemProducaoForm({
                 const requested = watchedEqs[idx]?.quantity ?? 0
                 const exceedsAvailable =
                   availability && requested > availability.available
+                const stockError = errors.equipments?.[idx]?.stock_item_id
+                const quantityError = errors.equipments?.[idx]?.quantity
 
                 return (
-                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-8 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Equipamento</Label>}
-                      <Select
-                        value={watchedEqs[idx]?.stock_item_id ?? ""}
-                        onValueChange={(v) =>
-                          setValue(`equipments.${idx}.stock_item_id`, v)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o equipamento" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {equipamentos.map((s) => {
-                            const avail = equipamentosEmUso.find(
-                              (r) => r.stock_item_id === s.id
-                            )
-                            const available = avail
-                              ? avail.available
-                              : Number(s.quantity_on_hand)
-                            const total = avail ? avail.total : Number(s.quantity_on_hand)
-                            const duplicated = selectedInOtherRows.includes(s.id)
-                            const blocked = duplicated || available <= 0
-                            return (
-                              <SelectItem
-                                key={s.id}
-                                value={s.id}
-                                disabled={blocked}
-                                className={blocked ? "opacity-40 cursor-not-allowed" : ""}
-                              >
-                                {s.name} ({available}/{total} disp.)
-                                {available === 0 && " — totalmente em uso"}
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
-                      {errors.equipments?.[idx]?.stock_item_id && (
-                        <p className="text-xs text-red-500">
-                          {errors.equipments[idx]?.stock_item_id?.message}
-                        </p>
-                      )}
-                      {exceedsAvailable && (
-                        <p className="text-xs text-red-500">
-                          Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
-                        </p>
-                      )}
+                  <div key={field.id} className="space-y-1">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-8 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Equipamento</Label>}
+                        <Select
+                          value={watchedEqs[idx]?.stock_item_id ?? ""}
+                          onValueChange={(v) =>
+                            setValue(`equipments.${idx}.stock_item_id`, v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o equipamento" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {equipamentos.map((s) => {
+                              const avail = equipamentosEmUso.find(
+                                (r) => r.stock_item_id === s.id
+                              )
+                              const available = avail
+                                ? avail.available
+                                : Number(s.quantity_on_hand)
+                              const total = avail ? avail.total : Number(s.quantity_on_hand)
+                              const duplicated = selectedInOtherRows.includes(s.id)
+                              const blocked = duplicated || available <= 0
+                              return (
+                                <SelectItem
+                                  key={s.id}
+                                  value={s.id}
+                                  disabled={blocked}
+                                  className={blocked ? "opacity-40 cursor-not-allowed" : ""}
+                                >
+                                  {s.name} ({available}/{total} disp.)
+                                  {available === 0 && " — totalmente em uso"}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="col-span-3 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                        <Input
+                          type="number"
+                          step="1"
+                          min="1"
+                          {...register(`equipments.${idx}.quantity`, { valueAsNumber: true })}
+                        />
+                      </div>
+
+                      <div className="col-span-1">
+                        {idx === 0 && <div className="text-xs invisible">X</div>}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeEquip(idx)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="col-span-3 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
-                      <Input
-                        type="number"
-                        step="1"
-                        min="1"
-                        {...register(`equipments.${idx}.quantity`, { valueAsNumber: true })}
-                      />
-                      {errors.equipments?.[idx]?.quantity && (
-                        <p className="text-xs text-red-500">
-                          {errors.equipments[idx]?.quantity?.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="col-span-1">
-                      {idx === 0 && <div className="text-xs invisible">X</div>}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeEquip(idx)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
+                    {(stockError || quantityError || exceedsAvailable) && (
+                      <div className="grid grid-cols-12 gap-2">
+                        <div className="col-span-8 space-y-1">
+                          {stockError && (
+                            <p className="text-xs text-red-500">{stockError.message}</p>
+                          )}
+                          {exceedsAvailable && (
+                            <p className="text-xs text-red-500">
+                              Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
+                            </p>
+                          )}
+                        </div>
+                        <div className="col-span-3 space-y-1">
+                          {quantityError && (
+                            <p className="text-xs text-red-500">{quantityError.message}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
@@ -604,83 +613,92 @@ export function OrdemProducaoForm({
                 const requested = watchedVehs[idx]?.quantity ?? 0
                 const exceedsAvailable =
                   availability && requested > availability.available
+                const stockError = errors.vehicles?.[idx]?.stock_item_id
+                const quantityError = errors.vehicles?.[idx]?.quantity
 
                 return (
-                  <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
-                    <div className="col-span-8 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Veículo</Label>}
-                      <Select
-                        value={watchedVehs[idx]?.stock_item_id ?? ""}
-                        onValueChange={(v) =>
-                          setValue(`vehicles.${idx}.stock_item_id`, v)
-                        }
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Selecione o veículo" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {veiculos.map((s) => {
-                            const avail = veiculosEmUso.find(
-                              (r) => r.stock_item_id === s.id
-                            )
-                            const available = avail
-                              ? avail.available
-                              : Number(s.quantity_on_hand)
-                            const total = avail ? avail.total : Number(s.quantity_on_hand)
-                            const duplicated = selectedInOtherRows.includes(s.id)
-                            const blocked = duplicated || available <= 0
-                            return (
-                              <SelectItem
-                                key={s.id}
-                                value={s.id}
-                                disabled={blocked}
-                                className={blocked ? "opacity-40 cursor-not-allowed" : ""}
-                              >
-                                {s.name} ({available}/{total} disp.)
-                                {available === 0 && " — totalmente em uso"}
-                              </SelectItem>
-                            )
-                          })}
-                        </SelectContent>
-                      </Select>
-                      {errors.vehicles?.[idx]?.stock_item_id && (
-                        <p className="text-xs text-red-500">
-                          {errors.vehicles[idx]?.stock_item_id?.message}
-                        </p>
-                      )}
-                      {exceedsAvailable && (
-                        <p className="text-xs text-red-500">
-                          Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
-                        </p>
-                      )}
+                  <div key={field.id} className="space-y-1">
+                    <div className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-8 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Veículo</Label>}
+                        <Select
+                          value={watchedVehs[idx]?.stock_item_id ?? ""}
+                          onValueChange={(v) =>
+                            setValue(`vehicles.${idx}.stock_item_id`, v)
+                          }
+                        >
+                          <SelectTrigger>
+                            <SelectValue placeholder="Selecione o veículo" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {veiculos.map((s) => {
+                              const avail = veiculosEmUso.find(
+                                (r) => r.stock_item_id === s.id
+                              )
+                              const available = avail
+                                ? avail.available
+                                : Number(s.quantity_on_hand)
+                              const total = avail ? avail.total : Number(s.quantity_on_hand)
+                              const duplicated = selectedInOtherRows.includes(s.id)
+                              const blocked = duplicated || available <= 0
+                              return (
+                                <SelectItem
+                                  key={s.id}
+                                  value={s.id}
+                                  disabled={blocked}
+                                  className={blocked ? "opacity-40 cursor-not-allowed" : ""}
+                                >
+                                  {s.name} ({available}/{total} disp.)
+                                  {available === 0 && " — totalmente em uso"}
+                                </SelectItem>
+                              )
+                            })}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="col-span-3 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Quantidade</Label>}
+                        <Input
+                          type="number"
+                          step="1"
+                          min="1"
+                          {...register(`vehicles.${idx}.quantity`, { valueAsNumber: true })}
+                        />
+                      </div>
+
+                      <div className="col-span-1">
+                        {idx === 0 && <div className="text-xs invisible">X</div>}
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="icon"
+                          onClick={() => removeVeh(idx)}
+                        >
+                          <Trash2 className="h-4 w-4 text-red-500" />
+                        </Button>
+                      </div>
                     </div>
 
-                    <div className="col-span-3 space-y-1">
-                      {idx === 0 && <Label className="text-xs">Quantidade</Label>}
-                      <Input
-                        type="number"
-                        step="1"
-                        min="1"
-                        {...register(`vehicles.${idx}.quantity`, { valueAsNumber: true })}
-                      />
-                      {errors.vehicles?.[idx]?.quantity && (
-                        <p className="text-xs text-red-500">
-                          {errors.vehicles[idx]?.quantity?.message}
-                        </p>
-                      )}
-                    </div>
-
-                    <div className="col-span-1">
-                      {idx === 0 && <div className="text-xs invisible">X</div>}
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
-                        onClick={() => removeVeh(idx)}
-                      >
-                        <Trash2 className="h-4 w-4 text-red-500" />
-                      </Button>
-                    </div>
+                    {(stockError || quantityError || exceedsAvailable) && (
+                      <div className="grid grid-cols-12 gap-2">
+                        <div className="col-span-8 space-y-1">
+                          {stockError && (
+                            <p className="text-xs text-red-500">{stockError.message}</p>
+                          )}
+                          {exceedsAvailable && (
+                            <p className="text-xs text-red-500">
+                              Apenas {availability!.available} disp., {availability!.committed} em uso em outras ordens
+                            </p>
+                          )}
+                        </div>
+                        <div className="col-span-3 space-y-1">
+                          {quantityError && (
+                            <p className="text-xs text-red-500">{quantityError.message}</p>
+                          )}
+                        </div>
+                      </div>
+                    )}
                   </div>
                 )
               })}
