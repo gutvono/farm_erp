@@ -615,11 +615,20 @@ export type PayrollCalculationType =
   | "transport_voucher"
 export type PayrollItemSource = "manual" | "automatic"
 
+export interface JobPosition {
+  id: string
+  name: string
+  description: string | null
+  base_salary: number
+  is_active: boolean
+}
+
 export interface Employee {
   id: string
   name: string
   cpf: string
-  role: string
+  position_id: string
+  position_name: string
   base_salary: number
   contract_type: ContractType
   admission_date: string

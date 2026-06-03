@@ -12,15 +12,83 @@ from app.modules.auth.router import get_current_user
 from app.modules.folha import service as folha_service
 from app.modules.folha.schemas import (
     EmployeeUpdate,
+    JobPositionCreate,
+    JobPositionOut,
+    JobPositionUpdate,
     PayrollAutoCalculationRequest,
     PayrollEntryUpdate,
     PayrollManualItemUpsert,
     PayrollPeriodCreate,
 )
 from app.shared.enums import ContractType
+from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
+
+
+# ---------------------------------------------------------------------------
+# Cargos (Job Positions)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/cargos", response_model=Page[JobPositionOut])
+def list_positions(
+    params: PageParams = Depends(get_page_params),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> Page[JobPositionOut]:
+    return folha_service.list_positions(db, params=params)
+
+
+@router.post("/cargos", response_model=SuccessResponse, status_code=201)
+def create_position(
+    body: JobPositionCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    position = folha_service.create_position(db, body)
+    return success(
+        "Cargo criado com sucesso",
+        folha_service.serialize_position(position),
+    )
+
+
+@router.get("/cargos/{position_id}", response_model=SuccessResponse)
+def get_position(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    position = folha_service.get_position(db, position_id)
+    return success(
+        "Cargo obtido com sucesso",
+        folha_service.serialize_position(position),
+    )
+
+
+@router.put("/cargos/{position_id}", response_model=SuccessResponse)
+def update_position(
+    position_id: UUID,
+    body: JobPositionUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    position = folha_service.update_position(db, position_id, body)
+    return success(
+        "Cargo atualizado com sucesso",
+        folha_service.serialize_position(position),
+    )
+
+
+@router.delete("/cargos/{position_id}", response_model=SuccessResponse)
+def delete_position(
+    position_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    folha_service.delete_position(db, position_id)
+    return success("Cargo excluído com sucesso")
 
 
 # ---------------------------------------------------------------------------
@@ -52,10 +120,10 @@ def list_employees(
 def create_employee(
     name: str = Form(..., min_length=1, max_length=255),
     cpf: str = Form(..., min_length=1, max_length=32),
-    role: str = Form(..., min_length=1, max_length=100),
-    base_salary: Decimal = Form(..., ge=0),
+    position_id: UUID = Form(...),
     contract_type: ContractType = Form(...),
     admission_date: date = Form(...),
+    base_salary: Optional[Decimal] = Form(default=None, ge=0),
     email: Optional[str] = Form(default=None),
     phone: Optional[str] = Form(default=None),
     termination_cost_override: Optional[Decimal] = Form(default=None),
@@ -69,7 +137,7 @@ def create_employee(
         cpf=cpf,
         email=email,
         phone=phone,
-        role=role,
+        position_id=position_id,
         base_salary=base_salary,
         contract_type=contract_type,
         admission_date=admission_date,

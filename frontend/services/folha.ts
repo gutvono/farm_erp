@@ -1,8 +1,11 @@
 import { apiFetch } from "@/lib/api"
+import { fetchPaginated } from "@/lib/pagination"
 import {
   ApiResponse,
   ContractType,
   Employee,
+  JobPosition,
+  Paginated,
   PayrollBatchResult,
   PayrollCalculationPreview,
   PayrollCalculationRequest,
@@ -43,7 +46,8 @@ interface RawEmployee {
   id: string
   name: string
   cpf: string
-  role: string
+  position_id: string
+  position_name: string
   base_salary: string | number
   contract_type: ContractType
   admission_date: string
@@ -59,7 +63,8 @@ function parseEmployee(raw: RawEmployee): Employee {
     id: raw.id,
     name: raw.name,
     cpf: raw.cpf,
-    role: raw.role,
+    position_id: raw.position_id,
+    position_name: raw.position_name,
     base_salary: toNumber(raw.base_salary),
     contract_type: raw.contract_type,
     admission_date: raw.admission_date,
@@ -114,7 +119,7 @@ export async function updateFuncionario(
   id: string,
   data: Partial<{
     name: string
-    role: string
+    position_id: string
     base_salary: number
     contract_type: ContractType
     admission_date: string
@@ -134,6 +139,80 @@ export async function demitirFuncionario(id: string): Promise<Employee> {
     { method: "POST" }
   )
   return parseEmployee(response.data)
+}
+
+// ── Cargos (Job Positions) ───────────────────────────────────────────────────
+
+interface RawJobPosition {
+  id: string
+  name: string
+  description: string | null
+  base_salary: string | number
+  is_active: boolean
+}
+
+function parseJobPosition(raw: RawJobPosition): JobPosition {
+  return {
+    id: raw.id,
+    name: raw.name,
+    description: raw.description ?? null,
+    base_salary: toNumber(raw.base_salary),
+    is_active: raw.is_active,
+  }
+}
+
+/**
+ * Lista paginada de cargos (`GET /api/folha/cargos`). O endpoint responde o
+ * envelope `Page[T]` cru (infra de paginação da Demanda 0), por isso usa
+ * `fetchPaginated`. `base_salary` chega como string e é convertido por
+ * `parseJobPosition`. `order_by` aceito pelo backend: `name`, `base_salary`
+ * (default `name asc`); `search` filtra por `name`.
+ */
+export async function getCargos(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+}): Promise<Paginated<JobPosition>> {
+  return fetchPaginated<JobPosition, RawJobPosition>(
+    "/api/folha/cargos",
+    params,
+    parseJobPosition
+  )
+}
+
+export async function createCargo(data: {
+  name: string
+  description?: string
+  base_salary: number
+  is_active: boolean
+}): Promise<JobPosition> {
+  const response = await apiFetch<ApiResponse<RawJobPosition>>(
+    "/api/folha/cargos",
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseJobPosition(response.data)
+}
+
+export async function updateCargo(
+  id: string,
+  data: Partial<{
+    name: string
+    description: string
+    base_salary: number
+    is_active: boolean
+  }>
+): Promise<JobPosition> {
+  const response = await apiFetch<ApiResponse<RawJobPosition>>(
+    `/api/folha/cargos/${id}`,
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return parseJobPosition(response.data)
+}
+
+export async function deleteCargo(id: string): Promise<void> {
+  await apiFetch(`/api/folha/cargos/${id}`, { method: "DELETE" })
 }
 
 // ── Períodos ─────────────────────────────────────────────────────────────────

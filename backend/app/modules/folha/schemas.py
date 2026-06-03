@@ -16,6 +16,49 @@ from app.shared.enums import (
 
 
 # ---------------------------------------------------------------------------
+# Cargos (Job Positions)
+# ---------------------------------------------------------------------------
+
+
+class JobPositionCreate(BaseModel):
+    name: str = Field(min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None)
+    base_salary: Decimal = Field(default=Decimal("0"), ge=0)
+    is_active: bool = Field(default=True)
+
+
+class JobPositionUpdate(BaseModel):
+    name: Optional[str] = Field(default=None, min_length=1, max_length=120)
+    description: Optional[str] = Field(default=None)
+    base_salary: Optional[Decimal] = Field(default=None, ge=0)
+    is_active: Optional[bool] = None
+
+
+class JobPositionOut(BaseModel):
+    id: UUID
+    name: str
+    description: Optional[str] = None
+    base_salary: Decimal
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, position) -> "JobPositionOut":
+        return cls(
+            id=position.id,
+            name=position.name,
+            description=position.description,
+            base_salary=position.base_salary,
+            is_active=position.is_active,
+            created_at=position.created_at,
+            updated_at=position.updated_at,
+        )
+
+
+# ---------------------------------------------------------------------------
 # Employees
 # ---------------------------------------------------------------------------
 
@@ -25,8 +68,9 @@ class EmployeeCreate(BaseModel):
     cpf: str = Field(min_length=1, max_length=32)
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
-    role: str = Field(min_length=1, max_length=100)
-    base_salary: Decimal = Field(ge=0)
+    position_id: UUID
+    # Opcional: quando ausente, o Service usa o base_salary do cargo escolhido.
+    base_salary: Optional[Decimal] = Field(default=None, ge=0)
     contract_type: ContractType
     admission_date: date
     termination_cost_override: Optional[Decimal] = Field(default=None, ge=0)
@@ -36,7 +80,7 @@ class EmployeeUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
-    role: Optional[str] = Field(default=None, min_length=1, max_length=100)
+    position_id: Optional[UUID] = None
     base_salary: Optional[Decimal] = Field(default=None, ge=0)
     contract_type: Optional[ContractType] = None
     admission_date: Optional[date] = None
@@ -49,7 +93,8 @@ class EmployeeOut(BaseModel):
     cpf: str
     email: Optional[str] = None
     phone: Optional[str] = None
-    role: str
+    position_id: UUID
+    position_name: str
     base_salary: Decimal
     contract_type: ContractType
     admission_date: date
@@ -64,13 +109,15 @@ class EmployeeOut(BaseModel):
 
     @classmethod
     def from_model(cls, employee, photo_url: Optional[str] = None) -> "EmployeeOut":
+        position = employee.position
         return cls(
             id=employee.id,
             name=employee.name,
             cpf=employee.document,
             email=employee.email,
             phone=employee.phone,
-            role=employee.role,
+            position_id=employee.position_id,
+            position_name=position.name if position else "",
             base_salary=employee.base_salary,
             contract_type=employee.contract_type,
             admission_date=employee.hire_date,

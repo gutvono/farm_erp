@@ -20,6 +20,7 @@ from app.modules.folha.calculations import (
 )
 from app.modules.folha.model import (
     Employee,
+    JobPosition,
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
@@ -27,6 +28,9 @@ from app.modules.folha.model import (
 )
 from app.modules.folha.schemas import (
     EmployeeOut,
+    JobPositionCreate,
+    JobPositionOut,
+    JobPositionUpdate,
     PayrollAutoCalculationRequest,
     PayrollBatchResult,
     PayrollCalculationPreview,
@@ -36,6 +40,7 @@ from app.modules.folha.schemas import (
     PayrollManualItemUpsert,
     PayrollPeriodOut,
 )
+from app.shared.pagination import Page, PageParams
 from app.shared.enums import (
     ContractType,
     FinancialCategory,
@@ -212,6 +217,73 @@ def _entry_remuneration_base(entry: PayrollEntry) -> Decimal:
 
 
 # ---------------------------------------------------------------------------
+# Cargos (Job Positions)
+# ---------------------------------------------------------------------------
+
+
+def _get_active_position_or_404(db: Session, position_id: UUID) -> JobPosition:
+    """Cargo deve existir, não estar excluído e estar ativo (para vínculo)."""
+    position = folha_repo.get_position(db, position_id)
+    if not position or not position.is_active:
+        raise HTTPException(status_code=404, detail="Cargo não encontrado")
+    return position
+
+
+def create_position(db: Session, data: JobPositionCreate) -> JobPosition:
+    if folha_repo.get_position_by_name(db, data.name):
+        raise HTTPException(
+            status_code=400, detail="Já existe um cargo com este nome"
+        )
+    return folha_repo.create_position(
+        db,
+        name=data.name,
+        description=data.description,
+        base_salary=data.base_salary,
+        is_active=data.is_active,
+    )
+
+
+def list_positions(
+    db: Session, *, params: PageParams
+) -> Page[JobPositionOut]:
+    positions, total = folha_repo.list_positions_paginated(db, params=params)
+    items = [JobPositionOut.from_model(p) for p in positions]
+    return Page.create(items=items, total=total, params=params)
+
+
+def get_position(db: Session, position_id: UUID) -> JobPosition:
+    position = folha_repo.get_position(db, position_id)
+    if not position:
+        raise HTTPException(status_code=404, detail="Cargo não encontrado")
+    return position
+
+
+def update_position(
+    db: Session, position_id: UUID, data: JobPositionUpdate
+) -> JobPosition:
+    position = get_position(db, position_id)
+    fields = data.model_dump(exclude_unset=True)
+    new_name = fields.get("name")
+    if new_name and new_name != position.name:
+        if folha_repo.get_position_by_name(db, new_name):
+            raise HTTPException(
+                status_code=400, detail="Já existe um cargo com este nome"
+            )
+    return folha_repo.update_position(db, position_id, fields)
+
+
+def delete_position(db: Session, position_id: UUID) -> JobPosition:
+    get_position(db, position_id)
+    active_count = folha_repo.count_active_employees_by_position(db, position_id)
+    if active_count > 0:
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível excluir um cargo com funcionários vinculados",
+        )
+    return folha_repo.soft_delete_position(db, position_id)
+
+
+# ---------------------------------------------------------------------------
 # Employees
 # ---------------------------------------------------------------------------
 
@@ -223,8 +295,8 @@ def create_employee(
     cpf: str,
     email: Optional[str],
     phone: Optional[str],
-    role: str,
-    base_salary: Decimal,
+    position_id: UUID,
+    base_salary: Optional[Decimal],
     contract_type: ContractType,
     admission_date: date,
     photo_file: Optional[UploadFile] = None,
@@ -236,6 +308,14 @@ def create_employee(
             status_code=400, detail="Já existe um funcionário cadastrado com este CPF"
         )
 
+    position = _get_active_position_or_404(db, position_id)
+    # base_salary é opcional: quando ausente, herda o sugerido do cargo.
+    effective_salary = (
+        Decimal(str(base_salary))
+        if base_salary is not None
+        else Decimal(str(position.base_salary))
+    )
+
     photo_path: Optional[str] = None
     if photo_file is not None and photo_file.filename:
         photo_path = _save_photo(photo_file)
@@ -246,8 +326,8 @@ def create_employee(
         cpf=cpf,
         email=email,
         phone=phone,
-        role=role,
-        base_salary=base_salary,
+        position_id=position_id,
+        base_salary=effective_salary,
         contract_type=contract_type,
         admission_date=admission_date,
         photo_path=photo_path,
@@ -280,6 +360,9 @@ def update_employee(
     db: Session, employee_id: UUID, update_fields: dict
 ) -> Employee:
     _get_employee_or_404(db, employee_id)
+    # Trocar o cargo exige um cargo existente e ativo (mesma regra da criação).
+    if update_fields.get("position_id") is not None:
+        _get_active_position_or_404(db, update_fields["position_id"])
     # Map schema names to model names (admission_date → hire_date)
     mapped: dict = {}
     for key, value in update_fields.items():
@@ -773,6 +856,10 @@ def pay_all_entries(db: Session, period_id: UUID) -> PayrollBatchResult:
 # ---------------------------------------------------------------------------
 # Serialization helpers (used by router)
 # ---------------------------------------------------------------------------
+
+
+def serialize_position(position: JobPosition) -> dict:
+    return JobPositionOut.from_model(position).model_dump(mode="json")
 
 
 def serialize_employee(employee: Employee) -> dict:

@@ -2,7 +2,9 @@
 
 ## Overview
 
-Módulo responsável pela gestão de funcionários, criação de períodos mensais de folha (holerites), ajustes de horas extras/descontos, pagamento individual ou em lote e demissões. Toda operação que movimenta dinheiro (pagamento, demissão) gera movimentos financeiros e, quando aplicável, contas a pagar.
+Módulo responsável pela gestão de **cargos**, funcionários, criação de períodos mensais de folha (holerites), ajustes de horas extras/descontos, pagamento individual ou em lote e demissões. Toda operação que movimenta dinheiro (pagamento, demissão) gera movimentos financeiros e, quando aplicável, contas a pagar.
+
+A partir da **Demanda 2**, o cargo do funcionário deixou de ser texto livre e passou a ser uma **entidade cadastrável** (`job_positions`), referenciada por FK (`employees.position_id`). O antigo campo `employees.role` foi removido fisicamente (migration `0014`).
 
 ## Arquitetura
 
@@ -16,6 +18,18 @@ Obedece à regra do projeto: router valida entrada e retorna resposta; service o
 
 Todos os endpoints exigem autenticação via cookie `session_token` (dependency `get_current_user`).
 
+### Cargos (Job Positions)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/folha/cargos` | Lista cargos **paginados** (envelope `Page[T]` cru). Params: `page`, `page_size`, `order_by` (`name`/`base_salary`), `order_dir`, `search` (por `name`) |
+| `POST` | `/api/folha/cargos` | Cria cargo (JSON). Nome único → `400` se duplicado |
+| `GET` | `/api/folha/cargos/{id}` | Detalhe do cargo |
+| `PUT` | `/api/folha/cargos/{id}` | Atualiza cargo (campos opcionais; renomear para nome já usado → `400`) |
+| `DELETE` | `/api/folha/cargos/{id}` | Soft delete. **Bloqueado** (`400`) se houver funcionário ativo vinculado |
+
+A listagem usa a infra de paginação compartilhada (Demanda 0): `order_by` é validado por allowlist (`name`, `base_salary`); valor inválido cai no default (`name asc`) — nunca `500`. `search` filtra por `name` (ILIKE). Diferente das demais listagens do módulo, retorna o **envelope `Page[T]` cru** (não `SuccessResponse`), como as outras telas paginadas do sistema.
+
 ### Funcionários
 
 | Método | Rota | Descrição |
@@ -26,7 +40,12 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `PUT` | `/api/folha/funcionarios/{id}` | Atualiza dados cadastrais (sem foto) |
 | `POST` | `/api/folha/funcionarios/{id}/demitir` | Demite funcionário, lança saída no Financeiro + conta a pagar |
 
-O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, `role`, `base_salary`, `contract_type`, `admission_date`, `email` e `phone`, mais o arquivo opcional `photo_file` (somente `image/jpeg` ou `image/png`). A foto é gravada em `settings.upload_dir/employees/{uuid}_{filename}` e exposta no `EmployeeOut.photo_url` como `/uploads/{photo_path}`. Se nenhuma foto for enviada, `photo_url` retorna `null` e cabe ao front-end usar o fallback (silhueta default).
+O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, **`position_id`** (UUID do cargo, no lugar do antigo `role`), `contract_type`, `admission_date`, **`base_salary` (opcional)**, `email` e `phone`, mais o arquivo opcional `photo_file` (somente `image/jpeg` ou `image/png`). 
+
+- **`position_id`** deve referenciar um cargo existente e **ativo** — caso contrário `404 "Cargo não encontrado"`.
+- **`base_salary` é opcional:** quando omitido, o funcionário nasce com o `base_salary` **sugerido pelo cargo**; quando enviado, o valor informado **prevalece** (o do cargo é só sugestão). Ex.: cargo "Colhedor" tem base 1800 → criar sem `base_salary` ⇒ funcionário com 1800; enviar 2000 ⇒ fica 2000.
+
+A foto é gravada em `settings.upload_dir/employees/{uuid}_{filename}` e exposta no `EmployeeOut.photo_url` como `/uploads/{photo_path}`. Se nenhuma foto for enviada, `photo_url` retorna `null` e cabe ao front-end usar o fallback (silhueta default).
 
 ### Períodos de Folha
 
@@ -54,14 +73,40 @@ O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, `
 
 ## Schemas principais
 
+### JobPositionCreate / JobPositionUpdate (JSON)
+```json
+{
+  "name": "Tratorista",
+  "description": "Operação de tratores",
+  "base_salary": 2500.00,
+  "is_active": true
+}
+```
+- `name` obrigatório (≤ 120 chars), único entre cargos não-excluídos.
+- `description` opcional; `base_salary ≥ 0` (default `0`); `is_active` default `true`.
+- No `JobPositionUpdate` todos os campos são opcionais.
+
+### JobPositionOut
+```json
+{
+  "id": "uuid",
+  "name": "Tratorista",
+  "description": "Operação de tratores",
+  "base_salary": "2500.00",
+  "is_active": true,
+  "created_at": "...",
+  "updated_at": "..."
+}
+```
+
 ### EmployeeCreate (form-data)
 ```
 name: string
 cpf: string
-role: string
-base_salary: Decimal ≥ 0
+position_id: uuid            # cargo (substitui o antigo role)
 contract_type: clt | pj | temporario
 admission_date: date
+base_salary?: Decimal ≥ 0    # opcional: default = base_salary do cargo
 email?: string
 phone?: string
 termination_cost_override?: Decimal ≥ 0
@@ -76,7 +121,8 @@ photo_file?: image/jpeg|image/png
   "cpf": "111.222.333-01",
   "email": "joao@fazenda.com",
   "phone": "(35) 98100-0001",
-  "role": "Gerente Agrícola",
+  "position_id": "uuid",
+  "position_name": "Gerente Agrícola",
   "base_salary": "6000.00",
   "contract_type": "clt",
   "admission_date": "2020-03-01",
@@ -88,6 +134,7 @@ photo_file?: image/jpeg|image/png
   "updated_at": "..."
 }
 ```
+`position_name` é resolvido a partir do cargo vinculado (`employees.position` → `job_positions.name`). O campo `role` **não existe mais**.
 
 ### PayrollPeriodCreate
 ```json
@@ -144,8 +191,16 @@ photo_file?: image/jpeg|image/png
 
 ## Regras de Negócio
 
+### Cargos
+- **Unicidade:** `name` é único entre cargos não-excluídos. Criar/renomear para um nome já usado → `400 "Já existe um cargo com este nome"`.
+- **Salário sugerido:** `base_salary` do cargo é apenas a sugestão usada para prefillar o salário do funcionário na criação. O salário efetivo vive em `employees.base_salary` e pode divergir; alterar o cargo depois **não** retroage aos funcionários.
+- **Exclusão bloqueada:** `DELETE` só faz o soft delete se **nenhum** funcionário ativo (`deleted_at IS NULL`) estiver vinculado àquele `position_id`. Havendo vínculo ativo → `400 "Não é possível excluir um cargo com funcionários vinculados"`. Após demitir/desvincular os funcionários, o `DELETE` passa a funcionar.
+- **Soft delete:** cargo excluído some das listagens e do `GET` por id; o histórico permanece (funcionários antigos continuam referenciando o `position_id`).
+- A contagem de funcionários por cargo (que o PCP consome) sai de `COUNT(employees) GROUP BY position_id` — relação 1:N, sem M:N.
+
 ### Funcionários
 - CPF é único — criação em duplicidade retorna `400`.
+- **Cargo (`position_id`):** obrigatório na criação; deve existir e estar ativo (senão `404 "Cargo não encontrado"`). No `update`, trocar o cargo segue a mesma validação. `base_salary` na criação é opcional e herda o do cargo quando ausente (ver Endpoints → Funcionários).
 - Foto só é enviada na criação (PUT não aceita foto). Formatos aceitos: JPEG e PNG.
 - `update` aceita todos os campos opcionais exceto `cpf` (CPF não é atualizável).
 - `deactivate_employee` faz soft delete (`deleted_at = now()`) e marca `is_active = False` + `termination_date = today`. Após isso o funcionário não aparece mais em listagens nem em `get` (operação semântica final).
@@ -210,6 +265,16 @@ Validação de saldo antes do pagamento usa `fin_service.get_balance(db).saldo` 
 
 ## Database Schema
 
+### `job_positions`
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `name` | VARCHAR(120) unique indexado (`ix_job_positions_name`) |
+| `description` | TEXT nullable |
+| `base_salary` | NUMERIC(12,2) NOT NULL (salário sugerido) |
+| `is_active` | BOOLEAN NOT NULL |
+| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ (soft delete) |
+
 ### `employees`
 | Coluna | Tipo |
 |--------|------|
@@ -217,7 +282,7 @@ Validação de saldo antes do pagamento usa `fin_service.get_balance(db).saldo` 
 | `name` | VARCHAR(255) indexado |
 | `document` (CPF) | VARCHAR(32) unique indexado |
 | `email`, `phone` | VARCHAR nullable |
-| `role` | VARCHAR(100) |
+| `position_id` | UUID FK → job_positions (`fk_employees_position`) NOT NULL, indexado |
 | `contract_type` | enum (`clt`/`pj`/`temporario`) |
 | `base_salary` | NUMERIC(12,2) |
 | `hire_date` | DATE |
@@ -320,6 +385,17 @@ Reversível via `downgrade()` (drop das tabelas e enums).
 - Elimina o diff residual reportado por `alembic check`.
 
 Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQUE`).
+
+`0013_job_positions` (arquivo `alembic/versions/20260603_0013_job_positions.py`) — **Demanda 2**:
+- Cria a tabela `job_positions` (cargo cadastrável).
+- Migração de dados (idempotente): insere um cargo por valor DISTINTO de `employees.role`; adiciona `employees.position_id` (FK + índice); backfill por igualdade exata de texto (`role` → `name` do cargo); torna `position_id` NOT NULL; rebaixa `employees.role` a NULLABLE/DEPRECATED (sem dropar).
+- "Colhedor" e "Colhedora" ficam como cargos distintos (sem normalizar gênero).
+- Reversível (`downgrade` repopula `role`, exige NOT NULL, remove `position_id` e dropa `job_positions`).
+
+`0014_drop_employee_role` (arquivo `alembic/versions/20260603_0014_drop_employee_role.py`) — **Demanda 2**, passo final:
+- `upgrade()`: **DROP físico** de `employees.role` (`DROP COLUMN IF EXISTS role`), depois que o Backend parou de ler/escrever o campo. O dado canônico do cargo é `position_id`.
+- `downgrade()`: recria a coluna `role VARCHAR(100) NULLABLE` (não repopula — quem precisar do texto resolve via `JOIN job_positions`).
+- O atributo `role` foi removido do model `Employee` para manter `alembic check` limpo (model × banco em sincronia).
 
 > **Convenção:** `alembic_version.version_num` é `VARCHAR(32)` — o `revision id` de cada migration deve ter no máximo 32 caracteres (por isso `0008_fix_payroll_desc_index` e não o nome completo do arquivo).
 

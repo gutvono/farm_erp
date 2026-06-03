@@ -46,7 +46,7 @@ nome do enum.
 
 | Tabela | Soft delete | Observação |
 |--------|-------------|------------|
-| `users`, `clients`, `suppliers`, `employees` | ✅ | entidades cadastrais |
+| `users`, `clients`, `suppliers`, `employees`, `job_positions` | ✅ | entidades cadastrais |
 | `stock_items`, `plots` | ✅ | cadastros base |
 | `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events` | ✅ | operações de negócio e catálogos |
 | `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
@@ -274,17 +274,41 @@ O cancelamento por inadimplência marca `clients.is_delinquent = TRUE`.
 
 ### Folha
 
+#### `job_positions`
+Cargos cadastráveis da folha (entidade de negócio → soft delete). Substituem o
+antigo texto livre `employees.role`. O PCP (Demanda 5) usará esta entidade para
+pedir "X funcionários do cargo Y" — a contagem por cargo sai de
+`COUNT(employees) GROUP BY position_id` (relação 1:N, **não** M:N).
+
+| Coluna | Tipo | Nulo? | Default | Significado (negócio) |
+|--------|------|-------|---------|-----------------------|
+| `id` | `UUID` PK | não | — | Identificador do cargo |
+| `name` | `VARCHAR(120)` UNIQUE | não | — | Nome do cargo (ex.: "Gerente Agrícola") |
+| `description` | `TEXT` | sim | — | Descrição livre do cargo |
+| `base_salary` | `NUMERIC(12,2)` | não | 0 | Salário base **sugerido**: prefilla `employees.base_salary` na criação do funcionário (editável; o valor efetivo fica no funcionário e pode divergir) |
+| `is_active` | `BOOLEAN` | não | true | Cargo disponível para uso |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | `now()` | Auditoria |
+| `deleted_at` | `TIMESTAMPTZ` | sim | — | **Soft delete** (NULL = ativo) |
+
+Índices/constraints: `ix_job_positions_name` (UNIQUE — unicidade e busca por nome),
+`ix_job_positions_deleted_at` (filtro de soft delete).
+
 #### `employees`
 Funcionários. Contratos: CLT, PJ, Temporário.
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `document` | `VARCHAR(32)` UNIQUE | CPF |
+| `position_id` | `UUID` FK → `job_positions.id` (`fk_employees_position`, índice `ix_employees_position_id`) | Cargo do funcionário (NOT NULL). Um funcionário tem **um** cargo por vez |
 | `contract_type` | ENUM `contract_type` | `clt` \| `pj` \| `temporario` |
-| `base_salary` | `NUMERIC(12,2)` | Salário base |
+| `base_salary` | `NUMERIC(12,2)` | Salário base (efetivo; prefillado a partir do cargo na criação) |
 | `hire_date`, `termination_date` | `DATE` | Admissão e demissão |
 | `photo_path` | `VARCHAR(500)` | Caminho em `/uploads` |
 | `is_active` | `BOOLEAN` | Ativo (FALSE após demissão) |
+
+##### Relacionamentos
+- `employees.position_id → job_positions.id` (N:1) — o cargo do funcionário.
+  Contagem por cargo (uso do PCP): `COUNT(employees) GROUP BY position_id`.
 
 #### `payroll_periods`
 Competências mensais. UNIQUE (`competency_year`, `competency_month`).
@@ -443,9 +467,9 @@ suppliers ────┬──── purchase_orders ──┬── purchase_o
 
 stock_items ──── stock_movements (ledger)
 
-employees ──── payroll_entries ──── payroll_periods
-                  │
-                  └──── payroll_entry_items ──── payroll_events
+job_positions ──◀ employees ──── payroll_entries ──── payroll_periods
+                       │
+                       └──── payroll_entry_items ──── payroll_events
 
 plots ──┬──── production_orders ──┬── production_inputs ──▶ stock_items
         │                        ├── production_harvests
@@ -535,6 +559,42 @@ declarados nos models (`__table_args__`) com o mesmo nome, mantendo
 `accounts_receivable.due_date`, e as colunas `name` de `clients`, `suppliers`,
 `stock_items` e `employees` (todas via `index=True` no model).
 
+### Cargos da folha — `role` texto → FK (Demanda 2)
+
+A migration **`0013_job_positions`** (`down_revision`
+`0012_invoice_cancel_fields`) cria a tabela `job_positions` e migra o cargo do
+funcionário de texto livre para FK:
+
+1. Cria `job_positions` + índices (`ix_job_positions_name` unique,
+   `ix_job_positions_deleted_at`).
+2. Insere **um cargo por valor DISTINTO** de `employees.role` (`base_salary = 0`;
+   o ajuste fino dos salários sugeridos fica para a UI). Igualdade **exata** de
+   texto — `"Colhedor"` e `"Colhedora"` viram **cargos distintos** (não há
+   normalização de gênero/caixa; isso é decisão de UI, não do banco).
+3. Adiciona `employees.position_id` (nullable) + FK `fk_employees_position` +
+   `ix_employees_position_id`.
+4. **Backfill** vinculando cada funcionário ao cargo cujo `name` = seu `role`.
+5. Torna `position_id` **NOT NULL**.
+6. Torna `employees.role` **NULLABLE** (DEPRECATED) — **não** dropa.
+
+**Decisão (integridade entre passos):** `role` foi mantida viva e nullable para o
+Backend conseguir lê-la entre os passos DBA→Backend. O **DROP físico** foi feito
+no passo Backend (migration **`0014_drop_employee_role`**, head atual), depois que
+o código parou de ler/escrever o campo — o dado canônico do cargo é `position_id`.
+
+`0013.downgrade()` repopula `role` a partir de `job_positions.name`, restaura
+`role NOT NULL`, remove `position_id` (índice/FK/coluna) e dropa `job_positions`
+(reversibilidade testada localmente). A migration é idempotente
+(`IF NOT EXISTS`/`ON CONFLICT`/DO-block) — roda também no caminho do banco novo,
+em que `0001` (`create_all`) já materializou a tabela e a coluna a partir dos
+models atualizados.
+
+A migration **`0014_drop_employee_role`** (`down_revision` `0013_job_positions`)
+faz `DROP COLUMN IF EXISTS role`; o `downgrade()` recria `role VARCHAR(100)`
+NULLABLE (sem repopular — quem precisar do texto resolve via `JOIN job_positions`).
+O atributo `role` também foi removido do model `Employee`, mantendo
+`alembic check` limpo (model × banco em sincronia).
+
 ---
 
 ## Como rodar
@@ -587,7 +647,8 @@ python -m poetry run alembic upgrade head
 - **1** usuário admin
 - **3** clientes (1 inadimplente: Mercearia Dona Rita)
 - **3** fornecedores
-- **8** funcionários — 3 CLT (R$ 2.200–6.000), 3 PJ (R$ 4.000–5.500), 2 Temporários (R$ 1.800)
+- **8** cargos (`job_positions`) com salário sugerido (R$ 1.800–6.000)
+- **8** funcionários — 3 CLT (R$ 2.200–6.000), 3 PJ (R$ 4.000–5.500), 2 Temporários (R$ 1.800); cada um vinculado a um cargo via `position_id` (campo legado `role` fica NULL)
 - **9** itens de estoque — 3 qualidades de café em sacas de 60kg, 4 insumos, 1 trator, 1 colheitadeira
 - **2** talhões e **3** atividades registradas
 - **1** ordem de produção concluída (100 sacas: 19 especial, 52 superior, 29 tradicional)

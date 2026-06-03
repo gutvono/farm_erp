@@ -21,12 +21,13 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { createFuncionario, updateFuncionario } from "@/services/folha"
-import { ContractType, Employee } from "@/types/index"
+import { createFuncionario, getCargos, updateFuncionario } from "@/services/folha"
+import { ContractType, Employee, JobPosition } from "@/types/index"
 
 // ─── helpers ──────────────────────────────────────────────────────────────────
 
 const CPF_REGEX = /^\d{3}\.\d{3}\.\d{3}-\d{2}$/
+const CARGOS_PAGE_SIZE = 100
 
 function formatCpf(digits: string): string {
   return digits.replace(/(\d{3})(\d{3})(\d{3})(\d{2})/, "$1.$2.$3-$4")
@@ -36,6 +37,14 @@ function parseCurrency(v: string): number | undefined {
   if (!v || v.trim() === "") return undefined
   const n = parseFloat(v.replace(",", "."))
   return isNaN(n) ? undefined : n
+}
+
+// Converte o valor do input de salário: vazio → undefined (backend usa o do cargo);
+// texto numérico → number.
+function salaryFromInput(v: unknown): number | undefined {
+  if (v === "" || v === null || v === undefined) return undefined
+  const n = Number(v)
+  return Number.isNaN(n) ? undefined : n
 }
 
 function terminationPlaceholder(contractType: ContractType | undefined): string {
@@ -59,10 +68,13 @@ const terminationField = z
     { message: "Valor deve ser >= 0" }
   )
 
+// Salário base é OPCIONAL: quando vazio, o backend usa o salário do cargo. A
+// conversão vazio→undefined / texto→número é feita via `setValueAs` no input, então
+// aqui basta um número opcional (mantém input e output do schema iguais).
 const baseFields = {
   name: z.string().min(1, "Nome é obrigatório"),
-  role: z.string().min(1, "Cargo é obrigatório"),
-  base_salary: z.number().positive("Salário deve ser > 0"),
+  position_id: z.string().min(1, "Cargo é obrigatório"),
+  base_salary: z.number().min(0, "Salário deve ser >= 0").optional(),
   contract_type: z.enum(["clt", "pj", "temporario"], {
     error: "Tipo de contrato é obrigatório",
   }),
@@ -99,6 +111,7 @@ export function FuncionarioForm({
   const [loading, setLoading] = useState(false)
   const [photoFile, setPhotoFile] = useState<File | null>(null)
   const [photoError, setPhotoError] = useState<string | null>(null)
+  const [cargos, setCargos] = useState<JobPosition[]>([])
 
   // Controlled display value for CPF (shows raw digits while typing, masked on blur)
   const [cpfDisplay, setCpfDisplay] = useState("")
@@ -113,6 +126,17 @@ export function FuncionarioForm({
 
   const contractTypeCreate = createForm.watch("contract_type")
   const contractTypeEdit = editForm.watch("contract_type")
+  const positionCreate = createForm.watch("position_id")
+  const positionEdit = editForm.watch("position_id")
+
+  // Carrega os cargos disponíveis para o dropdown ao abrir o formulário. Busca uma
+  // página grande (a listagem já exclui cargos removidos via soft delete).
+  useEffect(() => {
+    if (!open) return
+    getCargos({ page: 1, page_size: CARGOS_PAGE_SIZE, order_by: "name", order_dir: "asc" })
+      .then((res) => setCargos(res.items))
+      .catch(() => {})
+  }, [open])
 
   useEffect(() => {
     if (!open) return
@@ -121,7 +145,7 @@ export function FuncionarioForm({
     if (employee) {
       editForm.reset({
         name: employee.name,
-        role: employee.role,
+        position_id: employee.position_id,
         base_salary: employee.base_salary,
         contract_type: employee.contract_type,
         admission_date: employee.admission_date,
@@ -135,14 +159,28 @@ export function FuncionarioForm({
       createForm.reset({
         name: "",
         cpf: "",
-        role: "",
-        base_salary: 0,
+        position_id: "",
+        base_salary: undefined,
         contract_type: undefined,
         admission_date: "",
         termination_cost_override: "",
       })
     }
   }, [open, employee, createForm, editForm])
+
+  // Ao escolher um cargo, prefilla o salário base com o sugerido pelo cargo. O
+  // campo permanece editável — o usuário pode sobrescrever.
+  function handleSelectCargoCreate(positionId: string) {
+    createForm.setValue("position_id", positionId, { shouldValidate: true })
+    const cargo = cargos.find((c) => c.id === positionId)
+    if (cargo) createForm.setValue("base_salary", cargo.base_salary)
+  }
+
+  function handleSelectCargoEdit(positionId: string) {
+    editForm.setValue("position_id", positionId, { shouldValidate: true })
+    const cargo = cargos.find((c) => c.id === positionId)
+    if (cargo) editForm.setValue("base_salary", cargo.base_salary)
+  }
 
   // ── CPF handlers ────────────────────────────────────────────────────────────
 
@@ -186,8 +224,12 @@ export function FuncionarioForm({
       const formData = new FormData()
       formData.append("name", data.name)
       formData.append("cpf", data.cpf)
-      formData.append("role", data.role)
-      formData.append("base_salary", String(data.base_salary))
+      formData.append("position_id", data.position_id)
+      // base_salary é opcional: só anexamos quando informado (senão o backend usa
+      // o salário do cargo).
+      if (data.base_salary !== undefined) {
+        formData.append("base_salary", String(data.base_salary))
+      }
       formData.append("contract_type", data.contract_type)
       formData.append("admission_date", data.admission_date)
       const terminationCost = parseCurrency(data.termination_cost_override ?? "")
@@ -215,7 +257,7 @@ export function FuncionarioForm({
     try {
       await updateFuncionario(employee.id, {
         name: data.name,
-        role: data.role,
+        position_id: data.position_id,
         base_salary: data.base_salary,
         contract_type: data.contract_type,
         admission_date: data.admission_date,
@@ -256,27 +298,39 @@ export function FuncionarioForm({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label htmlFor="edit-role">Cargo *</Label>
-                <Input id="edit-role" {...editForm.register("role")} />
-                {editForm.formState.errors.role && (
+                <Label>Cargo *</Label>
+                <Select value={positionEdit ?? ""} onValueChange={handleSelectCargoEdit}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o cargo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cargos.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {editForm.formState.errors.position_id && (
                   <p className="text-xs text-red-500">
-                    {editForm.formState.errors.role.message}
+                    {editForm.formState.errors.position_id.message}
                   </p>
                 )}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="edit-base_salary">Salário base *</Label>
+                <Label htmlFor="edit-base_salary">Salário base</Label>
                 <Input
                   id="edit-base_salary"
                   type="number"
                   step="0.01"
-                  {...editForm.register("base_salary", { valueAsNumber: true })}
+                  {...editForm.register("base_salary", { setValueAs: salaryFromInput })}
                 />
                 {editForm.formState.errors.base_salary && (
                   <p className="text-xs text-red-500">
                     {editForm.formState.errors.base_salary.message}
                   </p>
                 )}
+                <p className="text-xs text-slate-400">Sugerido pelo cargo; pode ajustar</p>
               </div>
             </div>
 
@@ -382,27 +436,42 @@ export function FuncionarioForm({
 
             <div className="grid grid-cols-2 gap-4">
               <div className="space-y-1">
-                <Label htmlFor="role">Cargo *</Label>
-                <Input id="role" {...createForm.register("role")} />
-                {createForm.formState.errors.role && (
+                <Label>Cargo *</Label>
+                <Select value={positionCreate ?? ""} onValueChange={handleSelectCargoCreate}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione o cargo" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {cargos.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+                {createForm.formState.errors.position_id && (
                   <p className="text-xs text-red-500">
-                    {createForm.formState.errors.role.message}
+                    {createForm.formState.errors.position_id.message}
                   </p>
                 )}
               </div>
               <div className="space-y-1">
-                <Label htmlFor="base_salary">Salário base *</Label>
+                <Label htmlFor="base_salary">Salário base</Label>
                 <Input
                   id="base_salary"
                   type="number"
                   step="0.01"
-                  {...createForm.register("base_salary", { valueAsNumber: true })}
+                  placeholder="Sugerido pelo cargo"
+                  {...createForm.register("base_salary", { setValueAs: salaryFromInput })}
                 />
                 {createForm.formState.errors.base_salary && (
                   <p className="text-xs text-red-500">
                     {createForm.formState.errors.base_salary.message}
                   </p>
                 )}
+                <p className="text-xs text-slate-400">
+                  Preenchido pelo cargo; pode sobrescrever
+                </p>
               </div>
             </div>
 

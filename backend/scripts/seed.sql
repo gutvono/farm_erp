@@ -54,17 +54,33 @@ INSERT INTO suppliers (id, name, document, email, phone, address, notes) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 4. EMPLOYEES (8: 3 CLT + 3 PJ + 2 Temp)
+-- 4. JOB POSITIONS (cargos) — entidade referenciada por employees.position_id
+--    base_salary = sugestão de salário do cargo (prefilla o do funcionário).
+--    Um cargo por funcionário do seed; "Colhedor" e "Colhedora" são distintos.
 -- -----------------------------------------------------------------------------
-INSERT INTO employees (id, name, document, email, phone, role, contract_type, base_salary, hire_date, is_active) VALUES
-('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', 'Gerente Agrícola',         'clt',         6000.00, '2020-03-01', TRUE),
-('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', 'Supervisora de Produção',  'clt',         3500.00, '2021-06-15', TRUE),
-('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', 'Operador de Máquinas',     'clt',         2200.00, '2022-09-10', TRUE),
-('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', 'Consultora de Qualidade',  'pj',          5500.00, '2023-02-01', TRUE),
-('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', 'Mecânico Industrial',      'pj',          4000.00, '2023-08-15', TRUE),
-('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', 'Contabilidade',            'pj',          4500.00, '2022-01-10', TRUE),
-('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', 'Colhedor',                 'temporario',  1800.00, '2026-02-01', TRUE),
-('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', 'Colhedora',                'temporario',  1800.00, '2026-02-01', TRUE)
+INSERT INTO job_positions (id, name, description, base_salary, is_active) VALUES
+('99999999-9999-9999-9999-999999990001', 'Gerente Agrícola',         'Gestão das operações agrícolas da fazenda',          6000.00, TRUE),
+('99999999-9999-9999-9999-999999990002', 'Supervisora de Produção',  'Supervisão das equipes de produção',                 3500.00, TRUE),
+('99999999-9999-9999-9999-999999990003', 'Operador de Máquinas',     'Operação de máquinas e implementos agrícolas',       2200.00, TRUE),
+('99999999-9999-9999-9999-999999990004', 'Consultora de Qualidade',  'Análise e controle de qualidade do café',            5500.00, TRUE),
+('99999999-9999-9999-9999-999999990005', 'Mecânico Industrial',      'Manutenção de máquinas e equipamentos',              4000.00, TRUE),
+('99999999-9999-9999-9999-999999990006', 'Contabilidade',            'Rotinas contábeis e fiscais',                        4500.00, TRUE),
+('99999999-9999-9999-9999-999999990007', 'Colhedor',                 'Colheita de café (safra)',                           1800.00, TRUE),
+('99999999-9999-9999-9999-999999990008', 'Colhedora',                'Colheita de café (safra)',                           1800.00, TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 4b. EMPLOYEES (8: 3 CLT + 3 PJ + 2 Temp) — cargo via position_id (role legado: NULL)
+-- -----------------------------------------------------------------------------
+INSERT INTO employees (id, name, document, email, phone, position_id, contract_type, base_salary, hire_date, is_active) VALUES
+('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', '99999999-9999-9999-9999-999999990001', 'clt',         6000.00, '2020-03-01', TRUE),
+('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', '99999999-9999-9999-9999-999999990002', 'clt',         3500.00, '2021-06-15', TRUE),
+('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', '99999999-9999-9999-9999-999999990003', 'clt',         2200.00, '2022-09-10', TRUE),
+('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', '99999999-9999-9999-9999-999999990004', 'pj',          5500.00, '2023-02-01', TRUE),
+('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', '99999999-9999-9999-9999-999999990005', 'pj',          4000.00, '2023-08-15', TRUE),
+('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', '99999999-9999-9999-9999-999999990006', 'pj',          4500.00, '2022-01-10', TRUE),
+('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', '99999999-9999-9999-9999-999999990007', 'temporario',  1800.00, '2026-02-01', TRUE),
+('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', '99999999-9999-9999-9999-999999990008', 'temporario',  1800.00, '2026-02-01', TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

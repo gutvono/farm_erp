@@ -86,7 +86,7 @@ export function FuncionarioCard({ employee, onEdit, onDemitted }: FuncionarioCar
               <div className="flex items-start justify-between gap-2">
                 <div className="min-w-0">
                   <p className="font-semibold text-slate-800 truncate">{employee.name}</p>
-                  <p className="text-sm text-slate-500 truncate">{employee.role}</p>
+                  <p className="text-sm text-slate-500 truncate">{employee.position_name}</p>
                 </div>
                 {!employee.is_active && (
                   <Badge className="bg-slate-200 text-slate-600 hover:bg-slate-200 flex-shrink-0">
