@@ -17,6 +17,7 @@ from app.modules.estoque.schemas import (
     StockMovementOut,
 )
 from app.shared.enums import MovementType, StockCategory
+from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -88,26 +89,22 @@ def delete_item(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/movimentacoes", response_model=SuccessResponse)
+@router.get("/movimentacoes", response_model=Page[StockMovementOut])
 def list_movements(
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
-    order_by: str = "created_at",
-    order_dir: str = "desc",
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    movements = estoque_service.list_movements(
+) -> Page[StockMovementOut]:
+    return estoque_service.list_movements_paginated(
         db,
+        params=params,
         stock_item_id=stock_item_id,
         movement_type=movement_type,
         source_module=source_module,
-        order_by=order_by,
-        order_dir=order_dir,
     )
-    data = [StockMovementOut.from_model(m).model_dump(mode="json") for m in movements]
-    return success("Movimentações listadas com sucesso", data)
 
 
 @router.post("/movimentacoes", response_model=SuccessResponse, status_code=201)

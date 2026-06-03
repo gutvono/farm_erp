@@ -43,6 +43,11 @@ class Supplier(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 class PurchaseOrder(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "purchase_orders"
+    __table_args__ = (
+        # Ordenação default da lista de Compras (ordered_at desc). Ver migration
+        # 0011_add_sort_indexes.
+        Index("idx_purchase_orders_ordered_at", "ordered_at"),
+    )
 
     supplier_id = Column(
         UUID(as_uuid=True),

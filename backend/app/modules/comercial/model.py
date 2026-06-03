@@ -1,4 +1,4 @@
-from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -27,6 +27,11 @@ class Client(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 class Sale(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "sales"
+    __table_args__ = (
+        # Ordenação default da lista de Vendas (sold_at desc). Ver migration
+        # 0011_add_sort_indexes.
+        Index("idx_sales_sold_at", "sold_at"),
+    )
 
     client_id = Column(
         UUID(as_uuid=True),
