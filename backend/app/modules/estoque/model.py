@@ -1,4 +1,4 @@
-from sqlalchemy import Column, DateTime, ForeignKey, Numeric, String, Text
+from sqlalchemy import Column, DateTime, ForeignKey, Index, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -47,6 +47,11 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
 class StockMovement(UUIDMixin, TimestampMixin, Base):
     __tablename__ = "stock_movements"
+    __table_args__ = (
+        # Ordenação default da aba Movimentações (occurred_at desc). Ver migration
+        # 0011_add_sort_indexes.
+        Index("idx_stock_movements_occurred_at", "occurred_at"),
+    )
 
     stock_item_id = Column(
         UUID(as_uuid=True),

@@ -503,6 +503,30 @@ partir delas.
 - `stock_items.quantity_on_hand` deve ser mantido pela service layer ao
   registrar cada `stock_movement`.
 
+### Índices de ordenação (Demanda 0 — paginação)
+
+A infra de paginação (`docs/refac/0-demanda-infra-paginacao.md`) ordena as listas
+por colunas-chave. Para evitar full scan no `ORDER BY` quando o volume crescer,
+a migration **`0011_add_sort_indexes`** adicionou índices btree às colunas que
+servem de **ordenação default** das listagens e que ainda não tinham índice:
+
+| Índice | Tabela.coluna | Ordenação default da lista |
+|--------|---------------|----------------------------|
+| `idx_stock_movements_occurred_at` | `stock_movements.occurred_at` | Estoque → Movimentações (desc) |
+| `idx_purchase_orders_ordered_at` | `purchase_orders.ordered_at` | Compras (desc) |
+| `idx_sales_sold_at` | `sales.sold_at` | Vendas (desc) |
+| `idx_invoices_issue_date` | `invoices.issue_date` | Faturamento (desc) |
+
+Índices btree comuns atendem tanto `ASC` quanto `DESC` (o Postgres faz backward
+scan), por isso não foram criados índices direcionais. Os índices também são
+declarados nos models (`__table_args__`) com o mesmo nome, mantendo
+`alembic check` limpo.
+
+**Colunas candidatas que já possuíam índice** (nenhuma ação necessária):
+`financial_movements.occurred_at`, `accounts_payable.due_date`,
+`accounts_receivable.due_date`, e as colunas `name` de `clients`, `suppliers`,
+`stock_items` e `employees` (todas via `index=True` no model).
+
 ---
 
 ## Como rodar

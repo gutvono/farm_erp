@@ -11,6 +11,20 @@ export interface PaginatedResponse<T> {
   per_page: number
 }
 
+/**
+ * Envelope genérico de resposta paginada do backend (Demanda 0 — infra de
+ * paginação). Espelha exatamente o `Page[T]` retornado pela API:
+ * `{ items, total, page, page_size, pages }`. Reutilizado por todos os
+ * endpoints paginados via `fetchPaginated` (ver `lib/pagination.ts`).
+ */
+export interface Paginated<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 export interface Notification {
   id: string
   type: string

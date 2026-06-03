@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, ForeignKey, Integer, Numeric, String, Text
+from sqlalchemy import Column, Date, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -10,6 +10,11 @@ from app.shared.enums import InvoiceStatus, sa_enum_values
 
 class Invoice(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     __tablename__ = "invoices"
+    __table_args__ = (
+        # Ordenação default da lista de Faturamento (issue_date desc). Ver migration
+        # 0011_add_sort_indexes.
+        Index("idx_invoices_issue_date", "issue_date"),
+    )
 
     number = Column(String(32), unique=True, nullable=False, index=True)
     client_id = Column(

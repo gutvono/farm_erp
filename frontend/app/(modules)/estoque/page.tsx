@@ -25,11 +25,12 @@ import { StockItemRow } from "@/components/modules/estoque/StockItemRow"
 import { StockItemForm } from "@/components/modules/estoque/StockItemForm"
 import { MovimentacaoForm } from "@/components/modules/estoque/MovimentacaoForm"
 import { MovimentacoesTable } from "@/components/modules/estoque/MovimentacoesTable"
+import { MovimentacoesHistory } from "@/components/modules/estoque/MovimentacoesHistory"
+import { useMovimentacoes } from "@/components/modules/estoque/useMovimentacoes"
 import { InventarioModal } from "@/components/modules/estoque/InventarioModal"
 import { ConferenciaRecebimento } from "@/components/modules/estoque/ConferenciaRecebimento"
 import {
   getItens,
-  getMovimentacoes,
   getInventario,
 } from "@/services/estoque"
 import { getRecebimentos, iniciarConferencia } from "@/services/compras"
@@ -38,7 +39,6 @@ import {
   PurchaseOrderWithReceipts,
   StockCategory,
   StockItem,
-  StockMovement,
 } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
@@ -67,8 +67,7 @@ export default function EstoquePage() {
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [belowMinFilter, setBelowMinFilter] = useState(false)
 
-  const [movements, setMovements] = useState<StockMovement[]>([])
-  const [movementsLoading, setMovementsLoading] = useState(false)
+  const movements = useMovimentacoes()
 
   const [inventory, setInventory] = useState<Inventory | null>(null)
   const [inventoryLoading, setInventoryLoading] = useState(false)
@@ -81,8 +80,6 @@ export default function EstoquePage() {
 
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null)
-  const [historyMovements, setHistoryMovements] = useState<StockMovement[]>([])
-  const [historyLoading, setHistoryLoading] = useState(false)
 
   // Recebimentos
   const [recebimentos, setRecebimentos] = useState<PurchaseOrderWithReceipts[]>([])
@@ -105,18 +102,6 @@ export default function EstoquePage() {
     }
   }, [categoryFilter, belowMinFilter])
 
-  const loadMovements = useCallback(async () => {
-    setMovementsLoading(true)
-    try {
-      const data = await getMovimentacoes({ order_by: "occurred_at", order_dir: "desc" })
-      setMovements(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar movimentações")
-    } finally {
-      setMovementsLoading(false)
-    }
-  }, [])
-
   const loadRecebimentos = useCallback(async () => {
     setRecebimentosLoading(true)
     try {
@@ -130,7 +115,6 @@ export default function EstoquePage() {
   }, [])
 
   useEffect(() => { loadItems() }, [loadItems])
-  useEffect(() => { loadMovements() }, [loadMovements])
   useEffect(() => { loadRecebimentos() }, [loadRecebimentos])
 
   async function handleOpenInventory() {
@@ -146,22 +130,9 @@ export default function EstoquePage() {
     }
   }
 
-  async function handleOpenHistory(item: StockItem) {
+  function handleOpenHistory(item: StockItem) {
     setHistoryItem(item)
     setHistoryOpen(true)
-    setHistoryLoading(true)
-    try {
-      const data = await getMovimentacoes({
-        stock_item_id: item.id,
-        order_by: "occurred_at",
-        order_dir: "desc",
-      })
-      setHistoryMovements(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar histórico")
-    } finally {
-      setHistoryLoading(false)
-    }
   }
 
   function handleEditItem(item: StockItem) {
@@ -190,7 +161,7 @@ export default function EstoquePage() {
 
   async function handleConferenciaFinalizada() {
     setExpandedConferencia(null)
-    await Promise.all([loadRecebimentos(), loadItems(), loadMovements()])
+    await Promise.all([loadRecebimentos(), loadItems(), movements.reload()])
   }
 
   const criticalCount = items.filter((i) => i.is_below_minimum).length
@@ -296,8 +267,14 @@ export default function EstoquePage() {
             </div>
 
             <MovimentacoesTable
-              movements={movements}
-              loading={movementsLoading}
+              data={movements.data}
+              loading={movements.loading}
+              page={movements.page}
+              sort={movements.sort}
+              onPageChange={movements.setPage}
+              onSortChange={movements.toggleSort}
+              filters={movements.filters}
+              onFiltersChange={movements.setFilters}
               items={items.map((i) => ({ id: i.id, name: i.name }))}
             />
           </TabsContent>
@@ -432,7 +409,7 @@ export default function EstoquePage() {
         item={editingItem}
         onSuccess={() => {
           loadItems()
-          loadMovements()
+          movements.reload()
         }}
       />
 
@@ -442,7 +419,7 @@ export default function EstoquePage() {
         items={items}
         onSuccess={() => {
           loadItems()
-          loadMovements()
+          movements.reload()
         }}
       />
 
@@ -462,11 +439,9 @@ export default function EstoquePage() {
             </SheetTitle>
           </SheetHeader>
           <div className="mt-4">
-            <MovimentacoesTable
-              movements={historyMovements}
-              loading={historyLoading}
-              hideItemFilter
-            />
+            {historyItem && (
+              <MovimentacoesHistory key={historyItem.id} stockItemId={historyItem.id} />
+            )}
           </div>
         </SheetContent>
       </Sheet>

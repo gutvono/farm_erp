@@ -19,6 +19,7 @@ from app.modules.estoque.schemas import (
 )
 from app.modules.financeiro import service as fin_service
 from app.shared.enums import FinancialCategory, MovementType
+from app.shared.pagination import Page, PageParams
 
 
 # ---------------------------------------------------------------------------
@@ -163,23 +164,23 @@ def create_movement(db: Session, data: StockMovementCreate) -> StockMovement:
     return movement
 
 
-def list_movements(
+def list_movements_paginated(
     db: Session,
     *,
+    params: PageParams,
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
-    order_by: str = "created_at",
-    order_dir: str = "desc",
-) -> list[StockMovement]:
-    return estoque_repo.list_movements(
+) -> Page[StockMovementOut]:
+    movements, total = estoque_repo.list_movements_paginated(
         db,
+        params=params,
         stock_item_id=stock_item_id,
         movement_type=movement_type,
         source_module=source_module,
-        order_by=order_by,
-        order_dir=order_dir,
     )
+    items = [StockMovementOut.from_model(m) for m in movements]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_movement(db: Session, movement_id: UUID) -> StockMovement:

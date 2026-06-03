@@ -1,8 +1,10 @@
 import { apiFetch } from "@/lib/api"
+import { fetchPaginated } from "@/lib/pagination"
 import {
   ApiResponse,
   Inventory,
   InventoryItemOut,
+  Paginated,
   StockCategory,
   StockItem,
   StockMovement,
@@ -169,26 +171,29 @@ export async function deleteItem(id: string): Promise<void> {
   await apiFetch(`/api/estoque/itens/${id}`, { method: "DELETE" })
 }
 
-export async function getMovimentacoes(params?: {
+/**
+ * Lista paginada de movimentações de estoque (`GET /api/estoque/movimentacoes`).
+ * O endpoint passou a responder o envelope `Page[T]` na Demanda 0 — por isso a
+ * busca usa `fetchPaginated` (e não mais o `ApiResponse`). Os Decimals chegam
+ * como string e são convertidos para number por `parseMovement`.
+ *
+ * `order_by` aceito pelo backend: `occurred_at`, `quantity`, `total_value`,
+ * `unit_cost` (default `occurred_at desc`).
+ */
+export async function getMovimentacoesPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
   stock_item_id?: string
   movement_type?: StockMovementType
   source_module?: string
-  order_by?: string
-  order_dir?: "asc" | "desc"
-}): Promise<StockMovement[]> {
-  const response = await apiFetch<ApiResponse<RawStockMovement[]>>(
+}): Promise<Paginated<StockMovement>> {
+  return fetchPaginated<StockMovement, RawStockMovement>(
     "/api/estoque/movimentacoes",
-    {
-      params: {
-        stock_item_id: params?.stock_item_id,
-        movement_type: params?.movement_type,
-        source_module: params?.source_module,
-        order_by: params?.order_by,
-        order_dir: params?.order_dir,
-      },
-    }
+    params,
+    parseMovement
   )
-  return response.data.map(parseMovement)
 }
 
 export async function createMovimentacao(data: {

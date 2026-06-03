@@ -3,12 +3,12 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import asc, desc
 from sqlalchemy.orm import Session
 
 from app.modules.estoque.model import StockItem, StockMovement
 from app.modules.estoque.schemas import StockItemCreate, StockItemUpdate, StockMovementCreate
 from app.shared.enums import MovementType
+from app.shared.pagination import PageParams, paginate_query
 
 
 # ---------------------------------------------------------------------------
@@ -148,17 +148,29 @@ def create_movement(db: Session, data: StockMovementCreate) -> StockMovement:
     return movement
 
 
-def list_movements(
+# Columns allowed for ordering the movements list (allowlist guards against
+# arbitrary/invalid order_by values reaching the database).
+MOVEMENT_ORDER_COLUMNS = {
+    "occurred_at": StockMovement.occurred_at,
+    "quantity": StockMovement.quantity,
+    "total_value": StockMovement.total_value,
+    "unit_cost": StockMovement.unit_cost,
+}
+
+
+def list_movements_paginated(
     db: Session,
     *,
+    params: PageParams,
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
-    order_by: str = "created_at",
-    order_dir: str = "desc",
-    skip: int = 0,
-    limit: int = 100,
-) -> list[StockMovement]:
+) -> tuple[list[StockMovement], int]:
+    """List stock movements applying filters + generic pagination/ordering.
+
+    Returns ``(movements, total)`` where ``total`` is the full filtered count.
+    Default order is ``occurred_at desc``.
+    """
     query = db.query(StockMovement)
     if stock_item_id:
         query = query.filter(StockMovement.stock_item_id == stock_item_id)
@@ -167,25 +179,17 @@ def list_movements(
     if source_module:
         query = query.filter(StockMovement.source_module == source_module)
 
-    # Dynamic ordering
-    sortable_columns = {
-        "created_at": StockMovement.created_at,
-        "occurred_at": StockMovement.occurred_at,
-        "quantity": StockMovement.quantity,
-        "unit_cost": StockMovement.unit_cost,
-        "total_value": StockMovement.total_value,
-        "movement_type": StockMovement.movement_type,
-        "source_module": StockMovement.source_module,
-    }
-    col = sortable_columns.get(order_by, StockMovement.created_at)
-    order_fn = desc if order_dir.lower() == "desc" else asc
-    query = query.order_by(order_fn(col))
-
-    movements = query.offset(skip).limit(limit).all()
-    # Eager load stock_item
+    movements, total = paginate_query(
+        query,
+        params,
+        allowed_order_by=MOVEMENT_ORDER_COLUMNS,
+        default_order=StockMovement.occurred_at.desc(),
+        tiebreaker=StockMovement.id,
+    )
+    # Eager load stock_item for serialization
     for m in movements:
         _ = m.stock_item
-    return movements
+    return movements, total
 
 
 def get_movement(db: Session, movement_id: UUID) -> Optional[StockMovement]:
