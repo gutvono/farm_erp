@@ -268,11 +268,15 @@ def finalize_receipt(
         )
 
     # Service orders bypass item-by-item conferência and generate the conta a
-    # pagar straight from the order total_amount.
+    # pagar straight from the order total_amount. Fallback: emit the service NF
+    # here too (the primary path is /concluir-servico).
     if (order.order_type or "produto") == "servico":
+        from app.modules.faturamento import service as fat_service
+
         updated = compras_repo._set_status(
             db, order_id, PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
         )
+        fat_service.criar_nota_servico(db, updated.id)
         _gerar_contas_pagar_da_ordem(db, updated, amount=Decimal(updated.total_amount or 0))
         fin_service.registrar_movimento(
             db,
@@ -315,6 +319,10 @@ def finalize_receipt(
 
     updated = compras_repo.finalize_receipt(db, order_id, items)
 
+    # ERP: a entrada de estoque e as NFs (recebimento/devolução/transporte) são
+    # geradas AQUI, na conferência — não mais no pagamento. Idempotente.
+    _gerar_estoque_e_nf_da_conferencia(db, updated)
+
     receipt_total = Decimal(updated.receipt_total_amount or 0)
     shipping_cost = Decimal(str(updated.shipping_cost or 0))
     payable_amount = receipt_total + shipping_cost
@@ -326,11 +334,64 @@ def finalize_receipt(
         movement_type=MovementType.SAIDA,
         category=FinancialCategory.COMPRA,
         amount=Decimal("0"),
-        description="Conferência finalizada — aguardando pagamento",
+        description="Conferência finalizada — mercadoria recebida, aguardando pagamento",
         source_module="compras",
         reference_id=order.id,
     )
     return compras_repo.get_order_with_receipts(db, order_id)
+
+
+def _gerar_estoque_e_nf_da_conferencia(db: Session, order: PurchaseOrder) -> None:
+    """Register stock entry + emit NF (recebimento/devolução/transporte) at conference.
+
+    Moved here from ``complete_order_after_payment`` (Demanda 1.1): in an ERP the
+    goods receipt and the fiscal documents happen when the merchandise is
+    physically checked, not at payment time. Idempotent: skips emission if a
+    recebimento NF already exists for the order (guards against re-entry).
+    """
+    from app.modules.faturamento import service as fat_service
+
+    if fat_service.existe_nota_recebimento(db, order.id):
+        return
+
+    # Materialize before the loop: registrar_entrada commits and would expire
+    # the relationship collections mid-iteration.
+    items_by_id = {item.id: item for item in order.items}
+    receipts = list(order.receipts)
+    has_accepted = False
+    has_rejected = False
+    for receipt in receipts:
+        order_item = items_by_id.get(receipt.purchase_order_item_id)
+        if not order_item:
+            continue
+        qty_accepted = Decimal(str(receipt.quantity_accepted))
+        if qty_accepted > 0:
+            has_accepted = True
+            estoque_service.registrar_entrada(
+                db,
+                stock_item_id=order_item.stock_item_id,
+                quantity=qty_accepted,
+                unit_cost=Decimal(str(order_item.unit_price)),
+                description=f"Recebimento ordem #{order.id}",
+                source_module="compras",
+                reference_id=order.id,
+            )
+        if Decimal(str(receipt.quantity_rejected)) > 0:
+            has_rejected = True
+
+    if has_accepted:
+        fat_service.criar_nota_recebimento(db, order.id)
+    if has_rejected:
+        fat_service.criar_nota_devolucao(db, order.id)
+
+    shipping_cost = Decimal(str(order.shipping_cost or 0))
+    if shipping_cost > 0:
+        fat_service.criar_nota_transporte(
+            db,
+            shipping_cost=shipping_cost,
+            order_id=order.id,
+            client_id=None,
+        )
 
 
 def _gerar_contas_pagar_da_ordem(
@@ -408,9 +469,13 @@ def complete_service_order(db: Session, order_id: UUID) -> PurchaseOrder:
             detail="Apenas ordens de serviço aprovadas podem ser concluídas",
         )
 
+    from app.modules.faturamento import service as fat_service
+
     updated = compras_repo._set_status(
         db, order_id, PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
     )
+    # ERP: documento fiscal de serviço é emitido no aceite, não no pagamento.
+    fat_service.criar_nota_servico(db, updated.id)
     _gerar_contas_pagar_da_ordem(
         db, updated, amount=Decimal(updated.total_amount or 0)
     )
@@ -439,20 +504,19 @@ def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
 
 def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
     """
-    Chamada pelo Financeiro quando a conta a pagar vinculada à ordem é paga.
-    Para ordens de produto: registra entradas no estoque (apenas qty_accepted
-    > 0) e gera NF de recebimento/devolução. Para ordens de serviço: apenas
-    move a ordem para CONCLUIDA. Em ambos os casos, transiciona o status.
-    """
-    from app.modules.faturamento import service as fat_service
+    Chamada pelo Financeiro ao pagar uma conta a pagar vinculada à ordem.
 
+    A partir da Demanda 1.1, estoque + NF são gerados na CONFERÊNCIA (produto) /
+    no ACEITE (serviço), não mais no pagamento. O pagamento APENAS liquida a
+    conta a pagar (o movimento financeiro de pagamento já é registrado em
+    ``pay_payable``). Esta função só conclui a ordem quando NÃO resta nenhuma
+    conta a pagar EM ABERTO da ordem (suporta pagamento parcelado).
+    """
     order = compras_repo.get_order_with_receipts(db, order_id)
     if not order:
         raise HTTPException(status_code=404, detail="Ordem de compra não encontrada")
 
     if order.status == PurchaseOrderStatus.CONCLUIDA:
-        # Parcelamento: estoque + NF já registrados no pagamento da 1ª parcela.
-        # Demais pagamentos não disparam novamente o fluxo de conclusão.
         return order
 
     if order.status != PurchaseOrderStatus.AGUARDANDO_PAGAMENTO:
@@ -461,48 +525,12 @@ def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
             detail="Ordem não está aguardando pagamento",
         )
 
-    if (order.order_type or "produto") == "servico":
+    # Conclui só quando todas as contas a pagar da ordem estiverem liquidadas.
+    open_payables = fin_service.contar_contas_pagar_em_aberto_por_ordem(db, order.id)
+    if open_payables == 0:
         return compras_repo.complete_order(db, order_id)
 
-    items_by_id = {item.id: item for item in order.items}
-    has_accepted = False
-    has_rejected = False
-
-    for receipt in order.receipts:
-        order_item = items_by_id.get(receipt.purchase_order_item_id)
-        if not order_item:
-            continue
-        qty_accepted = Decimal(str(receipt.quantity_accepted))
-        if qty_accepted > 0:
-            has_accepted = True
-            estoque_service.registrar_entrada(
-                db,
-                stock_item_id=order_item.stock_item_id,
-                quantity=qty_accepted,
-                unit_cost=Decimal(str(order_item.unit_price)),
-                description=f"Recebimento ordem #{order.id}",
-                source_module="compras",
-                reference_id=order.id,
-            )
-        if Decimal(str(receipt.quantity_rejected)) > 0:
-            has_rejected = True
-
-    if has_accepted:
-        fat_service.criar_nota_recebimento(db, order.id)
-    if has_rejected:
-        fat_service.criar_nota_devolucao(db, order.id)
-
-    # NF de transporte (somente se houver custo de frete)
-    shipping_cost = Decimal(str(order.shipping_cost or 0))
-    if shipping_cost > 0:
-        fat_service.criar_nota_transporte(
-            db,
-            shipping_cost=shipping_cost,
-            order_id=order.id,
-            client_id=None,
-        )
-
-    return compras_repo.complete_order(db, order_id)
+    return order
 
 
 def soft_delete_order(db: Session, order_id: UUID) -> PurchaseOrder:

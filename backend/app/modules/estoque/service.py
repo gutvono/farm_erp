@@ -211,6 +211,30 @@ def get_inventory(db: Session) -> InventoryOut:
 # ---------------------------------------------------------------------------
 
 
+def obter_ou_criar_item_avariado(db: Session, original: StockItem) -> StockItem:
+    """Get (or create) the damaged-stock counterpart of an item.
+
+    Used by Faturamento when cancelling a return NF (`devolucao`): rejected
+    goods re-enter stock as a damaged item. The damaged item is identified by a
+    standardized SKU ``"{sku_original}-AVARIADO"``; if it already exists it is
+    reused (idempotent — never duplicates), otherwise it is created with the
+    same unit/category and ``unit_cost=0``.
+    """
+    damaged_sku = f"{original.sku}-AVARIADO"
+    existing = estoque_repo.get_item_by_sku(db, damaged_sku)
+    if existing:
+        return existing
+    data = StockItemCreate(
+        sku=damaged_sku,
+        name=f"{original.name} (AVARIADO)",
+        category=original.category,
+        unit=original.unit,
+        minimum_stock=Decimal("0"),
+        unit_cost=Decimal("0"),
+    )
+    return create_item(db, data)
+
+
 def registrar_entrada(
     db: Session,
     stock_item_id: UUID,

@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Date, ForeignKey, Index, Integer, Numeric, String, Text
+from sqlalchemy import Column, Date, DateTime, ForeignKey, Index, Integer, Numeric, String, Text
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import relationship
@@ -14,6 +14,9 @@ class Invoice(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         # Ordenação default da lista de Faturamento (issue_date desc). Ver migration
         # 0011_add_sort_indexes.
         Index("idx_invoices_issue_date", "issue_date"),
+        # Filtro por tipo de NF no despacho do cancelamento. Ver migration
+        # 0012_invoice_cancel_fields.
+        Index("idx_invoices_invoice_type", "invoice_type"),
     )
 
     number = Column(String(32), unique=True, nullable=False, index=True)
@@ -52,6 +55,9 @@ class Invoice(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         nullable=True,
         index=True,
     )
+    # Auditoria do cancelamento (Demanda 1). Distinto de deleted_at (soft delete).
+    cancelled_at = Column(DateTime(timezone=True), nullable=True)
+    cancellation_reason = Column(Text, nullable=True)
 
     items = relationship(
         "InvoiceItem",

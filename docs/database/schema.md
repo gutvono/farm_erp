@@ -219,10 +219,18 @@ Faturas emitidas (automáticas ou avulsas). Fluxo `emitida → paga → cancelad
 | `sale_id` | FK `sales.id` NULL | Venda de origem |
 | `issue_date`, `due_date` | `DATE` | Datas |
 | `total_amount` | `NUMERIC(12,2)` | Total |
-| `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `devolucao`, etc. |
+| `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `transporte`, `devolucao`. Indexado (`idx_invoices_invoice_type`) para o despacho do cancelamento |
 | `installment_number` | `INTEGER` NULL | Número desta parcela (ex.: 2) |
 | `installment_total` | `INTEGER` NULL | Total de parcelas (ex.: 3) |
-| `parent_invoice_id` | FK `invoices.id` NULL | Fatura-pai em parcelamentos |
+| `parent_invoice_id` | FK `invoices.id` NULL | Fatura-pai em parcelamentos (indexado `ix_invoices_parent_invoice_id`, usado para achar a cadeia parcelada) |
+| `cancelled_at` | `TIMESTAMPTZ` NULL | Quando a NF foi cancelada (auditoria do estorno) |
+| `cancellation_reason` | `TEXT` NULL | Motivo/observação do cancelamento |
+
+> **Cancelamento (Demanda 1, migration `0012_invoice_cancel_fields`):** `cancelled_at`
+> e `cancellation_reason` auditam o cancelamento com estorno. São **distintos** de
+> `deleted_at` (soft delete) — o cancelamento mantém a NF visível com `status = cancelada`.
+> Nenhuma tabela nova foi necessária: os estornos reusam `financial_movements`,
+> `stock_movements` e `stock_items` (item AVARIADO).
 
 #### `invoice_items`
 Itens da fatura (CASCADE).

@@ -81,6 +81,7 @@ def list_invoices(
     *,
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
+    order_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Invoice]:
@@ -89,6 +90,10 @@ def list_invoices(
         query = query.filter(Invoice.status == status)
     if client_id:
         query = query.filter(Invoice.client_id == client_id)
+    if order_id:
+        # NFs de compra não têm FK para a ordem; o vínculo é o texto
+        # `order_id=<uuid>` em notes (mesmo padrão de existe_nota_recebimento).
+        query = query.filter(Invoice.notes.ilike(f"%order_id={order_id}%"))
     invoices = (
         query.order_by(Invoice.issue_date.desc())
         .offset(skip)
@@ -116,6 +121,24 @@ def update_invoice_status(db: Session, invoice_id: UUID, status: InvoiceStatus) 
     if not invoice:
         return None
     invoice.status = status
+    db.add(invoice)
+    db.commit()
+    db.refresh(invoice)
+    _ = invoice.items
+    return invoice
+
+
+def cancel_invoice(
+    db: Session, invoice_id: UUID, *, reason: Optional[str] = None
+) -> Optional[Invoice]:
+    """Mark an invoice as cancelled, stamping cancelled_at (and reason) atomically."""
+    invoice = get_invoice(db, invoice_id)
+    if not invoice:
+        return None
+    invoice.status = InvoiceStatus.CANCELADA
+    invoice.cancelled_at = datetime.now(timezone.utc)
+    if reason is not None:
+        invoice.cancellation_reason = reason
     db.add(invoice)
     db.commit()
     db.refresh(invoice)

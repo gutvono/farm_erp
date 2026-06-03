@@ -21,7 +21,7 @@ Padronizar todas as listagens do sistema em tabela paginada, sem perder funciona
 |--------|-------|-----------|
 | Comercial | Clientes, Vendas | provavelmente ainda em card |
 | Compras | Ordens de Compra, Cotações | Fornecedores já na Demanda 6 |
-| Faturamento | Faturas | parte na Demanda 1 |
+| Faturamento | Faturas | parte na Demanda 1; **filtros avançados pedidos pelo cliente** (ver nota abaixo) |
 | Financeiro | Pagar/Receber/Movimentações | feito na Demanda 4 — só conferir |
 | Estoque | Itens, Recebimentos | Movimentações já na Demanda 0/3 |
 | Folha | Funcionários, Holerites, Cargos | parte nas Demandas 2/4 |
@@ -34,6 +34,13 @@ Padronizar todas as listagens do sistema em tabela paginada, sem perder funciona
   status, PDF etc.
 - **Paginação server-side** em todas as listas (consumindo `Page[T]`). Ordenação por colunas-chave.
 - Manter a identidade visual shadcn/Tailwind já usada; responsivo.
+- **Faturamento — filtros avançados (pedido do cliente, 2026-06-03):** a tela de Faturas deve, além
+  da tabela paginada, oferecer **ordenação por colunas** (emissão, vencimento, valor, número),
+  **busca textual** e **filtro por intervalo de data** (emissão início/fim; vencimento opcional),
+  no mesmo padrão das tabelas de movimentações. No **front**, os date-range usam date pickers e o
+  estado de query mora num hook por módulo (ex.: `useFaturas.ts`), espelhando `useMovimentacoes.ts`;
+  a `DataTable` permanece de apresentação. O deep-link `?order_id` da Demanda 1.1 deve continuar
+  funcionando como filtro pré-aplicado.
 
 ## Critérios de aceite
 - [ ] Nenhuma listagem principal usando card simples sem paginação (salvo onde card é proposital, ex.: cards de KPI do dashboard).
@@ -68,7 +75,13 @@ Padronizar todas as listagens do sistema em tabela paginada, sem perder funciona
 > (usando `PageParams`/`paginate_query` da Demanda 0), com filtros e ordenação coerentes:
 > - Comercial: `GET clientes`, `GET vendas` (filtros: status, busca por nome; ordenar por data/total).
 > - Compras: `GET ordens` (status, fornecedor, busca; ordenar por data/total), `GET cotacoes`.
-> - Faturamento: `GET faturas` (status, tipo, busca; ordenar por emissão/total).
+> - Faturamento: `GET faturas` — **escopo ampliado (pedido do cliente)**: paginar via `Page[T]`;
+>   filtros `status`, `tipo` (invoice_type), **`order_id`** (já implementado na Demanda 1.1, manter),
+>   **intervalo de data de emissão (`issue_after`/`issue_before`)** e, se viável, de vencimento
+>   (`due_after`/`due_before`); busca textual (`search`) sobre número/cliente-fornecedor/notes;
+>   ordenação por **emissão, vencimento, valor e número** (allowlist de `order_by`). Espelhar o
+>   padrão das movimentações (Demanda 0/4): date-range como em `financeiro /movimentacoes`
+>   (`start_date`/`end_date`) e sort server-side como em `estoque /movimentacoes`.
 > - Estoque: `GET itens` (categoria, busca; ordenar por nome/quantidade), `GET recebimentos`.
 > - Folha: `GET funcionarios` (contrato, ativo, busca), `GET cargos`.
 > - PCP: `GET ordens`, `GET talhoes`, `GET atividades`.

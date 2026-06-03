@@ -181,6 +181,40 @@ def list_payables(
     return query.order_by(AccountPayable.due_date.asc()).all()
 
 
+def list_payables_by_order(
+    db: Session,
+    order_id: UUID,
+    *,
+    status: Optional[AccountPayableStatus] = None,
+) -> list[AccountPayable]:
+    """List the accounts payable linked to a purchase order (for completion/cancel)."""
+    query = db.query(AccountPayable).filter(
+        AccountPayable.deleted_at.is_(None),
+        AccountPayable.purchase_order_id == order_id,
+    )
+    if status:
+        query = query.filter(AccountPayable.status == status)
+    return query.all()
+
+
+def exists_order_reversal(db: Session, order_id: UUID) -> bool:
+    """True if a financial reversal (ENTRADA/AJUSTE) already exists for the order.
+
+    Used to keep the purchase-order financial reversal idempotent across the
+    cancellation of multiple NFs of the same order (recebimento/transporte/servico).
+    """
+    return (
+        db.query(FinancialMovement.id)
+        .filter(
+            FinancialMovement.reference_id == order_id,
+            FinancialMovement.movement_type == MovementType.ENTRADA,
+            FinancialMovement.category == FinancialCategory.AJUSTE,
+        )
+        .first()
+        is not None
+    )
+
+
 def save(db: Session, instance) -> None:
     db.add(instance)
     db.commit()
@@ -255,6 +289,29 @@ def list_receivables(
     if due_after:
         query = query.filter(AccountReceivable.due_date >= due_after)
     return query.order_by(AccountReceivable.due_date.asc()).all()
+
+
+def list_receivables_by_refs(
+    db: Session,
+    *,
+    sale_id: Optional[UUID] = None,
+    invoice_id: Optional[UUID] = None,
+) -> list[AccountReceivable]:
+    """List receivables linked to a sale and/or invoice (for cancellation)."""
+    from sqlalchemy import or_
+
+    conditions = []
+    if sale_id is not None:
+        conditions.append(AccountReceivable.sale_id == sale_id)
+    if invoice_id is not None:
+        conditions.append(AccountReceivable.invoice_id == invoice_id)
+    if not conditions:
+        return []
+    return (
+        db.query(AccountReceivable)
+        .filter(AccountReceivable.deleted_at.is_(None), or_(*conditions))
+        .all()
+    )
 
 
 def count_delinquent_receivables_by_client(db: Session, client_id: UUID) -> int:
