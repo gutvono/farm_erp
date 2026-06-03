@@ -1,7 +1,8 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp, Lock, Send, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ChevronDown, ChevronUp, FileText, Lock, Send, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -54,6 +55,7 @@ interface OrdemCardProps {
 }
 
 export function OrdemCard({ order, onChanged }: OrdemCardProps) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const [sendingApproval, setSendingApproval] = useState(false)
   const [approvalDialogOpen, setApprovalDialogOpen] = useState(false)
@@ -80,7 +82,7 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
     setConcludingService(true)
     try {
       await concluirServico(order.id)
-      toast.success("Serviço concluído — aguardando pagamento")
+      toast.success("Serviço concluído — NF de serviço emitida, aguardando pagamento.")
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao concluir serviço")
@@ -107,6 +109,14 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
   const showReceiptTotal =
     order.status === "aguardando_pagamento" ||
     order.status === "concluida"
+
+  // NFs já existem assim que a mercadoria/serviço foi recebido (Demanda 1.1).
+  const hasInvoices =
+    order.status === "aguardando_pagamento" || order.status === "concluida"
+
+  function verNotasRelacionadas() {
+    router.push(`/faturamento?order_id=${order.id}`)
+  }
 
   return (
     <>
@@ -154,6 +164,15 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                   Bloqueada para edição — para alterar, cancele e crie uma nova
                 </p>
               )}
+
+              {/* Mercadoria/serviço já recebido; NF emitida; aguardando pagamento */}
+              {order.status === "aguardando_pagamento" && (
+                <p className="text-xs text-slate-500 mt-1">
+                  {order.order_type === "servico"
+                    ? "Serviço concluído e NF de serviço emitida — aguardando pagamento."
+                    : "Mercadoria recebida e NF emitida — aguardando pagamento."}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -197,6 +216,17 @@ export function OrdemCard({ order, onChanged }: OrdemCardProps) {
                   disabled={concludingService}
                 >
                   Concluir Serviço
+                </Button>
+              )}
+
+              {hasInvoices && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={verNotasRelacionadas}
+                >
+                  <FileText className="h-3.5 w-3.5 mr-1" />
+                  Ver notas relacionadas
                 </Button>
               )}
 

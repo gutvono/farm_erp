@@ -297,14 +297,58 @@ def pay_payable(
         occurred_at=payable.paid_at,
     )
 
-    # Integração com Compras: ao pagar conta de uma ordem aguardando_pagamento,
-    # dispara o fluxo de conclusão (estoque + NF de recebimento/devolução).
+    # Integração com Compras (Demanda 1.1): o pagamento APENAS liquida a conta a
+    # pagar e registra o movimento de pagamento (acima). Estoque + NF passaram
+    # para a conferência (produto) / aceite (serviço). complete_order_after_payment
+    # agora só CONCLUI a ordem quando não resta nenhuma conta a pagar em aberto
+    # (no parcelado, só conclui ao pagar a última parcela).
     if payable.purchase_order_id is not None:
         from app.modules.compras import service as compras_service
 
         compras_service.complete_order_after_payment(db, payable.purchase_order_id)
 
     return payable
+
+
+def contar_contas_pagar_em_aberto_por_ordem(db: Session, order_id: UUID) -> int:
+    """Count the still-open (em_aberto) accounts payable of a purchase order."""
+    return len(
+        fin_repo.list_payables_by_order(
+            db, order_id, status=AccountPayableStatus.EM_ABERTO
+        )
+    )
+
+
+def total_pago_por_ordem(db: Session, order_id: UUID) -> Decimal:
+    """Sum of the amounts already paid (status paga) for a purchase order."""
+    paid = fin_repo.list_payables_by_order(
+        db, order_id, status=AccountPayableStatus.PAGA
+    )
+    return sum((Decimal(str(p.amount)) for p in paid), Decimal("0"))
+
+
+def cancelar_contas_pagar_em_aberto_por_ordem(
+    db: Session, order_id: UUID
+) -> list[AccountPayable]:
+    """Cancel every open (em_aberto) account payable of a purchase order.
+
+    Used when an NF of the order is cancelled before payment — the money never
+    left the account, so the open obligation is simply cancelled (no reversal).
+    """
+    open_payables = fin_repo.list_payables_by_order(
+        db, order_id, status=AccountPayableStatus.EM_ABERTO
+    )
+    cancelled: list[AccountPayable] = []
+    for payable in open_payables:
+        payable.status = AccountPayableStatus.CANCELADA
+        fin_repo.save(db, payable)
+        cancelled.append(payable)
+    return cancelled
+
+
+def existe_estorno_ordem(db: Session, order_id: UUID) -> bool:
+    """True if a financial reversal already exists for the purchase order (idempotency)."""
+    return fin_repo.exists_order_reversal(db, order_id)
 
 
 def cancel_payable(db: Session, payable_id: UUID) -> AccountPayable:
@@ -349,6 +393,45 @@ def create_receivable(db: Session, body: AccountReceivableCreate) -> AccountRece
 
 def list_receivables(db: Session, **filters) -> list[AccountReceivable]:
     return fin_repo.list_receivables(db, **filters)
+
+
+def cancelar_contas_receber(
+    db: Session,
+    *,
+    sale_id: Optional[UUID] = None,
+    invoice_id: Optional[UUID] = None,
+    estorno_descricao: str,
+    estorno_reference_id: Optional[UUID] = None,
+) -> list[AccountReceivable]:
+    """Cancel the receivables linked to a sale/invoice (NF cancellation).
+
+    For each receivable not yet cancelled, registers a reversal financial
+    movement (SAIDA/AJUSTE) for the amount **already received** and sets the
+    status to ``cancelada``. Called by Faturamento when cancelling a sale NF.
+    Returns the list of receivables that were cancelled.
+    """
+    receivables = fin_repo.list_receivables_by_refs(
+        db, sale_id=sale_id, invoice_id=invoice_id
+    )
+    cancelled: list[AccountReceivable] = []
+    for receivable in receivables:
+        if receivable.status == AccountReceivableStatus.CANCELADA:
+            continue
+        received = Decimal(str(receivable.amount_received or 0))
+        if received > 0:
+            registrar_movimento(
+                db,
+                movement_type=MovementType.SAIDA,
+                category=FinancialCategory.AJUSTE,
+                amount=received,
+                description=estorno_descricao,
+                source_module="financeiro",
+                reference_id=estorno_reference_id,
+            )
+        receivable.status = AccountReceivableStatus.CANCELADA
+        fin_repo.save(db, receivable)
+        cancelled.append(receivable)
+    return cancelled
 
 
 def get_receivable(db: Session, receivable_id: UUID) -> AccountReceivable:

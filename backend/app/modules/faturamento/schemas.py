@@ -56,6 +56,8 @@ class InvoiceOut(BaseModel):
     installment_number: Optional[int] = None
     installment_total: Optional[int] = None
     parent_invoice_id: Optional[UUID] = None
+    cancelled_at: Optional[datetime] = None
+    cancellation_reason: Optional[str] = None
     items: list[InvoiceItemOut]
     created_at: datetime
     updated_at: datetime
@@ -79,6 +81,8 @@ class InvoiceOut(BaseModel):
             installment_number=invoice.installment_number,
             installment_total=invoice.installment_total,
             parent_invoice_id=invoice.parent_invoice_id,
+            cancelled_at=invoice.cancelled_at,
+            cancellation_reason=invoice.cancellation_reason,
             items=[InvoiceItemOut.model_validate(i) for i in invoice.items],
             created_at=invoice.created_at,
             updated_at=invoice.updated_at,
@@ -87,3 +91,7 @@ class InvoiceOut(BaseModel):
 
 class InvoiceStatusUpdate(BaseModel):
     status: InvoiceStatus
+
+
+class InvoiceCancel(BaseModel):
+    reason: Optional[str] = None

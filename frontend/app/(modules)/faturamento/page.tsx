@@ -1,7 +1,8 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
-import { Plus } from "lucide-react"
+import { Suspense, useCallback, useEffect, useState } from "react"
+import { useRouter, useSearchParams } from "next/navigation"
+import { Plus, X } from "lucide-react"
 import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
 import { Button } from "@/components/ui/button"
@@ -26,7 +27,11 @@ const STATUS_OPTIONS: { value: string; label: string }[] = [
   { value: "cancelada", label: "Cancelada" },
 ]
 
-export default function FaturamentoPage() {
+function FaturamentoContent() {
+  const router = useRouter()
+  const searchParams = useSearchParams()
+  const orderId = searchParams.get("order_id")
+
   const [faturas, setFaturas] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(false)
   const [statusFilter, setStatusFilter] = useState("all")
@@ -36,16 +41,17 @@ export default function FaturamentoPage() {
   const loadFaturas = useCallback(async () => {
     setLoading(true)
     try {
-      const data = await getFaturas(
-        statusFilter !== "all" ? { status: statusFilter as InvoiceStatus } : undefined
-      )
+      const data = await getFaturas({
+        status: statusFilter !== "all" ? (statusFilter as InvoiceStatus) : undefined,
+        order_id: orderId ?? undefined,
+      })
       setFaturas(data)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao carregar faturas")
     } finally {
       setLoading(false)
     }
-  }, [statusFilter])
+  }, [statusFilter, orderId])
 
   useEffect(() => {
     loadFaturas()
@@ -57,13 +63,37 @@ export default function FaturamentoPage() {
 
   const total = faturas.reduce((sum, f) => sum + f.total_amount, 0)
 
+  function clearOrderFilter() {
+    router.replace("/faturamento")
+  }
+
   return (
     <RootLayout title="Faturamento">
       <div className="space-y-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Faturamento</h2>
-          <p className="text-slate-500 text-sm">Faturas emitidas para clientes</p>
+          <p className="text-slate-500 text-sm">
+            {orderId ? "Notas fiscais" : "Faturas emitidas para clientes"}
+          </p>
         </div>
+
+        {orderId && (
+          <div className="flex items-center justify-between gap-3 flex-wrap rounded-md border border-blue-200 bg-blue-50 px-4 py-2">
+            <span className="text-sm text-blue-800">
+              Notas da compra{" "}
+              <span className="font-semibold">#{orderId.slice(0, 8)}</span>
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              className="border-blue-300 text-blue-700 hover:bg-blue-100"
+              onClick={clearOrderFilter}
+            >
+              <X className="h-4 w-4 mr-1" />
+              Limpar filtro
+            </Button>
+          </div>
+        )}
 
         <div className="flex items-center justify-between gap-3 flex-wrap">
           <div className="flex items-center gap-3">
@@ -114,5 +144,19 @@ export default function FaturamentoPage() {
         onSuccess={loadFaturas}
       />
     </RootLayout>
+  )
+}
+
+export default function FaturamentoPage() {
+  return (
+    <Suspense
+      fallback={
+        <RootLayout title="Faturamento">
+          <div className="py-12 text-center text-slate-400">Carregando faturas...</div>
+        </RootLayout>
+      }
+    >
+      <FaturamentoContent />
+    </Suspense>
   )
 }

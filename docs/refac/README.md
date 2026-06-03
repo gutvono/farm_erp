@@ -28,7 +28,7 @@ projeto: nunca criar sem ler o que já existe).
 | 3 | `3-demanda-estoque-categorias-configuracoes.md` | `feat/estoque-categorias-config` | 0 |
 | 4 | `4-demanda-financeiro-filtros-aprovacao-folha.md` | `feat/financeiro-aprovacao-folha` | 0, 2 |
 | 5 | `5-demanda-pcp-refac.md` | `feat/pcp-refac` | 2, 3, 4 |
-| 6 | `6-demanda-compras-fornecedor-cotacao.md` | `feat/compras-fornecedor-cotacao` | 0 |
+| 6 | `6-demanda-compras-fornecedor-cotacao.md` | `feat/compras-fornecedor-cotacao` | 0, 3 |
 | 7 | `7-demanda-frontend-geral-tabelas.md` | `feat/frontend-geral-tabelas` | 0 e todas |
 
 **Por que esta ordem:** o PCP (5) é a maior refatoração e depende de Cargos (2),
@@ -84,6 +84,19 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 - Ao aprovar, gera **uma NF de folha de pagamento por funcionário** (novo
   `invoice_type = "folha_pagamento"`).
 
+### D7 — Catálogo de fornecedor (produto ↔ fornecedor) + bloqueio de compra de avariado
+- Entra uma tabela **`supplier_items`** ligando **fornecedor ↔ item de estoque**, com
+  **preço por fornecedor**. Não temos acesso ao estoque do fornecedor → o item do catálogo
+  é tratado como **estoque infinito** (sempre disponível para comprar).
+- **Fluxo de compra invertido (front):** seleciona-se o **produto primeiro**; o dropdown de
+  fornecedores mostra **apenas os fornecedores que vendem aquele item**. A ordem continua com
+  **um fornecedor**; após escolhê-lo, os demais itens da ordem ficam restritos ao catálogo dele
+  (preço sugerido do catálogo, editável).
+- **Avariado deixa de ser comprável por consequência:** como o seletor de itens da compra passa a
+  vir do **catálogo do fornecedor** (e ninguém cadastra item `…-AVARIADO` no catálogo), itens
+  avariados nunca aparecem na compra. Pendência conhecida (comprar avariado) **resolvida por aqui**.
+- **Escopo:** este catálogo é **ampliação da Demanda 6** (que passa a ser "Fornecedor + Catálogo").
+
 ---
 
 ## Regras transversais (TODO prompt já as inclui, mas ficam aqui como referência)
@@ -92,6 +105,19 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 - Backend: `Router → Service → Repository → DB`. Nunca pular camadas. Lógica só no Service.
 - Frontend: `Page → Service → API`. Componentes "burros". Sem `fetch` em componente.
 - Idioma: **código em inglês**, **UI e mensagens em português**. TypeScript sem `any`.
+
+### Documentação (passo fundamental — não é etapa final opcional)
+- Documentar é **parte da entrega**. Nenhuma demanda/etapa fica "done" sem a doc atualizada.
+- A doc do refac alimenta um **futuro manual do usuário final completo** — escreva pensando nisso.
+- **Cada agente documenta no seu próprio estilo/contexto** (ver os `.md` em `.claude/agents/`):
+  - **DBA → `docs/database/schema.md`**: tabelas/colunas com **significado de negócio**,
+    relacionamentos, índices/constraints e a migration.
+  - **BACKEND → `docs/backend/[modulo].md`**: endpoints, **fluxos passo a passo**, máquina de
+    estados/status, integrações entre módulos e regras de negócio (com o porquê).
+  - **FRONTEND → `docs/frontend/[modulo].md`**: **na ótica do usuário** — fluxos passo a passo,
+    glossário de status/badges, ações/botões, mensagens, com marcadores `[SCREENSHOT: ...]`.
+- Ao mudar um contrato/regra, **corrija a doc obsoleta** (não deixe a antiga contradizendo a nova);
+  se sua mudança afetou a doc de outro módulo, sinalize no relatório de done.
 
 ### Banco / Migrations (Alembic)
 - Toda tabela: `id UUID`, `created_at`, `updated_at`. Entidades de negócio: `deleted_at`
@@ -167,13 +193,14 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 
 | Demanda | DBA | BACKEND | FRONTEND | PR | Prod |
 |---------|-----|---------|----------|----|----|
-| 0 Infra | ✅ | ✅ | ✅ | ⏳ | ⏳ |
-| 1 Faturamento | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 0 Infra | ✅ | ✅ | ✅ | ✅ | ✅ |
+| 1 Faturamento | ✅ | ✅ | ✅ | ⏳ | ⏳ | — cancelamento por estorno (4 tipos); removida a opção "Cancelada" do Select de status (sem estorno). Head: 0012_invoice_cancel_fields |
+| 1.1 Recebimento ERP | n/a | ✅ | ✅ | ⏳ | ☐ | — NF de recebimento/devolução/transporte + entrada de estoque movem da etapa de PAGAMENTO para a CONFERÊNCIA (norma ERP). Pagamento só liquida a(s) conta(s) a pagar e conclui a ordem (parcelado: só na última). Cancelamento segue "dinheiro só se move no pagamento" (estorno financeiro só se já pago; senão cancela a AP em aberto). Corrige o bug do parcelado. **+Descoberta de NFs:** filtro `GET /faturas?order_id` + botão "Ver notas relacionadas" na ordem → Faturamento filtrado. **Smoke do core validado** (parcelado 3x: NF/estoque só na conferência, conclui na última parcela; cancelamento antes×depois do pagamento). Débito técnico: FK `purchase_order_id` em `invoices` (futuro). Sem schema novo (head 0012). Pronto para PR/prod. |
 | 2 Folha cargos | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 3 Estoque/Config | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 4 Financeiro | ☐ | ☐ | ☐ | ☐ | ☐ |
 | 5 PCP | ☐ | ☐ | ☐ | ☐ | ☐ |
-| 6 Compras | ☐ | ☐ | ☐ | ☐ | ☐ |
+| 6 Compras | ☐ | ☐ | ☐ | ☐ | ☐ | — Fornecedor (CNPJ/CPF + endereço/CEP) + bug cotação de serviço **+ Catálogo de fornecedor** (`supplier_items`, produto↔fornecedor com preço; estoque infinito; compra seleciona produto→fornecedores que o vendem). Resolve a pendência "comprar avariado" (item avariado não entra em catálogo). Ver decisão D7. |
 | 7 Front geral | ☐ | ☐ | ☐ | ☐ | ☐ |
 </content>
 </invoke>

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Módulo responsável pelo cadastro de fornecedores e gestão de ordens de compra. A ordem passa por aprovação financeira, conferência item a item no recebimento e só é concluída automaticamente quando a conta a pagar correspondente é quitada no Financeiro. Integra com Estoque (entrada apenas dos itens aceitos), Financeiro (conta a pagar + movimentações) e Faturamento (NF de recebimento e NF de devolução).
+Módulo responsável pelo cadastro de fornecedores e gestão de ordens de compra. A ordem passa por aprovação financeira e conferência item a item no recebimento. A partir da Demanda 1.1, a **entrada no Estoque e as notas fiscais** (recebimento/devolução/transporte para produto; serviço no aceite) são geradas no momento da **conferência** (ou do `/concluir-servico`), não mais no pagamento. O pagamento da(s) conta(s) a pagar apenas **liquida** a obrigação; a ordem é **concluída automaticamente** quando não resta nenhuma conta a pagar em aberto (no parcelado, só na última parcela). Integra com Estoque (entrada apenas dos itens aceitos), Financeiro (conta a pagar + movimentações) e Faturamento (NF de recebimento, devolução, transporte e serviço).
 
 ## Arquitetura
 
@@ -32,7 +32,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/compras/ordens` | Cria ordem com itens (status inicial: `em_andamento`) |
 | `GET` | `/api/compras/ordens/{id}` | Detalhe da ordem com itens |
 | `PATCH` | `/api/compras/ordens/{id}/status` | **Legacy** — restrito a cancelamento. Use os endpoints dedicados do fluxo para as demais transições |
-| `POST` | `/api/compras/ordens/{id}/concluir-servico` | Apenas ordens de serviço (`order_type="servico"`) em status `aprovada`: muda para `aguardando_pagamento` e gera a conta a pagar com o `payment_method` da ordem |
+| `POST` | `/api/compras/ordens/{id}/concluir-servico` | Apenas ordens de serviço (`order_type="servico"`) em status `aprovada`: muda para `aguardando_pagamento`, **emite a NF de serviço** (`invoice_type="servico"`) e gera a conta a pagar com o `payment_method` da ordem |
 | `DELETE` | `/api/compras/ordens/{id}` | Soft delete (somente se `em_andamento`) |
 
 ### Fluxo de Aprovação e Conferência
@@ -43,11 +43,11 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/compras/ordens/{id}/aprovar` | `aguardando_aprovacao_financeiro` → `aprovada` (body define `payment_method` + parcelamento) |
 | `POST` | `/api/compras/ordens/{id}/recusar` | `aguardando_aprovacao_financeiro` → `cancelada` (body: `{ "note": "..." }`, salvo em `financial_approval_note`) |
 | `POST` | `/api/compras/ordens/{id}/iniciar-conferencia` | `aprovada` → `em_conferencia` (cria 1 `purchase_order_receipt` por item, status `pendente`). **Apenas ordens de produto** — retorna `400` se `order_type == "servico"` |
-| `POST` | `/api/compras/ordens/{id}/finalizar-conferencia` | `em_conferencia` → `aguardando_pagamento` (registra qtd aceita/recusada por item, calcula `receipt_total_amount`, gera a conta a pagar) |
+| `POST` | `/api/compras/ordens/{id}/finalizar-conferencia` | `em_conferencia` → `aguardando_pagamento` (registra qtd aceita/recusada por item, calcula `receipt_total_amount`, **dá entrada no estoque dos aceitos, emite NF de recebimento/devolução/transporte** e gera a conta a pagar) |
 | `GET` | `/api/compras/recebimentos` | Lista ordens **de produto** (`order_type == "produto"`) elegíveis a recebimento (status `aprovada` ou `em_conferencia`). Ordens de serviço nunca aparecem aqui |
 | `GET` | `/api/compras/recebimentos/{id}` | Detalhe da ordem com `receipts` |
 
-> A conclusão da ordem (`aguardando_pagamento` → `concluida`) acontece **automaticamente** quando o Financeiro paga a conta a pagar vinculada (`payable.purchase_order_id`). Não existe endpoint manual para essa transição.
+> A conclusão da ordem (`aguardando_pagamento` → `concluida`) acontece **automaticamente** quando o Financeiro paga a conta a pagar vinculada (`payable.purchase_order_id`) **e não resta nenhuma conta a pagar em aberto da ordem** (no parcelado, só na última parcela). Não existe endpoint manual para essa transição. Estoque e NFs **não** são gerados aqui — já foram emitidos na conferência/aceite.
 
 ## Schemas
 
@@ -99,7 +99,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 - `order_type`: `"produto"` (default) ou `"servico"`
 - Ordens de produto exigem **mínimo 1 item**; `total_amount` calculado automaticamente como soma dos subtotais (`subtotal = quantity × unit_price`)
 - Ordens de serviço exigem `service_description` (obrigatório) e `total_amount` > 0; `items` pode ser lista vazia
-- `shipping_cost`: opcional (`>= 0`), **aplica-se apenas a ordens de produto**. Em ordens de serviço o campo é forçado a `None`/`0` no validator, mesmo que enviado. Quando `> 0`, é somado ao `total_amount` da ordem e dispara a emissão de uma NF de transporte no pagamento (ver "Ao Pagar a Conta a Pagar")
+- `shipping_cost`: opcional (`>= 0`), **aplica-se apenas a ordens de produto**. Em ordens de serviço o campo é forçado a `None`/`0` no validator, mesmo que enviado. Quando `> 0`, é somado ao `total_amount` da ordem e dispara a emissão de uma NF de transporte na **conferência** (ver "Ao Finalizar a Conferência")
 - `ordered_at` opcional (default: now)
 - **Parcelamento (`installments`, `first_due_date`, `installment_interval_days`) não fica mais na criação** — o financeiro define no momento da aprovação
 
@@ -164,12 +164,14 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
                                                                                               ▼
                                                                                    aguardando_pagamento
                                                                                               │
-                                                                            (pagamento da conta a pagar)
+                                                                  (todas as contas a pagar liquidadas)
                                                                                               │
                                                                                               ▼
                                                                                           concluida
 ```
 
+- `aguardando_pagamento`: mercadoria/serviço **recebido**, NF(s) emitida(s) e estoque atualizado — aguardando a quitação financeira.
+- `concluida`: **todas** as contas a pagar da ordem foram pagas (no parcelado, a conclusão só ocorre na última parcela).
 - `concluida` e `cancelada` são **status finais**.
 - Tentar usar o endpoint legado `PATCH /ordens/{id}/status` com um status diferente de `cancelada` retorna `400` com instrução para usar os endpoints dedicados.
 - Soft delete permitido apenas em ordens com status `em_andamento`.
@@ -188,8 +190,10 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 ### Concluir Serviço (`/concluir-servico`)
 - Apenas ordens com `order_type == "servico"` e status `aprovada`.
 - Transição: `aprovada` → `aguardando_pagamento`.
+- **Emite a NF de serviço** (`invoice_type="servico"`, 1 item com a `service_description` e `total_amount` da ordem) via `fat_service.criar_nota_servico` — idempotente (não emite uma 2ª NF se já houver uma para a ordem). O documento fiscal de serviço é emitido **no aceite**, não no pagamento.
 - Gera conta a pagar com `amount = order.total_amount`, propagando `payment_method` e regras de parcelamento da ordem.
 - Registra `financial_movement` (R$0, descrição "Serviço concluído — aguardando pagamento").
+- Sem efeito de estoque (serviço não movimenta estoque).
 
 ### Ao Recusar (`/recusar`)
 - Origem: `aguardando_aprovacao_financeiro`
@@ -198,35 +202,40 @@ em_andamento ──/enviar-aprovacao──▶ aguardando_aprovacao_financeiro
 
 ### Ao Finalizar a Conferência (`/finalizar-conferencia`)
 - Origem: `em_conferencia`
-- **Ordens de serviço** (`order_type == "servico"`) pulam a conferência item a item: vão direto para `aguardando_pagamento` e geram a conta a pagar com `order.total_amount` e o `payment_method` da ordem. (O endpoint dedicado é `/concluir-servico`; finalize_receipt mantém o mesmo comportamento como fallback caso uma ordem de serviço esteja em `em_conferencia`.)
-- **Ordens de produto:** atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas e calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
+- **Ordens de serviço** (`order_type == "servico"`) pulam a conferência item a item: vão direto para `aguardando_pagamento`, **emitem a NF de serviço** (`criar_nota_servico`, sem estoque) e geram a conta a pagar com `order.total_amount` e o `payment_method` da ordem. (O endpoint dedicado é `/concluir-servico`; `finalize_receipt` mantém o mesmo comportamento como fallback caso uma ordem de serviço esteja em `em_conferencia`.)
+- **Ordens de produto:** atualiza cada `purchase_order_receipt` com as quantidades aceitas/recusadas (persistidas e commitadas no repository) e calcula `receipt_total_amount = Σ (quantity_accepted × unit_price)`.
+- **Entrada no Estoque e NFs são geradas AGORA** (Demanda 1.1), via `_gerar_estoque_e_nf_da_conferencia`. A operação é **idempotente**: se já existe NF de recebimento para a ordem (`existe_nota_recebimento`), nada é re-emitido. Para cada receipt:
+  1. **Entrada no Estoque** — apenas para `quantity_accepted > 0`, com `unit_cost = order_item.unit_price`, `reference_id = order.id`. As coleções `items`/`receipts` são materializadas **antes** do loop porque `registrar_entrada` faz commit e expira as relações.
+  2. **NF de Recebimento** — se houve qualquer item aceito: `criar_nota_recebimento(db, order.id)`.
+  3. **NF de Devolução** — se houve qualquer item com `quantity_rejected > 0`: `criar_nota_devolucao(db, order.id)`.
+  4. **NF de Transporte** — se `order.shipping_cost > 0`: `criar_nota_transporte(..., order_id=order.id, client_id=None)`. À vista (1 item, `quantity=1`, `unit_price=shipping_cost`), `movement_type=SAIDA`, `category=COMPRA`.
 - O valor a pagar é `receipt_total_amount + shipping_cost`. Como o frete é devido mesmo que todos os itens sejam recusados, a conta a pagar é gerada sempre que `receipt_total_amount + shipping_cost > 0` (não apenas quando `receipt_total_amount > 0`).
 - Quando há valor a pagar, gera **conta(s) a pagar** dependendo do `payment_method` armazenado na aprovação:
   - **Não parcelado (`a_vista`/`pix`/`boleto`):** uma única conta a pagar. Vencimento = `first_due_date` da ordem se definido, caso contrário `today + 30d`. `payment_method` é propagado para a conta.
-  - **Parcelado (`payment_method == "parcelado"`, `installments >= 2`):** N contas a pagar. O valor é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number`, `installment_total` e `payment_method = "parcelado"`.
-- Registra `financial_movement` (R$0, descrição "Conferência finalizada — aguardando pagamento").
-
-> **Atenção (parcelamento):** o gatilho `complete_order_after_payment` é disparado **uma única vez**, no pagamento da primeira parcela. Pagamentos das parcelas seguintes apenas baixam a conta a pagar — o estoque e as NFs já foram registrados.
+  - **Parcelado (`payment_method == "parcelado"`, `installments >= 2`):** N contas a pagar. O valor (já incluindo o frete) é dividido igualmente; a última parcela absorve o resíduo de centavos. Vencimentos = `first_due_date + n * installment_interval_days`. Cada conta recebe `installment_number`, `installment_total` e `payment_method = "parcelado"`.
+- Registra `financial_movement` (R$0, descrição "Conferência finalizada — mercadoria recebida, aguardando pagamento").
 
 ### Ao Pagar a Conta a Pagar (gatilho no Financeiro)
-Quando `financeiro.pay_payable` detecta `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment`. Para ordens de serviço, o fluxo apenas transiciona a ordem para `concluida` (sem entrada no estoque, sem NFs). Para ordens de produto, executa em sequência:
+A partir da Demanda 1.1 o pagamento **não** gera mais estoque nem NF (já emitidos na conferência/aceite). Quando `financeiro.pay_payable` liquida uma conta:
 
-1. **Entrada no Estoque** — apenas para receipts com `quantity_accepted > 0`:
-   ```python
-   estoque_service.registrar_entrada(
-       db,
-       stock_item_id=order_item.stock_item_id,
-       quantity=receipt.quantity_accepted,
-       unit_cost=order_item.unit_price,
-       description=f"Recebimento ordem #{order.id}",
-       source_module="compras",
-       reference_id=order.id,
-   )
-   ```
-2. **NF de Recebimento** — se houve qualquer item aceito: `fat_service.criar_nota_recebimento(db, order.id)`.
-3. **NF de Devolução** — se houve qualquer item com `quantity_rejected > 0`: `fat_service.criar_nota_devolucao(db, order.id)`.
-4. **NF de Transporte** — se `order.shipping_cost > 0`: `fat_service.criar_nota_transporte(db, shipping_cost=order.shipping_cost, order_id=order.id, client_id=None)`. Sempre à vista (1 item, `quantity=1`, `unit_price=shipping_cost`), `movement_type=SAIDA`, `category=COMPRA`.
-5. **Conclusão** — status → `concluida`, `received_at` = `now()`.
+1. Marca a conta como `paga` e registra o `financial_movement` de pagamento real (`SAIDA`/`PAGAMENTO`, valor da parcela) — esse é o único momento em que o dinheiro se move.
+2. Se `payable.purchase_order_id IS NOT NULL`, chama `compras_service.complete_order_after_payment`, que **apenas conclui a ordem** quando `contar_contas_pagar_em_aberto_por_ordem == 0`:
+   - **À vista / não parcelado:** a única conta é quitada → ordem vai para `concluida`.
+   - **Parcelado:** as primeiras parcelas apenas liquidam a respectiva conta; a ordem permanece em `aguardando_pagamento` até a **última** parcela ser paga, quando então transiciona para `concluida` (`received_at = now()`).
+   - Vale igualmente para produto e serviço — nenhum efeito de estoque/NF nesta etapa.
+
+### Cancelamento de NF de compra (Demanda 1.1)
+O cancelamento é acionado pelo Faturamento (`POST /api/faturamento/faturas/{id}/cancelar`) e segue o princípio **"o dinheiro só se move no pagamento"**. O tratamento financeiro de uma ordem de compra é centralizado em `_reverter_financeiro_ordem_compra`:
+
+- **Parte já paga da ordem:** estorno `ENTRADA/AJUSTE` do **valor pago** (`total_pago_por_ordem`). **Idempotente** — registrado uma única vez por ordem (guard `existe_estorno_ordem`), mesmo que mais de uma NF da mesma ordem (recebimento + transporte) seja cancelada.
+- **Parte em aberto:** as contas a pagar `em_aberto` da ordem são **canceladas** (`cancelar_contas_pagar_em_aberto_por_ordem`) — o dinheiro nunca saiu, então não há estorno.
+
+Por tipo de NF:
+
+- **NF de recebimento:** **sempre** estorna o estoque dos itens aceitos (`registrar_saida`, `unit_cost=0`, não mexe no CMP, `reference_id = invoice.id`) e aplica o tratamento financeiro acima. Antes de pagar → só cancela as contas em aberto, sem estorno financeiro. Depois de pago → estoque estornado **e** estorno do valor pago.
+- **NF de transporte (compra, `order_id` no notes):** o frete está embutido na(s) conta(s) a pagar da ordem, então usa o mesmo `_reverter_financeiro_ordem_compra` (idempotente — não duplica se a NF de recebimento da mesma ordem também for cancelada). Sem efeito de estoque.
+- **NF de serviço:** sem estoque; aplica `_reverter_financeiro_ordem_compra` (antes de pagar → cancela a conta em aberto; depois de pago → estorno do valor pago).
+- **NF de devolução:** inalterada — os itens rejeitados retornam ao estoque como itens **avariados** (idempotente por SKU).
 
 ### Validações na Criação
 - `supplier_id` deve existir e não estar deletado (404 se não encontrado)

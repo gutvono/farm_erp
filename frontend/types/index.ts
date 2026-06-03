@@ -418,6 +418,8 @@ export interface Invoice {
   installment_number: number | null
   installment_total: number | null
   parent_invoice_id: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
   items: InvoiceItem[]
   created_at: string
   updated_at: string

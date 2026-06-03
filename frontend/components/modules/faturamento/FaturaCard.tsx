@@ -1,11 +1,13 @@
 "use client"
 
 import { useState } from "react"
-import { CheckCircle2, ChevronDown, ChevronUp, FileDown } from "lucide-react"
+import { Ban, CheckCircle2, ChevronDown, ChevronUp, FileDown } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Label } from "@/components/ui/label"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -31,9 +33,32 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { updateFaturaStatus } from "@/services/faturamento"
+import { cancelarFatura, updateFaturaStatus } from "@/services/faturamento"
 import { Invoice, InvoiceStatus } from "@/types/index"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils"
+
+const CANCEL_SUCCESS_MESSAGE = "Nota fiscal cancelada com sucesso"
+
+// Efeito do cancelamento por tipo de NF (texto exibido no AlertDialog).
+// Regra Demanda 1.1: "o dinheiro só se move no pagamento". Em compras
+// (recebimento/serviço/transporte de compra), o financeiro só é estornado se a
+// ordem JÁ foi paga; caso contrário, a(s) conta(s) a pagar em aberto são
+// canceladas. O transporte de VENDA mantém o estorno do frete.
+const CANCEL_DESCRIPTIONS: Record<NfType, string> = {
+  venda:
+    "Isto cancelará a venda, devolverá os produtos ao estoque e cancelará as contas a receber vinculadas.",
+  recebimento:
+    "Os itens recebidos sairão do estoque. Se a compra já foi paga, o valor será estornado; caso contrário, a(s) conta(s) a pagar em aberto serão canceladas.",
+  transporte: "Isto estornará o valor do frete.",
+  servico:
+    "Sem efeito no estoque. Se a compra já foi paga, o valor será estornado; caso contrário, a(s) conta(s) a pagar em aberto serão canceladas.",
+  devolucao: "Os produtos devolvidos voltarão ao estoque como itens AVARIADOS.",
+}
+
+// Transporte de COMPRA (frete embutido na conta a pagar) segue o princípio
+// "estorno só se pago"; transporte de VENDA mantém o estorno do frete.
+const CANCEL_TRANSPORTE_COMPRA =
+  "Os itens recebidos seguem o princípio da compra: se já foi paga, o valor do frete será estornado; caso contrário, a(s) conta(s) a pagar em aberto serão canceladas."
 
 const STATUS_LABELS: Record<InvoiceStatus, string> = {
   emitida: "Emitida",
@@ -47,13 +72,14 @@ const STATUS_COLORS: Record<InvoiceStatus, string> = {
   cancelada: "bg-slate-100 text-slate-600",
 }
 
-type NfType = "venda" | "recebimento" | "devolucao" | "transporte"
+type NfType = "venda" | "recebimento" | "devolucao" | "transporte" | "servico"
 
 function detectNfType(notes: string | null): NfType | null {
   if (!notes) return null
   if (notes.includes("[NF-RECEBIMENTO]")) return "recebimento"
   if (notes.includes("[NF-DEVOLUCAO]")) return "devolucao"
   if (notes.includes("[NF-TRANSPORTE]")) return "transporte"
+  if (notes.includes("[NF-SERVICO]")) return "servico"
   return null
 }
 
@@ -62,6 +88,7 @@ function getNfType(invoice: Invoice): NfType | null {
   if (invoice.invoice_type === "recebimento") return "recebimento"
   if (invoice.invoice_type === "devolucao") return "devolucao"
   if (invoice.invoice_type === "transporte") return "transporte"
+  if (invoice.invoice_type === "servico") return "servico"
   if (invoice.sale_id && invoice.invoice_type === "normal") return "venda"
   return detectNfType(invoice.notes)
 }
@@ -91,13 +118,15 @@ function extractSaleIdFromNotes(notes: string | null): string | null {
   return match ? match[1] : null
 }
 
-async function generateTransportePdf(invoice: Invoice) {
+// Layout simples (sem CFOP/impostos de mercadoria), reaproveitado pela NF de
+// transporte e pela NF de serviço — ambas têm apenas descrição + total.
+async function generateSimplePdf(invoice: Invoice, title: string) {
   const { jsPDF } = await import("jspdf")
   const doc = new jsPDF()
 
   doc.setFontSize(16)
   doc.setFont("helvetica", "bold")
-  doc.text("NOTA FISCAL DE TRANSPORTE", 105, 18, { align: "center" })
+  doc.text(title, 105, 18, { align: "center" })
 
   doc.setFontSize(9)
   doc.setFont("helvetica", "normal")
@@ -168,7 +197,11 @@ async function generateTransportePdf(invoice: Invoice) {
 
 async function generatePdf(invoice: Invoice, nfType: NfType) {
   if (nfType === "transporte") {
-    await generateTransportePdf(invoice)
+    await generateSimplePdf(invoice, "NOTA FISCAL DE TRANSPORTE")
+    return
+  }
+  if (nfType === "servico") {
+    await generateSimplePdf(invoice, "NOTA FISCAL DE SERVIÇO")
     return
   }
 
@@ -317,11 +350,22 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
   const [updating, setUpdating] = useState(false)
   const [generatingPdf, setGeneratingPdf] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<InvoiceStatus | null>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState("")
+  const [cancelling, setCancelling] = useState(false)
 
   const isFinal = invoice.status === "paga" || invoice.status === "cancelada"
+  const isCancelled = invoice.status === "cancelada"
+  const canCancel = invoice.status === "emitida" || invoice.status === "paga"
   const nfType = getNfType(invoice)
   const isNfFiscal = nfType !== null
   const orderId = extractOrderIdFromNotes(invoice.notes)
+  // Transporte de COMPRA (tem order_id) segue "estorno só se pago"; transporte
+  // de VENDA mantém o estorno do frete.
+  const cancelDescription =
+    nfType === "transporte" && orderId
+      ? CANCEL_TRANSPORTE_COMPRA
+      : CANCEL_DESCRIPTIONS[nfType ?? "venda"]
   const fornecedorNotificado = invoice.notes?.includes("Fornecedor notificado") ?? false
 
   const isParcelada =
@@ -347,6 +391,21 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
     } finally {
       setUpdating(false)
       setPendingStatus(null)
+    }
+  }
+
+  async function confirmCancel() {
+    setCancelling(true)
+    try {
+      await cancelarFatura(invoice.id, cancelReason)
+      toast.success(CANCEL_SUCCESS_MESSAGE)
+      setCancelOpen(false)
+      setCancelReason("")
+      onChanged()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao cancelar nota fiscal")
+    } finally {
+      setCancelling(false)
     }
   }
 
@@ -405,6 +464,11 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                     Transporte
                   </Badge>
                 )}
+                {nfType === "servico" && (
+                  <Badge className="bg-indigo-50 text-indigo-700 border border-indigo-200">
+                    Serviço
+                  </Badge>
+                )}
 
                 {invoice.sale_id && !isNfFiscal && (
                   <Badge variant="outline" className="text-xs">
@@ -421,6 +485,8 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de devolução</p>
               ) : nfType === "transporte" ? (
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de transporte</p>
+              ) : nfType === "servico" ? (
+                <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de serviço</p>
               ) : null}
 
               <p className="text-sm text-slate-500">
@@ -438,6 +504,19 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                   Fornecedor notificado
                 </p>
               )}
+
+              {isCancelled && (
+                <p className="text-xs text-slate-500 mt-1">
+                  Cancelada
+                  {invoice.cancelled_at && ` em ${formatDateTime(invoice.cancelled_at)}`}
+                  {invoice.cancellation_reason && (
+                    <>
+                      {" · Motivo: "}
+                      <span className="italic">{invoice.cancellation_reason}</span>
+                    </>
+                  )}
+                </p>
+              )}
             </div>
 
             <div className="flex items-center gap-2 flex-shrink-0">
@@ -451,9 +530,9 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                   <FileDown className="h-4 w-4 mr-1" />
                   {generatingPdf ? "Gerando..." : "PDF"}
                 </Button>
-              ) : (
+              ) : !isCancelled ? (
                 <Select
-                  value={invoice.status}
+                  value={invoice.status === "paga" ? "paga" : "emitida"}
                   disabled={isFinal || updating}
                   onValueChange={(v) => setPendingStatus(v as InvoiceStatus)}
                 >
@@ -465,9 +544,21 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                       Emitida
                     </SelectItem>
                     <SelectItem value="paga">Paga</SelectItem>
-                    <SelectItem value="cancelada">Cancelada</SelectItem>
                   </SelectContent>
                 </Select>
+              ) : null}
+
+              {canCancel && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="border-red-200 text-red-600 hover:bg-red-50 hover:text-red-700"
+                  onClick={() => setCancelOpen(true)}
+                  disabled={cancelling}
+                >
+                  <Ban className="h-4 w-4 mr-1" />
+                  Cancelar NF
+                </Button>
               )}
 
               <Button variant="ghost" size="icon" onClick={() => setExpanded((v) => !v)}>
@@ -541,25 +632,43 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
       </AlertDialog>
 
       <AlertDialog
-        open={pendingStatus === "cancelada"}
-        onOpenChange={(open) => !open && setPendingStatus(null)}
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          if (cancelling) return
+          setCancelOpen(open)
+          if (!open) setCancelReason("")
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar fatura?</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar nota fiscal {invoice.number}?</AlertDialogTitle>
             <AlertDialogDescription>
-              A fatura <strong>{invoice.number}</strong> será cancelada. Esta ação não pode ser
-              desfeita.
+              {cancelDescription} Esta ação não pode ser desfeita.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={`cancel-reason-${invoice.id}`}>Motivo (opcional)</Label>
+            <Input
+              id={`cancel-reason-${invoice.id}`}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ex.: erro de emissão, devolução acordada…"
+              disabled={cancelling}
+            />
+          </div>
+
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingStatus(null)}>Voltar</AlertDialogCancel>
+            <AlertDialogCancel disabled={cancelling}>Voltar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmStatusChange}
-              disabled={updating}
+              onClick={(e) => {
+                e.preventDefault()
+                confirmCancel()
+              }}
+              disabled={cancelling}
               className="bg-red-600 hover:bg-red-700"
             >
-              {updating ? "Cancelando..." : "Cancelar fatura"}
+              {cancelling ? "Cancelando..." : "Cancelar NF"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
