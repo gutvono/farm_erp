@@ -40,6 +40,8 @@ interface RawInvoice {
   installment_number: number | null
   installment_total: number | null
   parent_invoice_id: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
   items: RawInvoiceItem[]
   created_at: string
   updated_at: string
@@ -61,6 +63,8 @@ function parseInvoice(raw: RawInvoice): Invoice {
     installment_number: raw.installment_number ?? null,
     installment_total: raw.installment_total ?? null,
     parent_invoice_id: raw.parent_invoice_id ?? null,
+    cancelled_at: raw.cancelled_at ?? null,
+    cancellation_reason: raw.cancellation_reason ?? null,
     items: (raw.items ?? []).map(parseInvoiceItem),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
@@ -70,10 +74,17 @@ function parseInvoice(raw: RawInvoice): Invoice {
 export async function getFaturas(params?: {
   status?: string
   client_id?: string
+  order_id?: string
 }): Promise<Invoice[]> {
   const response = await apiFetch<ApiResponse<RawInvoice[]>>(
     "/api/faturamento/faturas",
-    { params: { status: params?.status, client_id: params?.client_id } }
+    {
+      params: {
+        status: params?.status,
+        client_id: params?.client_id,
+        order_id: params?.order_id,
+      },
+    }
   )
   return response.data.map(parseInvoice)
 }
@@ -105,6 +116,27 @@ export async function updateFaturaStatus(
   const response = await apiFetch<ApiResponse<RawInvoice>>(
     `/api/faturamento/faturas/${id}/status`,
     { method: "PATCH", body: JSON.stringify({ status }) }
+  )
+  return parseInvoice(response.data)
+}
+
+/**
+ * Cancela uma NF com estorno ponta a ponta, conforme o `invoice_type`
+ * (venda/recebimento/transporte/devolucao). O backend responde o wrapper
+ * `SuccessResponse` — extraímos `data` (InvoiceOut já cancelada). O `reason`
+ * é opcional e enviado como motivo do cancelamento.
+ *
+ * Erros do backend (ex.: 400 "Nota fiscal já cancelada") são propagados
+ * verbatim por `apiFetch`.
+ */
+export async function cancelarFatura(id: string, reason?: string): Promise<Invoice> {
+  const trimmed = reason?.trim()
+  const response = await apiFetch<ApiResponse<RawInvoice>>(
+    `/api/faturamento/faturas/${id}/cancelar`,
+    {
+      method: "POST",
+      body: JSON.stringify(trimmed ? { reason: trimmed } : {}),
+    }
   )
   return parseInvoice(response.data)
 }

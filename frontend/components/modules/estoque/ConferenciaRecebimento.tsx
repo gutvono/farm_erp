@@ -118,11 +118,11 @@ export function ConferenciaRecebimento({ order, onFinalized }: ConferenciaRecebi
         }))
       )
       toast.success(
-        `Conferência finalizada. Conta a pagar de ${formatCurrency(receiptTotal)} gerada no financeiro.`
+        `Conferência finalizada — NF de recebimento emitida, estoque atualizado e conta a pagar de ${formatCurrency(receiptTotal)} gerada.`
       )
       if (rejectedCount > 0) {
         toast.warning(
-          `${rejectedCount} item${rejectedCount !== 1 ? "s" : ""} serão devolvidos ao fornecedor. A nota de devolução será gerada após o pagamento.`
+          `${rejectedCount} item${rejectedCount !== 1 ? "s" : ""} recusado${rejectedCount !== 1 ? "s" : ""} — NF de devolução emitida; fornecedor notificado.`
         )
       }
       onFinalized()
@@ -220,15 +220,16 @@ export function ConferenciaRecebimento({ order, onFinalized }: ConferenciaRecebi
           <AlertDialogHeader>
             <AlertDialogTitle>Finalizar conferência?</AlertDialogTitle>
             <AlertDialogDescription>
-              Uma conta a pagar de{" "}
-              <strong>{formatCurrency(receiptTotal)}</strong> será gerada no financeiro com o valor
-              dos itens aceitos.
+              Ao finalizar, a NF de recebimento será emitida, o estoque dos itens aceitos será
+              atualizado e uma conta a pagar de{" "}
+              <strong>{formatCurrency(receiptTotal)}</strong> será gerada no financeiro. O pagamento
+              é uma etapa posterior e separada.
               {rejectedCount > 0 && (
                 <>
                   {" "}
-                  {rejectedCount} item{rejectedCount !== 1 ? "s" : ""} será
-                  {rejectedCount !== 1 ? "ão" : ""} devolvido{rejectedCount !== 1 ? "s" : ""} ao
-                  fornecedor após o pagamento.
+                  {rejectedCount} item{rejectedCount !== 1 ? "s" : ""} recusado
+                  {rejectedCount !== 1 ? "s" : ""} {rejectedCount !== 1 ? "gerarão" : "gerará"} uma
+                  NF de devolução ao fornecedor.
                 </>
               )}
             </AlertDialogDescription>

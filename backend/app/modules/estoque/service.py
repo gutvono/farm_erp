@@ -19,6 +19,7 @@ from app.modules.estoque.schemas import (
 )
 from app.modules.financeiro import service as fin_service
 from app.shared.enums import FinancialCategory, MovementType
+from app.shared.pagination import Page, PageParams
 
 
 # ---------------------------------------------------------------------------
@@ -163,23 +164,23 @@ def create_movement(db: Session, data: StockMovementCreate) -> StockMovement:
     return movement
 
 
-def list_movements(
+def list_movements_paginated(
     db: Session,
     *,
+    params: PageParams,
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
-    order_by: str = "created_at",
-    order_dir: str = "desc",
-) -> list[StockMovement]:
-    return estoque_repo.list_movements(
+) -> Page[StockMovementOut]:
+    movements, total = estoque_repo.list_movements_paginated(
         db,
+        params=params,
         stock_item_id=stock_item_id,
         movement_type=movement_type,
         source_module=source_module,
-        order_by=order_by,
-        order_dir=order_dir,
     )
+    items = [StockMovementOut.from_model(m) for m in movements]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_movement(db: Session, movement_id: UUID) -> StockMovement:
@@ -208,6 +209,30 @@ def get_inventory(db: Session) -> InventoryOut:
 # ---------------------------------------------------------------------------
 # Public functions for cross-module use
 # ---------------------------------------------------------------------------
+
+
+def obter_ou_criar_item_avariado(db: Session, original: StockItem) -> StockItem:
+    """Get (or create) the damaged-stock counterpart of an item.
+
+    Used by Faturamento when cancelling a return NF (`devolucao`): rejected
+    goods re-enter stock as a damaged item. The damaged item is identified by a
+    standardized SKU ``"{sku_original}-AVARIADO"``; if it already exists it is
+    reused (idempotent — never duplicates), otherwise it is created with the
+    same unit/category and ``unit_cost=0``.
+    """
+    damaged_sku = f"{original.sku}-AVARIADO"
+    existing = estoque_repo.get_item_by_sku(db, damaged_sku)
+    if existing:
+        return existing
+    data = StockItemCreate(
+        sku=damaged_sku,
+        name=f"{original.name} (AVARIADO)",
+        category=original.category,
+        unit=original.unit,
+        minimum_stock=Decimal("0"),
+        unit_cost=Decimal("0"),
+    )
+    return create_item(db, data)
 
 
 def registrar_entrada(

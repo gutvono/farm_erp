@@ -45,7 +45,7 @@ export function HoleritePDF({ entry, period, employee }: HoleritePDFProps) {
 
       const monthLabel = MONTHS[period.reference_month - 1]
       const cpf = employee?.cpf ?? "—"
-      const role = employee?.role ?? "—"
+      const role = employee?.position_name ?? "—"
 
       // Cabeçalho
       doc.setFontSize(18)

@@ -434,6 +434,39 @@ SELECT id, name, email FROM customers WHERE deleted_at IS NULL;
 SELECT * FROM customers;
 ```
 
+## Documentation — PASSO FUNDAMENTAL (não é etapa final opcional)
+
+Documentar é **parte da entrega**, não um extra no fim. Uma migration/mudança de schema
+**não está "done"** sem `docs/database/schema.md` atualizado. Sua documentação é a fonte da
+verdade do modelo de dados para os outros agentes e, mais adiante, base para o **manual** e
+para a modelagem de relatórios.
+
+Cada agente documenta no seu próprio estilo/contexto. O **seu** (DBA) é o **modelo de dados**.
+Em `docs/database/schema.md`, para cada tabela criada/alterada, registre:
+
+```markdown
+## Tabela: nome_da_tabela
+Para que serve (1 linha, em PT — o que ela representa no negócio).
+
+| Coluna | Tipo | Nulo? | Default | Significado (em PT) |
+Inclua FKs (apontando a tabela referenciada), enums/domínios e o significado de cada valor
+de status quando houver. Marque colunas de soft delete (deleted_at) e os campos obrigatórios.
+
+### Relacionamentos
+- nome_da_tabela.x_id → outra_tabela.id (1:N / N:1) — o que o vínculo significa.
+
+### Índices e constraints
+- idx_*/uq_*/ck_* — coluna(s) e o porquê (ordenação, busca, unicidade, regra).
+
+### Migration
+- revision id + arquivo; o que faz no upgrade/downgrade; head resultante.
+```
+
+**Regras de escrita:** português; descreva o **significado de negócio** das tabelas/colunas
+(não só o tipo SQL) — alguém montando o manual precisa entender o que cada dado representa.
+Todo índice criado em migration deve ter espelho no model e estar refletido aqui. Se uma
+mudança tornou parte do schema.md obsoleta, **corrija** em vez de só anexar.
+
 ## Checklist Before Finishing
 
 - [ ] All tables have id, created_at, updated_at
@@ -443,7 +476,9 @@ SELECT * FROM customers;
 - [ ] All migrations are reversible (tested downgrade)
 - [ ] `make reset-db` creates all tables and populates seed data
 - [ ] Seed data is realistic and consistent (no orphaned records)
-- [ ] Documentation in docs/database/schema.md updated
+- [ ] **Documentação (passo fundamental)** em docs/database/schema.md atualizada: tabelas, colunas
+      com significado de negócio, relacionamentos, índices/constraints e a migration; trechos
+      obsoletos corrigidos
 - [ ] No hardcoded data in migrations
 
 ---

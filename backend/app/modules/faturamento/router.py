@@ -9,6 +9,7 @@ from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
 from app.modules.faturamento import service as fat_service
 from app.modules.faturamento.schemas import (
+    InvoiceCancel,
     InvoiceCreate,
     InvoiceOut,
     InvoiceStatusUpdate,
@@ -29,13 +30,14 @@ def _serialize(invoice, db: Session) -> dict:
 def list_invoices(
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
+    order_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
     invoices = fat_service.list_invoices(
-        db, status=status, client_id=client_id, skip=skip, limit=limit
+        db, status=status, client_id=client_id, order_id=order_id, skip=skip, limit=limit
     )
     data = [_serialize(inv, db) for inv in invoices]
     return success("Faturas listadas com sucesso", data)
@@ -70,6 +72,18 @@ def update_invoice_status(
 ) -> SuccessResponse:
     invoice = fat_service.update_status(db, invoice_id, body.status)
     return success("Status atualizado com sucesso", _serialize(invoice, db))
+
+
+@router.post("/faturas/{invoice_id}/cancelar", response_model=SuccessResponse)
+def cancel_invoice(
+    invoice_id: UUID,
+    body: Optional[InvoiceCancel] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    reason = body.reason if body else None
+    invoice = fat_service.cancelar_fatura(db, invoice_id, reason=reason)
+    return success("Nota fiscal cancelada com sucesso", _serialize(invoice, db))
 
 
 @router.delete("/faturas/{invoice_id}", response_model=SuccessResponse)

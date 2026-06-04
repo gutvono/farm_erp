@@ -1,3 +1,4 @@
+import re
 from datetime import date, timedelta
 from decimal import Decimal
 from typing import Optional
@@ -9,7 +10,7 @@ from sqlalchemy.orm import Session
 from app.modules.faturamento import repository as fat_repo
 from app.modules.faturamento.model import Invoice
 from app.modules.faturamento.schemas import InvoiceCreate
-from app.shared.enums import FinancialCategory, InvoiceStatus, MovementType
+from app.shared.enums import FinancialCategory, InvoiceStatus, MovementType, SaleStatus
 
 
 # ---------------------------------------------------------------------------
@@ -255,11 +256,12 @@ def list_invoices(
     *,
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
+    order_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Invoice]:
     return fat_repo.list_invoices(
-        db, status=status, client_id=client_id, skip=skip, limit=limit
+        db, status=status, client_id=client_id, order_id=order_id, skip=skip, limit=limit
     )
 
 
@@ -309,6 +311,309 @@ def update_status(db: Session, invoice_id: UUID, new_status: InvoiceStatus) -> I
 
 
 # ---------------------------------------------------------------------------
+# Cancellation with reversal (Demanda 1)
+# ---------------------------------------------------------------------------
+
+
+def _extract_uuid_from_notes(notes: Optional[str], key: str) -> Optional[UUID]:
+    """Extract ``{key}=<uuid>`` from an invoice ``notes`` field (e.g. order_id)."""
+    if not notes:
+        return None
+    match = re.search(rf"{key}=([0-9a-fA-F-]{{36}})", notes)
+    if not match:
+        return None
+    try:
+        return UUID(match.group(1))
+    except ValueError:
+        return None
+
+
+def _mark_cancelled(db: Session, invoice: Invoice, reason: Optional[str]) -> Invoice:
+    return fat_repo.cancel_invoice(db, invoice.id, reason=reason)
+
+
+def cancelar_fatura(
+    db: Session, invoice_id: UUID, *, reason: Optional[str] = None
+) -> Invoice:
+    """Cancel an invoice, reversing its effects according to ``invoice_type``.
+
+    Despatches per type (venda/recebimento/transporte/devolucao). Allowed from
+    ``emitida`` and ``paga``; blocked (400) if already ``cancelada``. The
+    cancellation flag (status + cancelled_at) guards against double reversal.
+    """
+    invoice = _get_invoice_or_404(db, invoice_id)
+
+    if invoice.status == InvoiceStatus.CANCELADA:
+        raise HTTPException(status_code=400, detail="Nota fiscal já está cancelada")
+
+    invoice_type = (invoice.invoice_type or "venda").lower()
+
+    if invoice_type == "venda":
+        _cancelar_nf_venda(db, invoice, reason)
+    elif invoice_type == "recebimento":
+        _cancelar_nf_recebimento(db, invoice, reason)
+    elif invoice_type == "transporte":
+        _cancelar_nf_transporte(db, invoice, reason)
+    elif invoice_type == "devolucao":
+        _cancelar_nf_devolucao(db, invoice, reason)
+    elif invoice_type == "servico":
+        _cancelar_nf_servico(db, invoice, reason)
+    else:
+        # Unknown type: only register a R$0 traceability movement + mark cancelled.
+        from app.modules.financeiro import service as fin_service
+
+        fin_service.registrar_movimento(
+            db,
+            movement_type=MovementType.SAIDA,
+            category=FinancialCategory.AJUSTE,
+            amount=Decimal("0"),
+            description=f"Cancelamento de nota fiscal {invoice.number}",
+            source_module="faturamento",
+            reference_id=invoice.id,
+        )
+        _mark_cancelled(db, invoice, reason)
+
+    # Reload after the cascade of commits to return the cancelled invoice.
+    return _get_invoice_or_404(db, invoice_id)
+
+
+def _cancelar_nf_venda(db: Session, invoice: Invoice, reason: Optional[str]) -> None:
+    """End-to-end cancellation (D4): return stock, cancel sale, cancel receivables."""
+    from app.modules.comercial import service as comercial_service
+    from app.modules.comercial.model import Sale
+    from app.modules.estoque import service as estoque_service
+    from app.modules.financeiro import service as fin_service
+
+    estorno_desc = f"Estorno cancelamento NF {invoice.number}"
+
+    sale_id = invoice.sale_id
+    if sale_id is None:
+        # Manual sale invoice (no sale record): cancel its receivable(s) + mark.
+        fin_service.cancelar_contas_receber(
+            db,
+            invoice_id=invoice.id,
+            estorno_descricao=estorno_desc,
+            estorno_reference_id=invoice.id,
+        )
+        _mark_cancelled(db, invoice, reason)
+        return
+
+    sale = db.query(Sale).filter(Sale.id == sale_id).first()
+    if not sale:
+        raise HTTPException(
+            status_code=404, detail="Venda associada à nota não encontrada"
+        )
+
+    # 1. Return each sold item to stock. unit_cost=0 → entrada gera ajuste R$0,
+    # sem movimento de "compra" e sem alterar o CMP (o lado financeiro é tratado
+    # pelas contas a receber). reference_id=sale.id para rastreabilidade.
+    for item in sale.items:
+        estoque_service.registrar_entrada(
+            db,
+            stock_item_id=item.stock_item_id,
+            quantity=Decimal(str(item.quantity)),
+            unit_cost=Decimal("0"),
+            description=f"{estorno_desc} — devolução ao estoque",
+            source_module="faturamento",
+            reference_id=sale.id,
+        )
+
+    # 2. Cancel the sale.
+    if sale.status != SaleStatus.CANCELADA:
+        comercial_service.update_status(db, sale.id, SaleStatus.CANCELADA)
+
+    # 3. Cancel all receivables of the sale (+ reverse any amount already received).
+    fin_service.cancelar_contas_receber(
+        db,
+        sale_id=sale.id,
+        estorno_descricao=estorno_desc,
+        estorno_reference_id=invoice.id,
+    )
+
+    # 4. Mark every invoice of the chain (same sale_id) cancelled. A transport NF
+    # of this sale also gets its freight reversed.
+    chain = (
+        db.query(Invoice)
+        .filter(Invoice.sale_id == sale.id, Invoice.deleted_at.is_(None))
+        .all()
+    )
+    for sibling in chain:
+        if sibling.status == InvoiceStatus.CANCELADA:
+            continue
+        if (sibling.invoice_type or "").lower() == "transporte":
+            _estornar_frete_venda(db, sibling)
+        _mark_cancelled(db, sibling, reason)
+
+
+def _reverter_financeiro_ordem_compra(
+    db: Session, order_id: UUID, *, descricao: str
+) -> None:
+    """Reverse the financial position of a purchase order (Demanda 1.1).
+
+    Princípio "o dinheiro só se move no pagamento":
+    - parte já PAGA da ordem → estorno ``ENTRADA/AJUSTE`` do valor pago;
+    - parte EM ABERTO → cancela as contas a pagar (o dinheiro nunca saiu).
+
+    Idempotente: o estorno só é registrado uma vez por ordem (guard
+    ``existe_estorno_ordem``); cancelar contas já canceladas é no-op. Pode ser
+    chamado a partir do cancelamento de qualquer NF de compra da mesma ordem
+    (recebimento/transporte/serviço) sem duplicar.
+    """
+    from app.modules.financeiro import service as fin_service
+
+    paid_total = fin_service.total_pago_por_ordem(db, order_id)
+    if paid_total > 0 and not fin_service.existe_estorno_ordem(db, order_id):
+        fin_service.registrar_movimento(
+            db,
+            movement_type=MovementType.ENTRADA,
+            category=FinancialCategory.AJUSTE,
+            amount=paid_total,
+            description=descricao,
+            source_module="faturamento",
+            reference_id=order_id,
+        )
+    fin_service.cancelar_contas_pagar_em_aberto_por_ordem(db, order_id)
+
+
+def _cancelar_nf_recebimento(
+    db: Session, invoice: Invoice, reason: Optional[str]
+) -> None:
+    """Cancel a receipt NF: always reverse stock; money only if already paid.
+
+    Demanda 1.1: o estoque dos itens aceitos é SEMPRE estornado (saída). No
+    financeiro, segue o princípio "dinheiro só se move no pagamento" via
+    ``_reverter_financeiro_ordem_compra`` (estorna o pago, cancela o em aberto).
+    """
+    from app.modules.compras.model import PurchaseOrder
+    from app.modules.estoque import service as estoque_service
+
+    order_id = _extract_uuid_from_notes(invoice.notes, "order_id")
+
+    # (a) Estoque: remove sempre as quantidades aceitas (saída não mexe em CMP).
+    if order_id is not None:
+        order = (
+            db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+        )
+        if order:
+            items_by_id = {item.id: item for item in order.items}
+            for receipt in order.receipts:
+                qty = Decimal(str(receipt.quantity_accepted))
+                if qty <= 0:
+                    continue
+                order_item = items_by_id.get(receipt.purchase_order_item_id)
+                if not order_item:
+                    continue
+                estoque_service.registrar_saida(
+                    db,
+                    stock_item_id=order_item.stock_item_id,
+                    quantity=qty,
+                    unit_cost=Decimal("0"),
+                    description=f"Estorno NF recebimento {invoice.number} — saída do estoque",
+                    source_module="faturamento",
+                    reference_id=invoice.id,
+                )
+
+        # (b) Financeiro: estorno do pago / cancelamento das contas em aberto.
+        _reverter_financeiro_ordem_compra(
+            db, order_id, descricao=f"Estorno NF recebimento {invoice.number}"
+        )
+
+    _mark_cancelled(db, invoice, reason)
+
+
+def _estornar_frete_venda(db: Session, invoice: Invoice) -> None:
+    """Reverse the freight of a SALE transport NF (SAIDA/AJUSTE, no stock)."""
+    from app.modules.financeiro import service as fin_service
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.AJUSTE,
+        amount=Decimal(str(invoice.total_amount)),
+        description=f"Estorno NF transporte {invoice.number}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+
+def _cancelar_nf_transporte(
+    db: Session, invoice: Invoice, reason: Optional[str]
+) -> None:
+    """Cancel a transport NF.
+
+    - VENDA (``sale_id`` no notes): estorno do frete (SAIDA/AJUSTE).
+    - COMPRA (``order_id`` no notes): o frete está embutido na(s) conta(s) a
+      pagar da ordem, então o tratamento financeiro segue o mesmo princípio do
+      recebimento (estorna o pago, cancela o em aberto) via
+      ``_reverter_financeiro_ordem_compra`` — idempotente, sem duplicar se a NF
+      de recebimento da mesma ordem também for cancelada. Sem efeito de estoque.
+    """
+    order_id = _extract_uuid_from_notes(invoice.notes, "order_id")
+    if order_id is not None:
+        _reverter_financeiro_ordem_compra(
+            db, order_id, descricao=f"Estorno NF transporte {invoice.number}"
+        )
+    else:
+        _estornar_frete_venda(db, invoice)
+    _mark_cancelled(db, invoice, reason)
+
+
+def _cancelar_nf_servico(
+    db: Session, invoice: Invoice, reason: Optional[str]
+) -> None:
+    """Cancel a service NF (Demanda 1.1): no stock; money only if already paid.
+
+    Segue o princípio "dinheiro só se move no pagamento" via
+    ``_reverter_financeiro_ordem_compra``.
+    """
+    order_id = _extract_uuid_from_notes(invoice.notes, "order_id")
+    if order_id is not None:
+        _reverter_financeiro_ordem_compra(
+            db, order_id, descricao=f"Estorno NF serviço {invoice.number}"
+        )
+    _mark_cancelled(db, invoice, reason)
+
+
+def _cancelar_nf_devolucao(
+    db: Session, invoice: Invoice, reason: Optional[str]
+) -> None:
+    """Rejected goods re-enter stock as AVARIADO items (idempotent by SKU)."""
+    from app.modules.compras.model import PurchaseOrder
+    from app.modules.estoque import repository as estoque_repo
+    from app.modules.estoque import service as estoque_service
+
+    order_id = _extract_uuid_from_notes(invoice.notes, "order_id")
+    if order_id is not None:
+        order = (
+            db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+        )
+        if order:
+            items_by_id = {item.id: item for item in order.items}
+            for receipt in order.receipts:
+                qty = Decimal(str(receipt.quantity_rejected))
+                if qty <= 0:
+                    continue
+                order_item = items_by_id.get(receipt.purchase_order_item_id)
+                if not order_item:
+                    continue
+                original = estoque_repo.get_item(db, order_item.stock_item_id)
+                if not original:
+                    continue
+                damaged = estoque_service.obter_ou_criar_item_avariado(db, original)
+                estoque_service.registrar_entrada(
+                    db,
+                    stock_item_id=damaged.id,
+                    quantity=qty,
+                    unit_cost=Decimal("0"),
+                    description=f"Devolução avariada NF {invoice.number}",
+                    source_module="faturamento",
+                    reference_id=invoice.id,
+                )
+
+    _mark_cancelled(db, invoice, reason)
+
+
+# ---------------------------------------------------------------------------
 # Soft delete
 # ---------------------------------------------------------------------------
 
@@ -334,6 +639,7 @@ def soft_delete_invoice(db: Session, invoice_id: UUID) -> Invoice:
 _NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"
 _NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"
 _NF_TRANSPORTE_PREFIX = "[NF-TRANSPORTE]"
+_NF_SERVICO_PREFIX = "[NF-SERVICO]"
 
 
 def _build_purchase_notes(prefix: str, order_id: UUID, supplier_name: str, extra: str = "") -> str:
@@ -341,6 +647,92 @@ def _build_purchase_notes(prefix: str, order_id: UUID, supplier_name: str, extra
     if extra:
         base = f"{base} — {extra}"
     return base
+
+
+def existe_nota_recebimento(db: Session, order_id: UUID) -> bool:
+    """True if a receipt NF (any status) already exists for the purchase order.
+
+    Used by Compras to keep conference-time NF/stock emission idempotent.
+    """
+    exists = (
+        db.query(Invoice.id)
+        .filter(
+            Invoice.invoice_type == "recebimento",
+            Invoice.notes.ilike(f"%order_id={order_id}%"),
+        )
+        .first()
+    )
+    return exists is not None
+
+
+def criar_nota_servico(db: Session, order_id: UUID) -> Invoice:
+    """Emit a service NF (invoice_type='servico') for a service purchase order.
+
+    Demanda 1.1: o documento fiscal de serviço é emitido no ACEITE
+    (/concluir-servico ou conferência), nunca no pagamento. Idempotente: não
+    emite uma 2ª NF se já houver uma para a ordem. ``client_id=None``; 1 item com
+    a ``service_description``; ``total_amount`` da ordem; vencimento = primeiro
+    vencimento da ordem (se houver) ou hoje. Registra movimento R$0 (o débito
+    real é o pagamento da conta a pagar).
+    """
+    from app.modules.compras.model import PurchaseOrder, Supplier
+    from app.modules.financeiro import service as fin_service
+
+    order = db.query(PurchaseOrder).filter(PurchaseOrder.id == order_id).first()
+    if not order:
+        raise HTTPException(status_code=404, detail="Ordem de compra não encontrada")
+
+    existing = (
+        db.query(Invoice)
+        .filter(
+            Invoice.deleted_at.is_(None),
+            Invoice.invoice_type == "servico",
+            Invoice.notes.ilike(f"%order_id={order_id}%"),
+        )
+        .first()
+    )
+    if existing:
+        return existing
+
+    supplier = db.query(Supplier).filter(Supplier.id == order.supplier_id).first()
+    supplier_name = supplier.name if supplier else ""
+    service_description = order.service_description or "Serviço contratado"
+    total_amount = Decimal(str(order.total_amount or 0))
+
+    invoice_items = [
+        {
+            "description": service_description,
+            "quantity": Decimal("1"),
+            "unit_price": total_amount,
+            "subtotal": total_amount,
+        }
+    ]
+    notes = _build_purchase_notes(
+        _NF_SERVICO_PREFIX, order.id, supplier_name, service_description
+    )
+
+    invoice = fat_repo.create_invoice(
+        db,
+        client_id=None,
+        items=invoice_items,
+        total_amount=total_amount,
+        sale_id=None,
+        due_date=order.first_due_date or date.today(),
+        notes=notes,
+        invoice_type="servico",
+    )
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.COMPRA,
+        amount=Decimal("0"),
+        description=f"NF de serviço emitida: {invoice.number} — ordem #{order.id}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+    return invoice
 
 
 def criar_nota_recebimento(db: Session, order_id: UUID) -> Invoice:

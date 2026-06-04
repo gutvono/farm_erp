@@ -216,33 +216,50 @@ def create_sale_with_integrations(sale_data, db_session):
 - Test the happy path and all edge cases
 - Use pytest fixtures for setup/teardown
 
-## Documentation
+## Documentation — PASSO FUNDAMENTAL (não é etapa final opcional)
 
-Document your work in `docs/backend/[modulo].md`:
+Documentar é **parte da entrega**, não um extra no fim. Uma demanda **não está "done"**
+sem a doc atualizada. A documentação de backend alimenta dois consumidores: (1) o PO e os
+outros agentes, que precisam entender o comportamento sem ler o código; (2) um **futuro
+manual do usuário final** — portanto descreva também o efeito observável de cada operação
+("o que o sistema faz quando o usuário X"), não só a mecânica interna.
+
+Cada agente documenta no seu próprio estilo/contexto. O **seu** (backend) é o contrato e as
+regras de negócio. Documente em `docs/backend/[modulo].md` cobrindo, no mínimo:
 
 ```markdown
-# Module: [Name]
+# Módulo: [Nome]
 
 ## Endpoints
-- GET /api/modulo → List
-- POST /api/modulo → Create
-- PUT /api/modulo/{id} → Update
-- DELETE /api/modulo/{id} → Soft delete
+| Método | Rota | O que faz (em PT) | Auth | Filtros/Params |
+Para cada um: corpo esperado, status codes e as mensagens de erro em PT que o usuário pode ver.
 
-## Integrations
-- Service calls [OtherModule] service for X
-- Repository filters soft-deleted records automatically
+## Fluxos de negócio (passo a passo)
+Descreva as operações de ponta a ponta na ordem em que acontecem (ex.: "Ao finalizar a
+conferência: 1) grava aceitos/recusados; 2) dá entrada no estoque; 3) emite NF de
+recebimento/devolução/transporte; 4) gera conta(s) a pagar; 5) ordem → aguardando_pagamento").
+Deixe explícito **quando** cada efeito acontece (qual etapa dispara estoque/NF/financeiro).
 
-## Database Schema
-[Table diagram or description]
+## Máquina de estados / status
+Liste cada status, o que significa em termos de negócio e quais transições são possíveis a
+partir dele. Marque os status finais/irreversíveis.
 
-## Business Rules
-- Rule 1
-- Rule 2
+## Integrações entre módulos
+Quais services este módulo chama e por quê (Estoque, Financeiro, Faturamento…), e os
+movimentos financeiros gerados (inclusive os de R$0,00).
 
-## Known Limitations
-- [Any known issues or future improvements]
+## Regras de negócio
+As regras travadas (validações, idempotência, "dinheiro só se move no pagamento" etc.),
+com o **porquê** quando não for óbvio.
+
+## Limitações conhecidas / Débito técnico
+O que ficou de fora, contornos e melhorias futuras (ex.: "NF de compra sem FK real").
 ```
+
+**Regras de escrita:** títulos e texto em português; sem expor detalhe de implementação que
+não importe ao leitor; quando uma regra/contrato mudar, **atualize o que ficou obsoleto**
+(não deixe a doc antiga contradizendo a nova). Se ao documentar você notar a doc de outro
+módulo desatualizada pela sua mudança, sinalize no relatório de done.
 
 ## Code Style
 
@@ -263,7 +280,9 @@ Document your work in `docs/backend/[modulo].md`:
 - [ ] Soft delete applied to business entities
 - [ ] Financial movements created for all transactions
 - [ ] Cross-module integrations working
-- [ ] Documentation updated in docs/backend/[modulo].md
+- [ ] **Documentação (passo fundamental)** atualizada em docs/backend/[modulo].md: endpoints,
+      fluxos passo a passo, máquina de estados, integrações, regras de negócio e débito técnico;
+      doc obsoleta de qualquer módulo afetado pela mudança foi corrigida
 - [ ] `uvicorn app.main:app --reload` runs without errors
 - [ ] No Python linting errors (use black + flake8)
 

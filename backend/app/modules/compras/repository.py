@@ -364,6 +364,9 @@ def finalize_receipt(
 
     order.status = PurchaseOrderStatus.AGUARDANDO_PAGAMENTO
     order.receipt_total_amount = receipt_total
+    # Mercadoria fisicamente recebida na conferência (ERP: documento fiscal e
+    # estoque entram aqui, não no pagamento).
+    order.received_at = datetime.now(timezone.utc)
     db.add(order)
     db.commit()
     db.refresh(order)

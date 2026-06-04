@@ -8,6 +8,7 @@ from sqlalchemy.orm import joinedload
 
 from app.modules.folha.model import (
     Employee,
+    JobPosition,
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
@@ -21,6 +22,15 @@ from app.shared.enums import (
     PayrollItemSource,
     PayrollPeriodStatus,
 )
+from app.shared.pagination import PageParams, paginate_query
+
+
+# Allowlist de ordenação para a listagem paginada de cargos (Demanda 2).
+# order_by fora desta lista cai no default (name asc), nunca 500.
+POSITION_ORDER_COLUMNS = {
+    "name": JobPosition.name,
+    "base_salary": JobPosition.base_salary,
+}
 
 
 SALARY_BASE_EVENT_DESCRIPTION = "Salario base"
@@ -87,6 +97,98 @@ DEFAULT_PAYROLL_EVENT_DEFINITIONS = (
 
 
 # ---------------------------------------------------------------------------
+# Job Positions (Cargos)
+# ---------------------------------------------------------------------------
+
+
+def create_position(
+    db: Session,
+    *,
+    name: str,
+    description: Optional[str],
+    base_salary: Decimal,
+    is_active: bool,
+) -> JobPosition:
+    position = JobPosition(
+        name=name,
+        description=description,
+        base_salary=base_salary,
+        is_active=is_active,
+    )
+    db.add(position)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+def get_position(db: Session, position_id: UUID) -> Optional[JobPosition]:
+    return (
+        db.query(JobPosition)
+        .filter(JobPosition.id == position_id, JobPosition.deleted_at.is_(None))
+        .first()
+    )
+
+
+def get_position_by_name(db: Session, name: str) -> Optional[JobPosition]:
+    return (
+        db.query(JobPosition)
+        .filter(JobPosition.name == name, JobPosition.deleted_at.is_(None))
+        .first()
+    )
+
+
+def list_positions_paginated(
+    db: Session, *, params: PageParams
+) -> tuple[list[JobPosition], int]:
+    query = db.query(JobPosition).filter(JobPosition.deleted_at.is_(None))
+    if params.search:
+        query = query.filter(JobPosition.name.ilike(f"%{params.search}%"))
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=POSITION_ORDER_COLUMNS,
+        default_order=JobPosition.name.asc(),
+        tiebreaker=JobPosition.id,
+    )
+
+
+def update_position(
+    db: Session, position_id: UUID, fields: dict
+) -> Optional[JobPosition]:
+    position = get_position(db, position_id)
+    if not position:
+        return None
+    for key, value in fields.items():
+        setattr(position, key, value)
+    db.add(position)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+def soft_delete_position(db: Session, position_id: UUID) -> Optional[JobPosition]:
+    position = get_position(db, position_id)
+    if not position:
+        return None
+    position.deleted_at = datetime.now(timezone.utc)
+    db.add(position)
+    db.commit()
+    db.refresh(position)
+    return position
+
+
+def count_active_employees_by_position(db: Session, position_id: UUID) -> int:
+    return (
+        db.query(Employee)
+        .filter(
+            Employee.position_id == position_id,
+            Employee.deleted_at.is_(None),
+        )
+        .count()
+    )
+
+
+# ---------------------------------------------------------------------------
 # Employees
 # ---------------------------------------------------------------------------
 
@@ -98,7 +200,7 @@ def create_employee(
     cpf: str,
     email: Optional[str],
     phone: Optional[str],
-    role: str,
+    position_id: UUID,
     base_salary: Decimal,
     contract_type: ContractType,
     admission_date: date,
@@ -110,7 +212,7 @@ def create_employee(
         document=cpf,
         email=email,
         phone=phone,
-        role=role,
+        position_id=position_id,
         base_salary=base_salary,
         contract_type=contract_type,
         hire_date=admission_date,

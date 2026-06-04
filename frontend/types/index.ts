@@ -11,6 +11,20 @@ export interface PaginatedResponse<T> {
   per_page: number
 }
 
+/**
+ * Envelope genérico de resposta paginada do backend (Demanda 0 — infra de
+ * paginação). Espelha exatamente o `Page[T]` retornado pela API:
+ * `{ items, total, page, page_size, pages }`. Reutilizado por todos os
+ * endpoints paginados via `fetchPaginated` (ver `lib/pagination.ts`).
+ */
+export interface Paginated<T> {
+  items: T[]
+  total: number
+  page: number
+  page_size: number
+  pages: number
+}
+
 export interface Notification {
   id: string
   type: string
@@ -410,6 +424,8 @@ export interface Invoice {
   installment_number: number | null
   installment_total: number | null
   parent_invoice_id: string | null
+  cancelled_at: string | null
+  cancellation_reason: string | null
   items: InvoiceItem[]
   created_at: string
   updated_at: string
@@ -643,11 +659,20 @@ export type PayrollCalculationType =
   | "transport_voucher"
 export type PayrollItemSource = "manual" | "automatic"
 
+export interface JobPosition {
+  id: string
+  name: string
+  description: string | null
+  base_salary: number
+  is_active: boolean
+}
+
 export interface Employee {
   id: string
   name: string
   cpf: string
-  role: string
+  position_id: string
+  position_name: string
   base_salary: number
   contract_type: ContractType
   admission_date: string

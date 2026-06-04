@@ -286,6 +286,46 @@ export function formatPhone(phone: string): string {
 }
 ```
 
+## Documentation — PASSO FUNDAMENTAL (não é etapa final opcional)
+
+Documentar é **parte da entrega**, não um extra no fim. Uma tela **não está "done"** sem a doc
+atualizada. A doc de frontend é a que mais alimenta o **futuro manual do usuário final** —
+então escreva **na ótica do usuário**: o que ele vê, o que ele clica e o que o sistema faz em
+resposta. Evite jargão técnico (nada de "useSearchParams", "service", "endpoint" no texto do
+fluxo); fale de telas, botões, abas, campos e mensagens.
+
+Cada agente documenta no seu próprio estilo/contexto. O **seu** (frontend) é a **experiência de
+uso**. Em `docs/frontend/[modulo].md`, cubra no mínimo:
+
+```markdown
+# Módulo: [Nome] (uso)
+
+## Visão geral da tela
+O que esta tela mostra e para que serve, em 2–3 linhas.
+
+## Fluxos passo a passo (numerados, ótica do usuário)
+Para cada tarefa do usuário (ex.: "Receber uma compra", "Cancelar uma nota", "Encontrar as
+notas de uma compra"): passos numerados começando pela ação do usuário e terminando no
+resultado visível. Cite o nome exato dos botões/abas como aparecem na UI.
+[SCREENSHOT: descrição do que capturar neste ponto]
+
+## Glossário de status / badges
+Cada status ou badge que aparece na tela, com o significado em PT e o que o usuário pode fazer
+naquele estado.
+
+## Ações e botões
+O que cada botão/ação faz (e quando aparece). Inclua os filtros disponíveis.
+
+## Mensagens e confirmações
+Os textos dos toasts e dos diálogos de confirmação relevantes, para o usuário saber o que esperar.
+```
+
+**Regras de escrita:** português claro, sem jargão não explicado; cada fluxo deve poder ser
+seguido por quem nunca viu o sistema. Use marcadores `[SCREENSHOT: ...]` onde o manual final
+deverá inserir uma captura. Mantenha consistência com a doc de backend correspondente (sem
+duplicar regra divergente). Se sua mudança tornou parte da doc obsoleta, **corrija** o trecho
+antigo em vez de só anexar.
+
 ## Checklist Before Finishing
 
 - [ ] All pages use Services, never fetch directly
@@ -297,7 +337,9 @@ export function formatPhone(phone: string): string {
 - [ ] shadcn/ui components used consistently
 - [ ] Responsive design (mobile, tablet, desktop)
 - [ ] Keyboard navigation and accessibility
-- [ ] Documentation updated in docs/frontend/[modulo].md
+- [ ] **Documentação (passo fundamental)** em docs/frontend/[modulo].md atualizada na ótica do
+      usuário: fluxos passo a passo, glossário de status/badges, ações e mensagens, com marcadores
+      [SCREENSHOT: ...]; trechos obsoletos corrigidos
 - [ ] `npm run build` passes without errors
 - [ ] `npm run lint` (TypeScript strict mode) passes
 - [ ] Tested in browser (happy path + edge cases)
