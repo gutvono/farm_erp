@@ -50,6 +50,14 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
+    # 0. Guard de create_all (banco novo): o `0001` roda `Base.metadata.create_all`
+    #    sobre os models ATUAIS, que já não têm mais a coluna `role` (dropada no
+    #    0014). Sem este guard, o passo 2 (`SELECT ... role`) quebraria em banco
+    #    novo com "column role does not exist". Em prod a coluna já existe (0013
+    #    rodou quando o model ainda tinha `role`), então isto é no-op lá. A coluna
+    #    é dropada logo em seguida pelo 0014 — net-schema-neutral.
+    op.execute("ALTER TABLE employees ADD COLUMN IF NOT EXISTS role VARCHAR(100)")
+
     # 1. Tabela job_positions (sem server_default em id/base_salary/is_active para
     #    casar 1:1 com os models, que usam default Python — alembic check limpo).
     op.execute(
