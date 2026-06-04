@@ -29,6 +29,27 @@ class StockUnit(str, enum.Enum):
     UNIDADE = "unidade"
 
 
+class SystemRole(str, enum.Enum):
+    """Papel de sistema atribuído a uma categoria de estoque (Demanda 3 / D3).
+
+    Como as categorias passam a ser livres (tabela `stock_categories`), o
+    sistema não consegue "adivinhar" o que é máquina/veículo/insumo etc. Este
+    enum é o vocabulário fixo que o admin mapeia para cada categoria
+    (`category_role_assignments`), e que PCP/Comercial consomem para entender
+    os itens. A ORDEM aqui define a ordem dos valores no tipo Postgres
+    `system_role` (via `sa_enum_values`) — espelhada na migration 0015.
+    """
+
+    MAQUINA = "maquina"
+    VEICULO = "veiculo"
+    EMBALAGEM = "embalagem"
+    INSUMO = "insumo"
+    PRODUTO_FINAL = "produto_final"
+    PRODUTO_INACABADO = "produto_inacabado"
+    PRODUTO_DESCARTADO = "produto_descartado"
+    PRODUTO_VENDAVEL = "produto_vendavel"
+
+
 class MovementType(str, enum.Enum):
     ENTRADA = "entrada"
     SAIDA = "saida"

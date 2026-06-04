@@ -52,7 +52,16 @@ TABLES_TO_CLEAR = [
     "purchase_order_items",
     "purchase_orders",
     "stock_movements",
+    # category_role_assignments e stock_items referenciam stock_categories
+    # (fk_cra_category / fk_stock_items_category) → stock_categories por ÚLTIMO
+    # entre esses três. app_settings é key-value sem FK (ordem livre).
+    # Como na Demanda 2 (job_positions): a migration 0015 popula stock_categories
+    # em prod com os mesmos NOMES do seed (ids diferentes); sem limpar antes, o
+    # re-seed colide por UNIQUE(name) (ix_stock_categories_name).
+    "category_role_assignments",
     "stock_items",
+    "stock_categories",
+    "app_settings",
     "accounts_receivable",
     "accounts_payable",
     "financial_movements",

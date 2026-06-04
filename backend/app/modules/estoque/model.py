@@ -18,14 +18,24 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
     sku = Column(String(64), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
+    # Categoria agora é FK (`category_id` → stock_categories). Um item tem UMA
+    # categoria (decisão D2). FK NOT NULL após o backfill da migration 0015.
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("stock_categories.id", name="fk_stock_items_category"),
+        nullable=False,
+        index=True,
+    )
+    # DEPRECATED: categoria como enum livre. Rebaixada a NULLABLE na migration
+    # 0015; o DROP físico da coluna + do tipo `stock_category` fica para o passo
+    # Backend (após o código parar de lê-la). Não usar em código novo.
     category = Column(
         SAEnum(
             StockCategory,
             name="stock_category",
             values_callable=sa_enum_values,
         ),
-        nullable=False,
-        default=StockCategory.OUTRO,
+        nullable=True,
         index=True,
     )
     unit = Column(
