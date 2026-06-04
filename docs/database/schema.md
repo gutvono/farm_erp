@@ -761,35 +761,30 @@ make reset-db
 
 O deploy (Railway) **não** dropa o banco: roda
 `alembic upgrade head && python scripts/seed_only.py`. O `seed_only.py` **limpa**
-as tabelas de negócio (`DELETE` na ordem de `TABLES_TO_CLEAR`, filhas antes das
-pais) e reaplica `seed.sql`. Toda **tabela de negócio nova precisa entrar nessa
-lista** — senão o re-seed quebra em ambiente com dados (prod), mesmo passando
-local (banco vazio).
+todas as tabelas e reaplica `seed.sql`.
 
-**`job_positions` está na lista, logo após `employees`** (pois
-`employees.position_id → job_positions` via `fk_employees_position`, sem
-`ON DELETE CASCADE` — limpar `employees` não limpa `job_positions`). Motivo
-concreto (hotfix): a `0013` **popula** `job_positions` em prod a partir do `role`
-legado, gerando linhas com os mesmos **nomes** do seed porém **ids diferentes**.
-O `INSERT` do seed usa `ON CONFLICT (id)` (ids fixos referenciados por
-`employees.position_id`), que **não** protege contra a `UNIQUE(name)`
-(`ix_job_positions_name`) → `duplicate key … (name)=(Gerente Agrícola)` e o deploy
-abortava. Limpar `job_positions` antes do seed elimina a colisão. Não trocar o
-conflito para `(name)`: pularia os ids fixos e quebraria a FK do funcionário.
+**A limpeza é DERIVADA DO SCHEMA** (desde o hardening `chore/seed-only-dynamic-clear`).
+O script consulta o catálogo (`information_schema.tables`, `BASE TABLE` do schema
+`public`), remove o conjunto de preservação e executa **um único
+`TRUNCATE … CASCADE`** (ordem-independente — o `CASCADE` resolve as FKs). Assim,
+**qualquer tabela nova futura entra na limpeza automaticamente**, sem editar o
+script.
 
-**Demanda 3** acrescentou à lista, na ordem de FK correta:
-`category_role_assignments` e `stock_items` **antes** de `stock_categories`
-(ambos referenciam `stock_categories`; `stock_categories` por último entre os
-três), mais `app_settings` (key-value, sem FK). Diferente do `job_positions`, a
-`0015` usa para as categorias os **mesmos ids fixos** do seed — então o
-`ON CONFLICT (id)` já bastaria no `reset_db`; ainda assim entram em
-`TABLES_TO_CLEAR` pela regra de ouro (robustez se os ids divergirem e limpeza de
-linhas obsoletas entre deploys).
+Conjunto de preservação (constante `PRESERVE_TABLES` em `seed_only.py`):
+- **`alembic_version`** — estado das migrations; limpá-la faria o próximo
+  `alembic upgrade head` re-rodar a cadeia inteira e quebrar.
 
-> Tabelas-filhas com `ON DELETE CASCADE` (ex.: `payroll_entry_items`,
-> `production_harvests`) são limpas transitivamente pelo pai e não precisam de
-> entrada própria; catálogos com `ON CONFLICT (id) DO NOTHING` e ids fixos (ex.:
-> `payroll_events`) não colidem no re-seed.
+> **SUPERSEDE a regra antiga.** Antes havia uma lista manual `TABLES_TO_CLEAR`
+> (ordem de FK, filhas antes das pais) e a diretriz "toda tabela de negócio nova
+> precisa entrar na lista". Essa lista era um campo minado: esquecer uma tabela
+> quebrava o re-seed em prod por colisão de `UNIQUE(name)` quando uma
+> data-migration populava a tabela com os mesmos nomes do seed (incidente
+> `job_positions` na Demanda 2; quase-incidente `stock_categories` na Demanda 3).
+> A derivação pelo schema elimina a classe inteira de bug — **não é mais preciso
+> manter lista nem pensar em ordem de FK**.
+
+`reset_db.py` (uso local) é independente: dropa/recria o banco inteiro, então não
+tem lista de limpeza e não foi afetado por esta mudança.
 
 ### Adicionar novas migrations
 

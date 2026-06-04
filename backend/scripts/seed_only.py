@@ -24,58 +24,33 @@ def _normalize_url(url: str) -> str:
         return url.replace("postgres://", "postgresql://", 1)
     return url
 
-# Tabelas na ordem correta para DELETE sem violar FK.
-# Filhas antes das pais.
-TABLES_TO_CLEAR = [
-    "user_sessions",
-    "notifications",
-    "plot_activities",
-    "production_inputs",
-    "production_order_workers",
-    "production_order_services",
-    "production_orders",
-    "plots",
-    "payroll_entries",
-    "payroll_periods",
-    "sale_items",
-    "sales",
-    "invoice_items",
-    "invoices",
-    # Cotações — filhas antes das pais. quotation_items.stock_item_id e
-    # quotation_proposals.supplier_id são RESTRICT, então precisam ser limpas
-    # antes de stock_items/suppliers.
-    "quotation_proposal_items",
-    "quotation_proposals",
-    "quotation_items",
-    "quotations",
-    "purchase_order_receipts",
-    "purchase_order_items",
-    "purchase_orders",
-    "stock_movements",
-    # category_role_assignments e stock_items referenciam stock_categories
-    # (fk_cra_category / fk_stock_items_category) → stock_categories por ÚLTIMO
-    # entre esses três. app_settings é key-value sem FK (ordem livre).
-    # Como na Demanda 2 (job_positions): a migration 0015 popula stock_categories
-    # em prod com os mesmos NOMES do seed (ids diferentes); sem limpar antes, o
-    # re-seed colide por UNIQUE(name) (ix_stock_categories_name).
-    "category_role_assignments",
-    "stock_items",
-    "stock_categories",
-    "app_settings",
-    "accounts_receivable",
-    "accounts_payable",
-    "financial_movements",
-    "employees",
-    # job_positions DEPOIS de employees: employees.position_id → job_positions
-    # (fk_employees_position, sem ON DELETE CASCADE). Precisa ser limpa
-    # explicitamente, senão as linhas que a migration 0013 criou em prod (a
-    # partir do role legado) sobrevivem e colidem por NOME com o seed
-    # (ix_job_positions_name) — ON CONFLICT (id) não protege contra esse conflito.
-    "job_positions",
-    "suppliers",
-    "clients",
-    "users",
-]
+
+# Tabelas que SOBREVIVEM ao re-seed (NÃO são limpas). Mantenha explícito e
+# comentado — exceções futuras (config persistente etc.) entram aqui.
+# - alembic_version: estado das migrations. Limpá-la faria o próximo
+#   `alembic upgrade head` tentar re-rodar a cadeia inteira e quebrar.
+PRESERVE_TABLES = {"alembic_version"}
+
+
+def _tables_to_clear(conn) -> list[str]:
+    """Limpeza DERIVADA DO SCHEMA (não mais lista manual).
+
+    Descobre todas as tabelas BASE do schema `public` no banco real e remove o
+    conjunto de preservação. Motivo: a lista fixa antiga era um campo minado —
+    toda tabela nova precisava ser lembrada, e esquecê-la quebrava o re-seed em
+    prod por colisão de UNIQUE(name) entre a data-migration e o seed (incidentes
+    `job_positions` na Demanda 2 e quase-incidente `stock_categories` na Demanda
+    3). Derivando do schema, qualquer tabela nova (Demandas 4/5/…) entra na
+    limpeza AUTOMATICAMENTE, sem editar este script.
+    """
+    rows = conn.execute(
+        text(
+            "SELECT table_name FROM information_schema.tables "
+            "WHERE table_schema = 'public' AND table_type = 'BASE TABLE' "
+            "ORDER BY table_name"
+        )
+    )
+    return [r[0] for r in rows if r[0] not in PRESERVE_TABLES]
 
 
 def main() -> None:
@@ -95,11 +70,16 @@ def main() -> None:
         sys.exit(1)
 
     with engine.connect() as conn:
-        # ── 1. Limpa tabelas na ordem correta ─────────────────────────────────
-        print(f"[seed-only] Limpando {len(TABLES_TO_CLEAR)} tabelas...")
-        for table in TABLES_TO_CLEAR:
-            conn.execute(text(f'DELETE FROM "{table}"'))
-            print(f"[seed-only]   ✓ {table}")
+        # ── 1. Limpa tabelas (derivadas do schema) ─────────────────────────────
+        # Um único TRUNCATE ... CASCADE: ordem-independente (o CASCADE resolve as
+        # FKs), e a lista vem do banco — nenhuma tabela nova pode ser esquecida.
+        tables = _tables_to_clear(conn)
+        print(
+            f"[seed-only] Limpando {len(tables)} tabelas "
+            f"(derivadas do schema; preservadas: {', '.join(sorted(PRESERVE_TABLES))})..."
+        )
+        identifiers = ", ".join(f'"{t}"' for t in tables)
+        conn.execute(text(f"TRUNCATE TABLE {identifiers} CASCADE"))
         conn.commit()
         print("[seed-only] Tabelas limpas.")
 
