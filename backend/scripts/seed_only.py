@@ -57,6 +57,12 @@ TABLES_TO_CLEAR = [
     "accounts_payable",
     "financial_movements",
     "employees",
+    # job_positions DEPOIS de employees: employees.position_id → job_positions
+    # (fk_employees_position, sem ON DELETE CASCADE). Precisa ser limpa
+    # explicitamente, senão as linhas que a migration 0013 criou em prod (a
+    # partir do role legado) sobrevivem e colidem por NOME com o seed
+    # (ix_job_positions_name) — ON CONFLICT (id) não protege contra esse conflito.
+    "job_positions",
     "suppliers",
     "clients",
     "users",
