@@ -12,6 +12,9 @@ export interface MovimentacaoFilters {
   stock_item_id?: string
   movement_type?: StockMovementType
   source_module?: string
+  search?: string
+  start_date?: string
+  end_date?: string
 }
 
 interface SortState {

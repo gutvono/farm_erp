@@ -7,7 +7,6 @@ from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.shared.enums import (
     MovementType,
-    StockCategory,
     StockUnit,
     sa_enum_values,
 )
@@ -18,24 +17,13 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
     sku = Column(String(64), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
-    # Categoria agora é FK (`category_id` → stock_categories). Um item tem UMA
-    # categoria (decisão D2). FK NOT NULL após o backfill da migration 0015.
+    # Categoria é FK (`category_id` → stock_categories). Um item tem UMA categoria
+    # (decisão D2). O antigo enum livre `category` foi removido fisicamente na
+    # migration 0016_drop_stock_category (Demanda 3).
     category_id = Column(
         UUID(as_uuid=True),
         ForeignKey("stock_categories.id", name="fk_stock_items_category"),
         nullable=False,
-        index=True,
-    )
-    # DEPRECATED: categoria como enum livre. Rebaixada a NULLABLE na migration
-    # 0015; o DROP físico da coluna + do tipo `stock_category` fica para o passo
-    # Backend (após o código parar de lê-la). Não usar em código novo.
-    category = Column(
-        SAEnum(
-            StockCategory,
-            name="stock_category",
-            values_callable=sa_enum_values,
-        ),
-        nullable=True,
         index=True,
     )
     unit = Column(
@@ -50,6 +38,9 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     description = Column(Text, nullable=True)
 
     movements = relationship("StockMovement", back_populates="stock_item")
+    # Categoria cadastrável (configuracoes.StockCategory). Resolvida pela FK
+    # category_id; usada para expor category_name no StockItemOut.
+    category = relationship("StockCategory")
 
     def __repr__(self) -> str:
         return f"<StockItem {self.sku} {self.name}>"

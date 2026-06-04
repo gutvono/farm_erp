@@ -189,7 +189,6 @@ Itens de estoque (café, insumos, veículos, equipamentos).
 |--------|------|-----------|
 | `sku` | `VARCHAR(64)` UNIQUE | Código interno |
 | `category_id` | `UUID` FK → `stock_categories.id` (`fk_stock_items_category`, índice `ix_stock_items_category_id`) | Categoria do item (NOT NULL). Um item tem **uma** categoria (D2) |
-| `category` | ENUM `stock_category` NULL | ⚠️ **DEPRECATED**: categoria como enum livre, substituída por `category_id`. Tornada nullable na migration 0015; **DROP físico da coluna + do tipo `stock_category` pendente no passo Backend**. Não usar em código novo |
 | `unit` | ENUM `stock_unit` | `saca` \| `litro` \| `kg` \| `unidade` |
 | `minimum_stock` | `NUMERIC(12,3)` | Gatilho de alerta |
 | `unit_cost` | `NUMERIC(12,2)` | Custo médio por unidade |
@@ -695,8 +694,8 @@ O atributo `role` também foi removido do model `Employee`, mantendo
 
 ### Categorias de estoque — enum → tabela (Demanda 3)
 
-A migration **`0015_stock_categories`** (`down_revision` `0014_drop_employee_role`,
-head atual) cria `stock_categories`, o tipo `system_role`,
+A migration **`0015_stock_categories`** (`down_revision` `0014_drop_employee_role`)
+cria `stock_categories`, o tipo `system_role`,
 `category_role_assignments` e `app_settings`, e migra a categoria do item de enum
 para FK:
 
@@ -714,13 +713,20 @@ para FK:
 3. Adiciona `stock_items.category_id` (FK + índice), faz o **backfill** a partir do
    enum (`cafe`→Café, …) e torna NOT NULL.
 4. Torna `stock_items.category` **NULLABLE** (deprecated) — sem dropar coluna nem
-   tipo `stock_category` (DROP físico fica para o Backend).
+   tipo `stock_category` (DROP físico feito pelo Backend na 0016).
 
-`downgrade()` repopula `category` a partir de `category_id`, restaura NOT NULL,
+`0015.downgrade()` repopula `category` a partir de `category_id`, restaura NOT NULL,
 remove `category_id` e dropa `app_settings`, `category_role_assignments`,
-`stock_categories` e o tipo `system_role` (reversibilidade testada). O atributo
-`StockItem.category` no model foi rebaixado a `nullable=True` para manter
-`alembic check` limpo entre os passos.
+`stock_categories` e o tipo `system_role` (reversibilidade testada).
+
+A migration **`0016_drop_stock_category`** (`down_revision` `0015_stock_categories`,
+**head atual**) faz o **DROP físico** de `stock_items.category` e, em seguida, do
+tipo `stock_category` (nessa ordem — `DROP TYPE` falha com coluna dependente). O
+`downgrade()` recria o tipo e a coluna (nullable, sem repopular). O atributo
+`StockItem.category` foi **removido** do model (substituído por uma relationship
+`category` → `StockCategory`), mantendo `alembic check` limpo (model × banco em
+sincronia). O **guard de `create_all`** da 0015 continua necessário: em banco novo
+ele recria tipo+coluna para o backfill e a 0016 os remove logo após.
 
 ---
 

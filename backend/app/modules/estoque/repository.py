@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 
 from app.modules.estoque.model import StockItem, StockMovement
 from app.modules.estoque.schemas import StockItemCreate, StockItemUpdate, StockMovementCreate
@@ -20,7 +20,7 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
     item = StockItem(
         sku=data.sku,
         name=data.name,
-        category=data.category,
+        category_id=data.category_id,
         unit=data.unit,
         minimum_stock=data.minimum_stock,
         unit_cost=data.unit_cost,
@@ -37,14 +37,23 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
 def list_items(
     db: Session,
     *,
-    category=None,
+    category_id: Optional[UUID] = None,
+    item_ids: Optional[list[UUID]] = None,
     below_minimum: bool = False,
     skip: int = 0,
     limit: int = 100,
 ) -> list[StockItem]:
-    query = db.query(StockItem).filter(StockItem.deleted_at.is_(None))
-    if category is not None:
-        query = query.filter(StockItem.category == category)
+    query = (
+        db.query(StockItem)
+        .options(joinedload(StockItem.category))
+        .filter(StockItem.deleted_at.is_(None))
+    )
+    if category_id is not None:
+        query = query.filter(StockItem.category_id == category_id)
+    if item_ids is not None:
+        # Filtro por papel resolvido no service (lista de ids). Lista vazia →
+        # nenhum item (in_([]) é sempre falso), comportamento correto.
+        query = query.filter(StockItem.id.in_(item_ids))
     items = query.order_by(StockItem.name.asc()).offset(skip).limit(limit).all()
     if below_minimum:
         items = [i for i in items if Decimal(i.quantity_on_hand) < Decimal(i.minimum_stock)]
@@ -54,6 +63,7 @@ def list_items(
 def get_item(db: Session, item_id: UUID) -> Optional[StockItem]:
     return (
         db.query(StockItem)
+        .options(joinedload(StockItem.category))
         .filter(StockItem.id == item_id, StockItem.deleted_at.is_(None))
         .first()
     )
@@ -93,8 +103,9 @@ def soft_delete_item(db: Session, item_id: UUID) -> Optional[StockItem]:
 def get_inventory(db: Session) -> list[StockItem]:
     return (
         db.query(StockItem)
+        .options(joinedload(StockItem.category))
         .filter(StockItem.deleted_at.is_(None))
-        .order_by(StockItem.category.asc(), StockItem.name.asc())
+        .order_by(StockItem.name.asc())
         .all()
     )
 
@@ -165,11 +176,15 @@ def list_movements_paginated(
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> tuple[list[StockMovement], int]:
     """List stock movements applying filters + generic pagination/ordering.
 
     Returns ``(movements, total)`` where ``total`` is the full filtered count.
-    Default order is ``occurred_at desc``.
+    Default order is ``occurred_at desc``. ``params.search`` matches the movement
+    description OR the stock item name (ILIKE); ``start_date``/``end_date`` filter
+    ``occurred_at``.
     """
     query = db.query(StockMovement)
     if stock_item_id:
@@ -178,6 +193,20 @@ def list_movements_paginated(
         query = query.filter(StockMovement.movement_type == movement_type)
     if source_module:
         query = query.filter(StockMovement.source_module == source_module)
+    if start_date:
+        query = query.filter(StockMovement.occurred_at >= start_date)
+    if end_date:
+        query = query.filter(StockMovement.occurred_at <= end_date)
+    if params.search:
+        from sqlalchemy import or_
+
+        # Join no item para buscar também pelo nome. Movimentos sempre têm
+        # stock_item_id (FK NOT NULL), então inner join é seguro.
+        like = f"%{params.search}%"
+        query = query.join(StockItem, StockItem.id == StockMovement.stock_item_id)
+        query = query.filter(
+            or_(StockMovement.description.ilike(like), StockItem.name.ilike(like))
+        )
 
     movements, total = paginate_query(
         query,

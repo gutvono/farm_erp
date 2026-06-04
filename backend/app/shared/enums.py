@@ -14,14 +14,6 @@ class ContractType(str, enum.Enum):
     TEMPORARIO = "temporario"
 
 
-class StockCategory(str, enum.Enum):
-    CAFE = "cafe"
-    INSUMO = "insumo"
-    VEICULO = "veiculo"
-    EQUIPAMENTO = "equipamento"
-    OUTRO = "outro"
-
-
 class StockUnit(str, enum.Enum):
     SACA = "saca"
     LITRO = "litro"

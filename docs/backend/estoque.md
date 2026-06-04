@@ -16,11 +16,17 @@ router.py → service.py → repository.py → PostgreSQL
 
 Todos os endpoints exigem autenticação via cookie `session_token` (dependency `get_current_user`).
 
+### Filtros de listagem (Demanda 3)
+
+- **`GET /itens?category_id=<uuid>`** — filtra por categoria (FK `stock_categories`).
+- **`GET /itens?role=<system_role>`** — filtra por **papel** da categoria (ex.: `produto_vendavel`, `produto_final`, `maquina`...). O Service resolve o papel em IDs de itens via `configuracoes.service.get_item_ids_by_role` (join `stock_items → stock_categories → category_role_assignments`). Como uma categoria pode ter vários papéis, um item de "Café" (papéis `produto_final` **e** `produto_vendavel`) aparece para ambos os filtros.
+- **`GET /movimentacoes`** — paginação `Page[T]` (Demanda 0). Filtros: `stock_item_id`, `movement_type`, `source_module`, `start_date`/`end_date` (sobre `occurred_at`) e `search` (ILIKE na `description` da movimentação **ou** no nome do item, via join). Ordenação por allowlist `{occurred_at, quantity, total_value, unit_cost}`; `order_by` inválido cai no default (`occurred_at desc`) — nunca 500; tiebreaker pela PK.
+
 ### Itens de Estoque
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/estoque/itens` | Lista itens (filtros: `category`, `below_minimum`) |
+| `GET` | `/api/estoque/itens` | Lista itens (filtros: `category_id`, `role`, `below_minimum`) |
 | `POST` | `/api/estoque/itens` | Cria novo item |
 | `GET` | `/api/estoque/itens/{id}` | Detalhe do item |
 | `PUT` | `/api/estoque/itens/{id}` | Atualiza item |
@@ -30,7 +36,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/estoque/movimentacoes` | Lista (filtros: `stock_item_id`, `movement_type`, `source_module`; ordenação: `order_by`, `order_dir`) |
+| `GET` | `/api/estoque/movimentacoes` | Lista paginada `Page[T]` (filtros: `stock_item_id`, `movement_type`, `source_module`, `search`, `start_date`, `end_date`; ordenação: `order_by`, `order_dir`) |
 | `POST` | `/api/estoque/movimentacoes` | Registra movimentação manual |
 | `GET` | `/api/estoque/movimentacoes/{id}` | Detalhe da movimentação |
 
@@ -47,7 +53,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 {
   "sku": "CAFE-ESP-001",
   "name": "Café Especial",
-  "category": "cafe",
+  "category_id": "uuid",
   "unit": "saca",
   "minimum_stock": 10,
   "unit_cost": 450.00,
@@ -56,11 +62,13 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 }
 ```
 
+- **`category_id`** (UUID) substitui o antigo enum `category` (Demanda 3). Deve referenciar uma categoria existente em `stock_categories` (senão `404 "Categoria não encontrada"`). As categorias são cadastradas no módulo **Configurações** (`/api/configuracoes/categorias`).
 - `hourly_cost` é opcional; usado em itens como mão de obra contratada ou
   máquinas para cálculo de custo por hora.
 
 ### StockItemOut (campos extras em relação ao create)
 - `id`, `quantity_on_hand`, `created_at`, `updated_at`
+- `category_id` (UUID) e `category_name` (resolvido via FK → `stock_categories.name`)
 - `is_below_minimum` (bool calculado: `quantity_on_hand < minimum_stock`)
 - `hourly_cost` (pode ser `null`)
 
@@ -90,7 +98,8 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
       "id": "uuid",
       "sku": "CAFE-ESP-001",
       "name": "Café Especial",
-      "category": "cafe",
+      "category_id": "uuid",
+      "category_name": "Café",
       "unit": "saca",
       "quantity_on_hand": 42,
       "unit_cost": 450.00,
@@ -201,7 +210,7 @@ Saídas e entradas com `unit_cost = 0` **não** disparam o recálculo.
 | `id` | UUID PK |
 | `sku` | VARCHAR(64) unique |
 | `name` | VARCHAR(255) |
-| `category` | enum (`cafe` / `insumo` / `veiculo` / `equipamento` / `outro`) |
+| `category_id` | UUID FK → `stock_categories` (`fk_stock_items_category`) NOT NULL, indexado. **Substituiu o enum `category`**, removido fisicamente na migration 0016 (Demanda 3) |
 | `unit` | enum (`saca` / `litro` / `kg` / `unidade`) |
 | `minimum_stock` | NUMERIC(12,3) |
 | `unit_cost` | NUMERIC(12,2) — média ponderada das entradas com valor |

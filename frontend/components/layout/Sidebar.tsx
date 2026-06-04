@@ -11,6 +11,7 @@ import {
   DollarSign,
   Users,
   Tractor,
+  Settings,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 
@@ -23,6 +24,7 @@ const modules = [
   { label: "Financeiro", href: "/financeiro", icon: DollarSign },
   { label: "Folha de Pagamento", href: "/folha", icon: Users },
   { label: "PCP", href: "/pcp", icon: Tractor },
+  { label: "Configurações", href: "/configuracoes", icon: Settings },
 ]
 
 export function Sidebar() {

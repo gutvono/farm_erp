@@ -5,10 +5,10 @@ import {
   Inventory,
   InventoryItemOut,
   Paginated,
-  StockCategory,
   StockItem,
   StockMovement,
   StockMovementType,
+  SystemRole,
   StockUnit,
 } from "@/types/index"
 
@@ -22,7 +22,8 @@ interface RawStockItem {
   id: string
   sku: string
   name: string
-  category: StockCategory
+  category_id: string
+  category_name: string
   unit: StockUnit
   quantity_on_hand: string | number
   minimum_stock: string | number
@@ -39,7 +40,8 @@ function parseStockItem(raw: RawStockItem): StockItem {
     id: raw.id,
     sku: raw.sku,
     name: raw.name,
-    category: raw.category,
+    category_id: raw.category_id,
+    category_name: raw.category_name,
     unit: raw.unit,
     quantity_on_hand: toNumber(raw.quantity_on_hand),
     minimum_stock: toNumber(raw.minimum_stock),
@@ -88,7 +90,8 @@ interface RawInventoryItem {
   id: string
   sku: string
   name: string
-  category: StockCategory
+  category_id: string
+  category_name: string
   unit: StockUnit
   quantity_on_hand: string | number
   unit_cost: string | number
@@ -108,7 +111,8 @@ function parseInventory(raw: RawInventory): Inventory {
       id: item.id,
       sku: item.sku,
       name: item.name,
-      category: item.category,
+      category_id: item.category_id,
+      category_name: item.category_name,
       unit: item.unit,
       quantity_on_hand: toNumber(item.quantity_on_hand),
       unit_cost: toNumber(item.unit_cost),
@@ -121,12 +125,19 @@ function parseInventory(raw: RawInventory): Inventory {
 }
 
 export async function getItens(params?: {
-  category?: StockCategory
+  category_id?: string
+  role?: SystemRole
   below_minimum?: boolean
 }): Promise<StockItem[]> {
   const response = await apiFetch<ApiResponse<RawStockItem[]>>(
     "/api/estoque/itens",
-    { params: { category: params?.category, below_minimum: params?.below_minimum } }
+    {
+      params: {
+        category_id: params?.category_id,
+        role: params?.role,
+        below_minimum: params?.below_minimum,
+      },
+    }
   )
   return response.data.map(parseStockItem)
 }
@@ -134,7 +145,7 @@ export async function getItens(params?: {
 export async function createItem(data: {
   sku: string
   name: string
-  category: StockCategory
+  category_id: string
   unit: StockUnit
   minimum_stock: number
   unit_cost: number
@@ -152,7 +163,7 @@ export async function updateItem(
   id: string,
   data: Partial<{
     name: string
-    category: StockCategory
+    category_id: string
     unit: StockUnit
     minimum_stock: number
     unit_cost: number
@@ -178,7 +189,9 @@ export async function deleteItem(id: string): Promise<void> {
  * como string e são convertidos para number por `parseMovement`.
  *
  * `order_by` aceito pelo backend: `occurred_at`, `quantity`, `total_value`,
- * `unit_cost` (default `occurred_at desc`).
+ * `unit_cost` (default `occurred_at desc`). Filtros: `stock_item_id`,
+ * `movement_type`, `source_module`, `search` (ILIKE na descrição/nome do item) e
+ * intervalo `start_date`/`end_date` (sobre `occurred_at`).
  */
 export async function getMovimentacoesPaginated(params: {
   page?: number
@@ -188,6 +201,9 @@ export async function getMovimentacoesPaginated(params: {
   stock_item_id?: string
   movement_type?: StockMovementType
   source_module?: string
+  search?: string
+  start_date?: string
+  end_date?: string
 }): Promise<Paginated<StockMovement>> {
   return fetchPaginated<StockMovement, RawStockMovement>(
     "/api/estoque/movimentacoes",
