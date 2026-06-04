@@ -22,14 +22,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { createItem, updateItem } from "@/services/estoque"
-import { StockCategory, StockItem, StockUnit } from "@/types/index"
+import { getCategorias } from "@/services/configuracoes"
+import { Category, StockItem, StockUnit } from "@/types/index"
 
 const schema = z.object({
   sku: z.string().min(1, "SKU é obrigatório"),
   name: z.string().min(1, "Nome é obrigatório"),
-  category: z.enum(["cafe", "insumo", "equipamento", "veiculo", "outro"], {
-    error: "Categoria é obrigatória",
-  }),
+  category_id: z.string().min(1, "Categoria é obrigatória"),
   unit: z.enum(["saca", "litro", "kg", "unidade"], {
     error: "Unidade é obrigatória",
   }),
@@ -41,20 +40,14 @@ const schema = z.object({
 
 type FormData = z.infer<typeof schema>
 
-const CATEGORIES: { value: StockCategory; label: string }[] = [
-  { value: "cafe", label: "Café" },
-  { value: "insumo", label: "Insumo" },
-  { value: "equipamento", label: "Equipamento" },
-  { value: "veiculo", label: "Veículo" },
-  { value: "outro", label: "Outro" },
-]
-
 const UNITS: { value: StockUnit; label: string }[] = [
   { value: "saca", label: "Saca" },
   { value: "litro", label: "Litro" },
   { value: "kg", label: "Kg" },
   { value: "unidade", label: "Unidade" },
 ]
+
+const CATEGORIAS_PAGE_SIZE = 100
 
 interface StockItemFormProps {
   open: boolean
@@ -65,6 +58,7 @@ interface StockItemFormProps {
 
 export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItemFormProps) {
   const [loading, setLoading] = useState(false)
+  const [categories, setCategories] = useState<Category[]>([])
 
   const {
     register,
@@ -84,12 +78,20 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
     },
   })
 
+  // Carrega as categorias (com seus papéis) para o dropdown ao abrir.
+  useEffect(() => {
+    if (!open) return
+    getCategorias({ page: 1, page_size: CATEGORIAS_PAGE_SIZE, order_by: "name", order_dir: "asc" })
+      .then((res) => setCategories(res.items))
+      .catch(() => {})
+  }, [open])
+
   useEffect(() => {
     if (open && item) {
       reset({
         sku: item.sku,
         name: item.name,
-        category: item.category,
+        category_id: item.category_id,
         unit: item.unit,
         minimum_stock: item.minimum_stock,
         unit_cost: item.unit_cost,
@@ -97,7 +99,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
         description: item.description ?? "",
       })
     } else if (open && !item) {
-      reset({ sku: "", name: "", minimum_stock: 0, unit_cost: 0, hourly_cost: undefined, description: "" })
+      reset({ sku: "", name: "", category_id: "", minimum_stock: 0, unit_cost: 0, hourly_cost: undefined, description: "" })
     }
   }, [open, item, reset])
 
@@ -107,7 +109,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
       if (item) {
         await updateItem(item.id, {
           name: data.name,
-          category: data.category as StockCategory,
+          category_id: data.category_id,
           unit: data.unit as StockUnit,
           minimum_stock: data.minimum_stock,
           unit_cost: data.unit_cost,
@@ -119,7 +121,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
         await createItem({
           sku: data.sku,
           name: data.name,
-          category: data.category as StockCategory,
+          category_id: data.category_id,
           unit: data.unit as StockUnit,
           minimum_stock: data.minimum_stock,
           unit_cost: data.unit_cost,
@@ -137,8 +139,15 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
     }
   }
 
-  const categoryValue = watch("category")
+  const categoryValue = watch("category_id")
   const unitValue = watch("unit")
+
+  // Custo por hora só faz sentido para itens cuja categoria tem papel de máquina
+  // ou veículo (entram no cálculo de custo por hora).
+  const selectedCategory = categories.find((c) => c.id === categoryValue)
+  const showHourlyCost =
+    selectedCategory?.roles.includes("maquina") ||
+    selectedCategory?.roles.includes("veiculo")
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -171,22 +180,22 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
             <div className="space-y-1">
               <Label>Categoria</Label>
               <Select
-                value={categoryValue}
-                onValueChange={(v) => setValue("category", v as StockCategory)}
+                value={categoryValue ?? ""}
+                onValueChange={(v) => setValue("category_id", v, { shouldValidate: true })}
               >
                 <SelectTrigger>
                   <SelectValue placeholder="Selecione" />
                 </SelectTrigger>
                 <SelectContent>
-                  {CATEGORIES.map((c) => (
-                    <SelectItem key={c.value} value={c.value}>
-                      {c.label}
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>
+                      {c.name}
                     </SelectItem>
                   ))}
                 </SelectContent>
               </Select>
-              {errors.category && (
-                <p className="text-xs text-red-500">{errors.category.message}</p>
+              {errors.category_id && (
+                <p className="text-xs text-red-500">{errors.category_id.message}</p>
               )}
             </div>
 
@@ -239,7 +248,7 @@ export function StockItemForm({ open, onOpenChange, item, onSuccess }: StockItem
             </div>
           </div>
 
-          {(categoryValue === "equipamento" || categoryValue === "veiculo") && (
+          {showHourlyCost && (
             <div className="space-y-1">
               <Label htmlFor="hourly_cost">Custo por Hora (R$) — opcional</Label>
               <Input

@@ -5,7 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.shared.enums import MovementType, StockCategory, StockUnit
+from app.shared.enums import MovementType, StockUnit
 
 
 # ---------------------------------------------------------------------------
@@ -16,7 +16,7 @@ from app.shared.enums import MovementType, StockCategory, StockUnit
 class StockItemCreate(BaseModel):
     sku: str = Field(min_length=1, max_length=64)
     name: str = Field(min_length=1, max_length=255)
-    category: StockCategory = StockCategory.OUTRO
+    category_id: UUID
     unit: StockUnit = StockUnit.UNIDADE
     minimum_stock: Decimal = Field(default=Decimal("0"), ge=0)
     unit_cost: Decimal = Field(default=Decimal("0"), ge=0)
@@ -26,7 +26,7 @@ class StockItemCreate(BaseModel):
 
 class StockItemUpdate(BaseModel):
     name: Optional[str] = Field(default=None, min_length=1, max_length=255)
-    category: Optional[StockCategory] = None
+    category_id: Optional[UUID] = None
     unit: Optional[StockUnit] = None
     minimum_stock: Optional[Decimal] = Field(default=None, ge=0)
     unit_cost: Optional[Decimal] = Field(default=None, ge=0)
@@ -38,7 +38,8 @@ class StockItemOut(BaseModel):
     id: UUID
     sku: str
     name: str
-    category: StockCategory
+    category_id: UUID
+    category_name: str
     unit: StockUnit
     minimum_stock: Decimal
     unit_cost: Decimal
@@ -53,11 +54,13 @@ class StockItemOut(BaseModel):
 
     @classmethod
     def from_model(cls, item) -> "StockItemOut":
+        category = item.category
         data = {
             "id": item.id,
             "sku": item.sku,
             "name": item.name,
-            "category": item.category,
+            "category_id": item.category_id,
+            "category_name": category.name if category else "",
             "unit": item.unit,
             "minimum_stock": item.minimum_stock,
             "unit_cost": item.unit_cost,
@@ -130,7 +133,8 @@ class InventoryItemOut(BaseModel):
     id: UUID
     sku: str
     name: str
-    category: StockCategory
+    category_id: UUID
+    category_name: str
     unit: StockUnit
     quantity_on_hand: Decimal
     unit_cost: Decimal
@@ -143,11 +147,13 @@ class InventoryItemOut(BaseModel):
     def from_model(cls, item) -> "InventoryItemOut":
         qty = Decimal(item.quantity_on_hand)
         cost = Decimal(item.unit_cost)
+        category = item.category
         return cls(
             id=item.id,
             sku=item.sku,
             name=item.name,
-            category=item.category,
+            category_id=item.category_id,
+            category_name=category.name if category else "",
             unit=item.unit,
             quantity_on_hand=qty,
             unit_cost=cost,

@@ -107,7 +107,7 @@ export default function PCPPage() {
   useEffect(() => { loadAtividades() }, [loadAtividades])
 
   useEffect(() => {
-    getItens({ category: "insumo" }).then(setInsumos).catch(() => {})
+    getItens({ role: "insumo" }).then(setInsumos).catch(() => {})
   }, [])
 
   function handleEditPlot(plot: Plot) {

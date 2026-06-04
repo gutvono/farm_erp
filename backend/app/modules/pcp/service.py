@@ -42,7 +42,7 @@ from app.shared.enums import (
     FinancialCategory,
     MovementType,
     ProductionOrderStatus,
-    StockCategory,
+    SystemRole,
 )
 
 
@@ -378,10 +378,19 @@ def _simulate_harvest(
 
 
 def _find_quality_item(db: Session, quality_keyword: str) -> Optional[StockItem]:
+    # Demanda 3: a categoria deixou de ser enum fixo. "Itens de café" (o produto
+    # final da produção) passam a ser resolvidos pelo PAPEL `produto_final` da
+    # categoria (via Configurações), preservando a semântica anterior
+    # (StockItem.category == CAFE). A refatoração profunda do PCP é a Demanda 5.
+    from app.modules.configuracoes import service as config_service
+
+    item_ids = config_service.get_item_ids_by_role(db, SystemRole.PRODUTO_FINAL)
+    if not item_ids:
+        return None
     items = (
         db.query(StockItem)
         .filter(
-            StockItem.category == StockCategory.CAFE,
+            StockItem.id.in_(item_ids),
             StockItem.deleted_at.is_(None),
         )
         .all()

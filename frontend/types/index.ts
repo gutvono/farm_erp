@@ -172,7 +172,6 @@ export interface DefaulterItem {
   due_date: string
 }
 
-export type StockCategory = "cafe" | "insumo" | "equipamento" | "veiculo" | "outro"
 export type StockUnit = "saca" | "litro" | "kg" | "unidade"
 export type StockMovementType = "entrada" | "saida"
 
@@ -180,7 +179,8 @@ export interface StockItem {
   id: string
   sku: string
   name: string
-  category: StockCategory
+  category_id: string
+  category_name: string
   unit: StockUnit
   quantity_on_hand: number
   minimum_stock: number
@@ -211,7 +211,8 @@ export interface InventoryItemOut {
   id: string
   sku: string
   name: string
-  category: StockCategory
+  category_id: string
+  category_name: string
   unit: StockUnit
   quantity_on_hand: number
   unit_cost: number
@@ -223,6 +224,33 @@ export interface Inventory {
   items: InventoryItemOut[]
   total_value: number
   generated_at: string
+}
+
+// ── CONFIGURAÇÕES ─────────────────────────────────────────────────────────────
+
+/** Vocabulário fixo de papéis de sistema (enum Postgres `system_role`). */
+export type SystemRole =
+  | "maquina"
+  | "veiculo"
+  | "embalagem"
+  | "insumo"
+  | "produto_final"
+  | "produto_inacabado"
+  | "produto_descartado"
+  | "produto_vendavel"
+
+export interface Category {
+  id: string
+  name: string
+  description: string | null
+  is_active: boolean
+  roles: SystemRole[]
+}
+
+export interface HarvestDestinations {
+  industria_item_id: string | null
+  embalagem_item_id: string | null
+  descarte_item_id: string | null
 }
 
 // ── COMPRAS ──────────────────────────────────────────────────────────────────

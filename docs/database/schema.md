@@ -3,7 +3,7 @@
 ## Visão Geral
 
 O banco de dados do Coffee Farm ERP é modelado em PostgreSQL, acessado via
-SQLAlchemy 2.0, com migrações via Alembic. Todas as 22 tabelas seguem os
+SQLAlchemy 2.0, com migrações via Alembic. Todas as tabelas seguem os
 mesmos padrões de chave primária, auditoria e, quando aplicável, soft delete.
 
 ---
@@ -47,10 +47,12 @@ nome do enum.
 | Tabela | Soft delete | Observação |
 |--------|-------------|------------|
 | `users`, `clients`, `suppliers`, `employees`, `job_positions` | ✅ | entidades cadastrais |
-| `stock_items`, `plots` | ✅ | cadastros base |
+| `stock_items`, `plots`, `stock_categories` | ✅ | cadastros base |
 | `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events` | ✅ | operações de negócio e catálogos |
 | `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
+| `category_role_assignments` | ❌ | tabela de ligação M:N (hard delete; CASCADE da categoria) |
+| `app_settings` | ❌ | key-value de configuração |
 | `notifications` | ❌ | efêmeras por design |
 
 ---
@@ -186,12 +188,15 @@ Itens de estoque (café, insumos, veículos, equipamentos).
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `sku` | `VARCHAR(64)` UNIQUE | Código interno |
-| `category` | ENUM `stock_category` | `cafe` \| `insumo` \| `veiculo` \| `equipamento` \| `outro` |
+| `category_id` | `UUID` FK → `stock_categories.id` (`fk_stock_items_category`, índice `ix_stock_items_category_id`) | Categoria do item (NOT NULL). Um item tem **uma** categoria (D2) |
 | `unit` | ENUM `stock_unit` | `saca` \| `litro` \| `kg` \| `unidade` |
 | `minimum_stock` | `NUMERIC(12,3)` | Gatilho de alerta |
 | `unit_cost` | `NUMERIC(12,2)` | Custo médio por unidade |
 | `hourly_cost` | `NUMERIC(10,2)` NULL | Custo por hora (para itens como mão de obra e máquinas) |
 | `quantity_on_hand` | `NUMERIC(12,3)` | Saldo atual (denormalizado; ledger é `stock_movements`) |
+
+##### Relacionamentos
+- `stock_items.category_id → stock_categories.id` (N:1) — a categoria do item.
 
 #### `stock_movements`
 Ledger imutável de entradas/saídas de estoque.
@@ -204,6 +209,72 @@ Ledger imutável de entradas/saídas de estoque.
 | `unit_cost`, `total_value` | `NUMERIC(12,2)` | Valor da movimentação |
 | `source_module`, `reference_id` | `VARCHAR`, `UUID` | Rastreabilidade |
 | `occurred_at` | `TIMESTAMPTZ` | Quando ocorreu |
+
+---
+
+### Configurações (Estoque/Sistema)
+
+Módulo introduzido na Demanda 3 (decisões D2 e D3). As categorias de estoque
+deixam de ser um enum fixo e viram tabela cadastrável pelo usuário; um mapeamento
+M:N categoria→papel de sistema permite que PCP/Comercial continuem "entendendo" o
+que é máquina/veículo/insumo/etc.; e um key-value guarda configurações globais.
+
+#### `stock_categories`
+Categorias de estoque cadastráveis (entidade de negócio → soft delete). Substituem
+o enum `stock_category`.
+
+| Coluna | Tipo | Nulo? | Default | Significado (negócio) |
+|--------|------|-------|---------|-----------------------|
+| `id` | `UUID` PK | não | — | Identificador da categoria |
+| `name` | `VARCHAR(120)` UNIQUE | não | — | Nome (ex.: "Café", "Insumo") |
+| `description` | `TEXT` | sim | — | Descrição livre |
+| `is_active` | `BOOLEAN` | não | true | Disponível para uso |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | `now()` | Auditoria |
+| `deleted_at` | `TIMESTAMPTZ` | sim | — | **Soft delete** (NULL = ativa) |
+
+Índices: `ix_stock_categories_name` (UNIQUE), `ix_stock_categories_deleted_at`.
+
+#### `category_role_assignments`
+Mapeamento **M:N** categoria ↔ papel de sistema. Tabela de ligação (sem soft
+delete). Uma categoria pode ter **vários** papéis (ex.: "Café" → `produto_final`
+**e** `produto_vendavel`).
+
+| Coluna | Tipo | Nulo? | Significado (negócio) |
+|--------|------|-------|-----------------------|
+| `id` | `UUID` PK | não | Identificador |
+| `category_id` | `UUID` FK → `stock_categories.id` (`fk_cra_category`, **ON DELETE CASCADE**) | não | Categoria |
+| `role` | ENUM `system_role` | não | Papel atribuído (ver enum abaixo) |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | Auditoria |
+
+Constraint: `uq_category_role` UNIQUE (`category_id`, `role`) — impede papel
+duplicado na mesma categoria. Índices: `ix_category_role_assignments_category_id`,
+`ix_category_role_assignments_role`.
+
+**Enum `system_role`** (vocabulário fixo de papéis; ordem dos valores no tipo
+Postgres): `maquina`, `veiculo`, `embalagem`, `insumo`, `produto_final`,
+`produto_inacabado`, `produto_descartado`, `produto_vendavel`. Consumido por
+PCP/Comercial para interpretar os itens de cada categoria.
+
+Papéis default semeados pela migration 0015: Café → `produto_final` +
+`produto_vendavel`; Insumo → `insumo`; Veículo → `veiculo`; Equipamento →
+`maquina`; Outro → (nenhum). O seed acrescenta Outro → `produto_descartado`
+(para hospedar o item-destino de Descarte da colheita — ver `app_settings`).
+
+#### `app_settings`
+Configuração **key-value** (sem soft delete). Guarda configurações globais; nesta
+demanda, os 3 itens-destino da colheita (D1).
+
+| Coluna | Tipo | Nulo? | Significado (negócio) |
+|--------|------|-------|-----------------------|
+| `id` | `UUID` PK | não | Identificador |
+| `key` | `VARCHAR(100)` UNIQUE | não | Chave da configuração |
+| `value` | `VARCHAR(500)` | sim | Valor (ex.: UUID de um `stock_item` como texto) |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | Auditoria |
+
+Índice: `ix_app_settings_key` (UNIQUE). Chaves desta demanda:
+`harvest_destination_industria_item_id`, `harvest_destination_embalagem_item_id`,
+`harvest_destination_descarte_item_id` → cada uma aponta (por `value` = UUID em
+texto, **sem FK**) para o `stock_item` que recebe a produção daquele destino.
 
 ---
 
@@ -465,7 +536,10 @@ suppliers ────┬──── purchase_orders ──┬── purchase_o
               │                       └── purchase_order_receipts ──▶ purchase_order_items
               └──── accounts_payable
 
-stock_items ──── stock_movements (ledger)
+stock_categories ──◀ stock_items ──── stock_movements (ledger)
+       └──◀ category_role_assignments (M:N categoria↔system_role)
+
+app_settings (key-value; harvest_destination_*_item_id → stock_items, sem FK)
 
 job_positions ──◀ employees ──── payroll_entries ──── payroll_periods
                        │
@@ -489,7 +563,7 @@ financial_movements (ledger, referencia opcional por source_module + reference_i
 A revisão `0001_initial_schema` usa `Base.metadata.create_all(bind)` em vez de
 operações `op.create_table()` explícitas. Motivos:
 
-1. **Evita duplicação**: os 22 modelos já são a fonte de verdade no SQLAlchemy;
+1. **Evita duplicação**: os modelos já são a fonte de verdade no SQLAlchemy;
    reescrever cada `op.create_table()` seria ~700 linhas duplicadas.
 2. **Bootstrap limpo**: para a primeira revisão, onde ainda não há schema
    versionado, `create_all` produz exatamente o mesmo DDL que Alembic geraria.
@@ -618,6 +692,42 @@ NULLABLE (sem repopular — quem precisar do texto resolve via `JOIN job_positio
 O atributo `role` também foi removido do model `Employee`, mantendo
 `alembic check` limpo (model × banco em sincronia).
 
+### Categorias de estoque — enum → tabela (Demanda 3)
+
+A migration **`0015_stock_categories`** (`down_revision` `0014_drop_employee_role`)
+cria `stock_categories`, o tipo `system_role`,
+`category_role_assignments` e `app_settings`, e migra a categoria do item de enum
+para FK:
+
+1. **Guard de `create_all`** (mesmo padrão do `0013`): garante o tipo
+   `stock_category` e a coluna `stock_items.category` antes de lê-los no backfill.
+   O passo Backend removerá `category` do model; sem o guard, num banco novo o
+   `0001` (`create_all`) não criaria tipo nem coluna e o backfill quebraria. No-op
+   em prod. Net-schema-neutral (o Backend dropa coluna + tipo depois).
+2. Insere as 5 categorias do enum (`Café/Insumo/Veículo/Equipamento/Outro`) com
+   **ids fixos** (referenciados pelo seed e pelo backfill) + os papéis default.
+   As linhas de `category_role_assignments` também usam **ids fixos iguais aos do
+   seed**, para que no `reset_db` (onde migration **e** seed rodam) o
+   `ON CONFLICT (id)` do seed deduplique — senão bateria na `UNIQUE(category_id,
+   role)`, repetindo o incidente do `job_positions`.
+3. Adiciona `stock_items.category_id` (FK + índice), faz o **backfill** a partir do
+   enum (`cafe`→Café, …) e torna NOT NULL.
+4. Torna `stock_items.category` **NULLABLE** (deprecated) — sem dropar coluna nem
+   tipo `stock_category` (DROP físico feito pelo Backend na 0016).
+
+`0015.downgrade()` repopula `category` a partir de `category_id`, restaura NOT NULL,
+remove `category_id` e dropa `app_settings`, `category_role_assignments`,
+`stock_categories` e o tipo `system_role` (reversibilidade testada).
+
+A migration **`0016_drop_stock_category`** (`down_revision` `0015_stock_categories`,
+**head atual**) faz o **DROP físico** de `stock_items.category` e, em seguida, do
+tipo `stock_category` (nessa ordem — `DROP TYPE` falha com coluna dependente). O
+`downgrade()` recria o tipo e a coluna (nullable, sem repopular). O atributo
+`StockItem.category` foi **removido** do model (substituído por uma relationship
+`category` → `StockCategory`), mantendo `alembic check` limpo (model × banco em
+sincronia). O **guard de `create_all`** da 0015 continua necessário: em banco novo
+ele recria tipo+coluna para o backfill e a 0016 os remove logo após.
+
 ---
 
 ## Como rodar
@@ -667,6 +777,15 @@ O `INSERT` do seed usa `ON CONFLICT (id)` (ids fixos referenciados por
 abortava. Limpar `job_positions` antes do seed elimina a colisão. Não trocar o
 conflito para `(name)`: pularia os ids fixos e quebraria a FK do funcionário.
 
+**Demanda 3** acrescentou à lista, na ordem de FK correta:
+`category_role_assignments` e `stock_items` **antes** de `stock_categories`
+(ambos referenciam `stock_categories`; `stock_categories` por último entre os
+três), mais `app_settings` (key-value, sem FK). Diferente do `job_positions`, a
+`0015` usa para as categorias os **mesmos ids fixos** do seed — então o
+`ON CONFLICT (id)` já bastaria no `reset_db`; ainda assim entram em
+`TABLES_TO_CLEAR` pela regra de ouro (robustez se os ids divergirem e limpeza de
+linhas obsoletas entre deploys).
+
 > Tabelas-filhas com `ON DELETE CASCADE` (ex.: `payroll_entry_items`,
 > `production_harvests`) são limpas transitivamente pelo pai e não precisam de
 > entrada própria; catálogos com `ON CONFLICT (id) DO NOTHING` e ids fixos (ex.:
@@ -697,7 +816,9 @@ python -m poetry run alembic upgrade head
 - **3** fornecedores
 - **8** cargos (`job_positions`) com salário sugerido (R$ 1.800–6.000)
 - **8** funcionários — 3 CLT (R$ 2.200–6.000), 3 PJ (R$ 4.000–5.500), 2 Temporários (R$ 1.800); cada um vinculado a um cargo via `position_id` (campo legado `role` fica NULL)
-- **9** itens de estoque — 3 qualidades de café em sacas de 60kg, 4 insumos, 1 trator, 1 colheitadeira
+- **5** categorias de estoque (`stock_categories`: Café, Insumo, Veículo, Equipamento, Outro) + **6** atribuições de papel (`category_role_assignments`; Café com 2 papéis, Outro com `produto_descartado`)
+- **3** configurações (`app_settings`): itens-destino da colheita (indústria/embalagem/descarte)
+- **10** itens de estoque — 3 qualidades de café, 4 insumos, 1 trator, 1 colheitadeira, 1 Café Descarte (refugo); cada item com `category_id` (enum `category` legado fica NULL)
 - **2** talhões e **3** atividades registradas
 - **1** ordem de produção concluída (100 sacas: 19 especial, 52 superior, 29 tradicional)
 - **1** ordem de compra concluída (R$ 7.600)

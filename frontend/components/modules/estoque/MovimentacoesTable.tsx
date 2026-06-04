@@ -1,6 +1,8 @@
 "use client"
 
 import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -117,7 +119,43 @@ export function MovimentacoesTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-wrap gap-2">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Buscar</Label>
+          <Input
+            value={filters.search ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, search: e.target.value || undefined })
+            }
+            placeholder="Descrição ou item..."
+            className="w-56"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">De</Label>
+          <Input
+            type="date"
+            value={filters.start_date ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, start_date: e.target.value || undefined })
+            }
+            className="w-40"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Até</Label>
+          <Input
+            type="date"
+            value={filters.end_date ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, end_date: e.target.value || undefined })
+            }
+            className="w-40"
+          />
+        </div>
+
         {!hideItemFilter && items.length > 0 && (
           <Select
             value={filters.stock_item_id ?? ALL}

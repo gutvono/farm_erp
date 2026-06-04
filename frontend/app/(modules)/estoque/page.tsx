@@ -33,23 +33,17 @@ import {
   getItens,
   getInventario,
 } from "@/services/estoque"
+import { getCategorias } from "@/services/configuracoes"
 import { getRecebimentos, iniciarConferencia } from "@/services/compras"
 import {
+  Category,
   Inventory,
   PurchaseOrderWithReceipts,
-  StockCategory,
   StockItem,
 } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
-const CATEGORIES: { value: string; label: string }[] = [
-  { value: "all", label: "Todas as categorias" },
-  { value: "cafe", label: "Café" },
-  { value: "insumo", label: "Insumo" },
-  { value: "equipamento", label: "Equipamento" },
-  { value: "veiculo", label: "Veículo" },
-  { value: "outro", label: "Outro" },
-]
+const CATEGORIAS_PAGE_SIZE = 100
 
 const STATUS_BADGE: Record<string, string> = {
   aprovada: "bg-emerald-100 text-emerald-700",
@@ -66,6 +60,7 @@ export default function EstoquePage() {
   const [itemsLoading, setItemsLoading] = useState(false)
   const [categoryFilter, setCategoryFilter] = useState<string>("all")
   const [belowMinFilter, setBelowMinFilter] = useState(false)
+  const [categories, setCategories] = useState<Category[]>([])
 
   const movements = useMovimentacoes()
 
@@ -91,7 +86,7 @@ export default function EstoquePage() {
     setItemsLoading(true)
     try {
       const data = await getItens({
-        category: categoryFilter !== "all" ? (categoryFilter as StockCategory) : undefined,
+        category_id: categoryFilter !== "all" ? categoryFilter : undefined,
         below_minimum: belowMinFilter || undefined,
       })
       setItems(data)
@@ -116,6 +111,12 @@ export default function EstoquePage() {
 
   useEffect(() => { loadItems() }, [loadItems])
   useEffect(() => { loadRecebimentos() }, [loadRecebimentos])
+
+  useEffect(() => {
+    getCategorias({ page: 1, page_size: CATEGORIAS_PAGE_SIZE, order_by: "name", order_dir: "asc" })
+      .then((res) => setCategories(res.items))
+      .catch(() => {})
+  }, [])
 
   async function handleOpenInventory() {
     setInventoryOpen(true)
@@ -214,9 +215,10 @@ export default function EstoquePage() {
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
-                    {CATEGORIES.map((c) => (
-                      <SelectItem key={c.value} value={c.value}>
-                        {c.label}
+                    <SelectItem value="all">Todas as categorias</SelectItem>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name}
                       </SelectItem>
                     ))}
                   </SelectContent>
