@@ -496,6 +496,19 @@ operações `op.create_table()` explícitas. Motivos:
 3. **Migrations futuras usam autogenerate**: a partir daí, toda alteração deve
    vir de `alembic revision --autogenerate -m "..."` com diffs explícitos.
 
+> ⚠️ **Consequência (banco novo vs. prod).** `create_all` reflete os models
+> **atuais**, não o histórico. Num banco novo ele "salta" direto para o estado
+> final do schema, enquanto em prod cada migration roda em sequência sobre o
+> estado da época. Duas regras nascem disso:
+> - **Idempotência obrigatória**: toda migration após a `0001` deve usar
+>   `IF NOT EXISTS`/`IF EXISTS`/`ON CONFLICT`/DO-block (a tabela/coluna pode já
+>   ter sido criada pelo `create_all`).
+> - **Colunas removidas do model**: se uma migration **lê/escreve** uma coluna
+>   que o model atual já não declara (ex.: foi dropada por uma migration
+>   posterior), o `create_all` num banco novo não a cria e a migration quebra.
+>   Proteja com `ADD COLUMN IF NOT EXISTS` antes do uso (ver `0013_job_positions`,
+>   coluna `role`).
+
 ### Enum `payment_method` (migration 1cd82e8905ef)
 
 Criado na migration `add_payment_method_and_service_orders`. Valores:
@@ -585,9 +598,19 @@ o código parou de ler/escrever o campo — o dado canônico do cargo é `positi
 `0013.downgrade()` repopula `role` a partir de `job_positions.name`, restaura
 `role NOT NULL`, remove `position_id` (índice/FK/coluna) e dropa `job_positions`
 (reversibilidade testada localmente). A migration é idempotente
-(`IF NOT EXISTS`/`ON CONFLICT`/DO-block) — roda também no caminho do banco novo,
-em que `0001` (`create_all`) já materializou a tabela e a coluna a partir dos
-models atualizados.
+(`IF NOT EXISTS`/`ON CONFLICT`/DO-block).
+
+**Guard de `create_all` no `0013` (banco novo).** Como o passo Backend removeu o
+atributo `role` do model `Employee`, o `0001` (`create_all`) num banco novo passou
+a criar `employees` **sem** a coluna `role`. O passo 2 do `0013` lê
+`employees.role`, então sem proteção o `alembic upgrade head` quebrava em banco
+novo com *"column role does not exist"* (e o `reset_db` junto). Por isso o
+`0013.upgrade()` começa com `ALTER TABLE employees ADD COLUMN IF NOT EXISTS role
+VARCHAR(100)`: em banco novo recria a coluna efêmera (que o `0014` dropa em
+seguida → **net-schema-neutral**); em prod, onde `0013` já rodou com a coluna
+presente, é no-op. Caso geral desta regra: *toda migration que lê uma coluna que
+o model atual já não declara precisa de guard `ADD COLUMN IF NOT EXISTS`, senão
+o caminho `create_all` quebra* (ver "Por que `create_all`").
 
 A migration **`0014_drop_employee_role`** (`down_revision` `0013_job_positions`)
 faz `DROP COLUMN IF EXISTS role`; o `downgrade()` recria `role VARCHAR(100)`
@@ -623,6 +646,31 @@ Esse script:
 ```bash
 make reset-db
 ```
+
+### Re-semeadura sem drop (`seed_only.py`) e limpeza de tabelas
+
+O deploy (Railway) **não** dropa o banco: roda
+`alembic upgrade head && python scripts/seed_only.py`. O `seed_only.py` **limpa**
+as tabelas de negócio (`DELETE` na ordem de `TABLES_TO_CLEAR`, filhas antes das
+pais) e reaplica `seed.sql`. Toda **tabela de negócio nova precisa entrar nessa
+lista** — senão o re-seed quebra em ambiente com dados (prod), mesmo passando
+local (banco vazio).
+
+**`job_positions` está na lista, logo após `employees`** (pois
+`employees.position_id → job_positions` via `fk_employees_position`, sem
+`ON DELETE CASCADE` — limpar `employees` não limpa `job_positions`). Motivo
+concreto (hotfix): a `0013` **popula** `job_positions` em prod a partir do `role`
+legado, gerando linhas com os mesmos **nomes** do seed porém **ids diferentes**.
+O `INSERT` do seed usa `ON CONFLICT (id)` (ids fixos referenciados por
+`employees.position_id`), que **não** protege contra a `UNIQUE(name)`
+(`ix_job_positions_name`) → `duplicate key … (name)=(Gerente Agrícola)` e o deploy
+abortava. Limpar `job_positions` antes do seed elimina a colisão. Não trocar o
+conflito para `(name)`: pularia os ids fixos e quebraria a FK do funcionário.
+
+> Tabelas-filhas com `ON DELETE CASCADE` (ex.: `payroll_entry_items`,
+> `production_harvests`) são limpas transitivamente pelo pai e não precisam de
+> entrada própria; catálogos com `ON CONFLICT (id) DO NOTHING` e ids fixos (ex.:
+> `payroll_events`) não colidem no re-seed.
 
 ### Adicionar novas migrations
 

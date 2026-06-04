@@ -57,6 +57,16 @@ ON CONFLICT (id) DO NOTHING;
 -- 4. JOB POSITIONS (cargos) — entidade referenciada por employees.position_id
 --    base_salary = sugestão de salário do cargo (prefilla o do funcionário).
 --    Um cargo por funcionário do seed; "Colhedor" e "Colhedora" são distintos.
+--
+--    IDEMPOTÊNCIA / re-seed: este INSERT usa ids fixos (referenciados por
+--    employees.position_id abaixo), então o ON CONFLICT é por (id). Isso NÃO
+--    protege contra a constraint UNIQUE(name) (ix_job_positions_name) caso
+--    existam linhas com os MESMOS nomes e ids DIFERENTES — exatamente o que a
+--    migration 0013_job_positions cria em prod a partir do role legado. A
+--    proteção contra essa colisão por NOME é feita LIMPANDO job_positions antes
+--    do seed (TABLES_TO_CLEAR em scripts/seed_only.py, após employees; reset_db.py
+--    parte de banco vazio). Não trocar o conflito para (name): isso pularia os
+--    ids fixos e quebraria a FK employees.position_id.
 -- -----------------------------------------------------------------------------
 INSERT INTO job_positions (id, name, description, base_salary, is_active) VALUES
 ('99999999-9999-9999-9999-999999990001', 'Gerente Agrícola',         'Gestão das operações agrícolas da fazenda',          6000.00, TRUE),
