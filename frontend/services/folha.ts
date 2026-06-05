@@ -6,7 +6,6 @@ import {
   Employee,
   JobPosition,
   Paginated,
-  PayrollBatchResult,
   PayrollCalculationPreview,
   PayrollCalculationRequest,
   PayrollEntry,
@@ -16,6 +15,10 @@ import {
   PayrollCalculationType,
   PayrollEventType,
   PayrollItemSource,
+  PayrollPaymentRequest,
+  PayrollPaymentRequestEntry,
+  PayrollPaymentRequestStatus,
+  PayrollPaymentRequestType,
   PayrollPeriod,
   PayrollPeriodStatus,
 } from "@/types/index"
@@ -396,12 +399,78 @@ export async function updateEntry(
   return parseEntry(response.data)
 }
 
-export async function pagarEntry(id: string): Promise<PayrollEntry> {
-  const response = await apiFetch<ApiResponse<RawPayrollEntry>>(
-    `/api/folha/entries/${id}/pagar`,
+// ── Solicitação de pagamento (Demanda 4) ──────────────────────────────────────
+
+interface RawPaymentRequestEntry {
+  entry_id: string
+  employee_id: string
+  employee_name: string
+  net_amount: string | number
+}
+
+interface RawPaymentRequest {
+  id: string
+  payroll_period_id: string
+  competency: string
+  request_type: PayrollPaymentRequestType
+  status: PayrollPaymentRequestStatus
+  total_amount: string | number
+  approval_note: string | null
+  requested_at: string
+  decided_at: string | null
+  entries: RawPaymentRequestEntry[]
+  created_at: string
+  updated_at: string
+}
+
+function parsePaymentRequestEntry(
+  raw: RawPaymentRequestEntry
+): PayrollPaymentRequestEntry {
+  return {
+    entry_id: raw.entry_id,
+    employee_id: raw.employee_id,
+    employee_name: raw.employee_name,
+    net_amount: toNumber(raw.net_amount),
+  }
+}
+
+/**
+ * Converte a solicitação de pagamento de folha vinda da API (decimais como
+ * string) para o tipo do front. Reutilizado pelo serviço do Financeiro
+ * (fila de aprovações) para manter um único formato.
+ */
+export function parsePaymentRequest(raw: RawPaymentRequest): PayrollPaymentRequest {
+  return {
+    id: raw.id,
+    payroll_period_id: raw.payroll_period_id,
+    competency: raw.competency,
+    request_type: raw.request_type,
+    status: raw.status,
+    total_amount: toNumber(raw.total_amount),
+    approval_note: raw.approval_note,
+    requested_at: raw.requested_at,
+    decided_at: raw.decided_at,
+    entries: (raw.entries ?? []).map(parsePaymentRequestEntry),
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
+}
+
+export type { RawPaymentRequest }
+
+/**
+ * Solicita o pagamento individual de um holerite. O dinheiro não sai aqui: a
+ * solicitação vai para a fila de aprovação do Financeiro e o holerite passa a
+ * `aguardando_aprovacao`.
+ */
+export async function solicitarPagamento(
+  entryId: string
+): Promise<PayrollPaymentRequest> {
+  const response = await apiFetch<ApiResponse<RawPaymentRequest>>(
+    `/api/folha/entries/${entryId}/solicitar-pagamento`,
     { method: "POST" }
   )
-  return parseEntry(response.data)
+  return parsePaymentRequest(response.data)
 }
 
 export async function getEventosFolha(): Promise<PayrollEvent[]> {
@@ -499,22 +568,16 @@ export async function deleteEntryItem(
   return parseEntry(response.data)
 }
 
-interface RawBatchResult {
-  paid_count: number
-  total_paid: string | number
-  insufficient_balance: boolean
-  failed_employees: string[]
-}
-
-export async function pagarTodos(period_id: string): Promise<PayrollBatchResult> {
-  const response = await apiFetch<ApiResponse<RawBatchResult>>(
-    `/api/folha/periodos/${period_id}/pagar-todos`,
+/**
+ * Solicita o pagamento de todos os holerites pendentes do período em uma única
+ * solicitação (lote). Move todos para `aguardando_aprovacao`; não move dinheiro.
+ */
+export async function solicitarPagamentoTodos(
+  periodId: string
+): Promise<PayrollPaymentRequest> {
+  const response = await apiFetch<ApiResponse<RawPaymentRequest>>(
+    `/api/folha/periodos/${periodId}/solicitar-pagamento-todos`,
     { method: "POST" }
   )
-  return {
-    paid_count: response.data.paid_count,
-    total_paid: toNumber(response.data.total_paid),
-    insufficient_balance: response.data.insufficient_balance,
-    failed_employees: response.data.failed_employees ?? [],
-  }
+  return parsePaymentRequest(response.data)
 }

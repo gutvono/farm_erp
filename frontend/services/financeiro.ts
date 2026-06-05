@@ -1,4 +1,6 @@
 import { apiFetch } from "@/lib/api"
+import { fetchPaginated } from "@/lib/pagination"
+import { parsePaymentRequest, type RawPaymentRequest } from "@/services/folha"
 import {
   AccountsPayable,
   AccountsReceivable,
@@ -10,8 +12,10 @@ import {
   DefaulterItem,
   FinancialMovement,
   MovementType,
+  Paginated,
   PayableStatus,
   PaymentMethod,
+  PayrollPaymentRequest,
   PixPaymentInfo,
   ReceivableStatus,
 } from "@/types/index"
@@ -184,22 +188,55 @@ export async function getSaldo(): Promise<Balance> {
   }
 }
 
+/**
+ * Lista paginada de movimentações (`GET /api/financeiro/movimentacoes`).
+ * Endpoint paginado da Demanda 0 → responde o envelope `Page[T]` cru, por isso
+ * usa `fetchPaginated`. `amount` chega como string e é convertido em
+ * `parseMovement`. Filtros: `movement_type`, `category`, `source_module`,
+ * `start_date`/`end_date` (sobre `occurred_at`), `search` (ILIKE em descrição).
+ * Ordenação aceita pelo backend: `occurred_at`, `amount` (default `occurred_at desc`).
+ */
 export async function getMovimentacoes(params?: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  movement_type?: MovementType
+  category?: string
   source_module?: string
-}): Promise<FinancialMovement[]> {
-  const response = await apiFetch<ApiResponse<RawMovement[]>>(
+  search?: string
+  start_date?: string
+  end_date?: string
+}): Promise<Paginated<FinancialMovement>> {
+  return fetchPaginated<FinancialMovement, RawMovement>(
     "/api/financeiro/movimentacoes",
-    { params: { source_module: params?.source_module } }
+    params,
+    parseMovement
   )
-  return response.data.map(parseMovement)
 }
 
-export async function getContasPagar(status?: PayableStatus): Promise<AccountsPayable[]> {
-  const response = await apiFetch<ApiResponse<RawPayable[]>>(
+/**
+ * Lista paginada de contas a pagar (`GET /api/financeiro/contas-pagar`).
+ * Filtros: `status`, `supplier_id`, `due_after`/`due_before`, `search` (ILIKE em
+ * número/descrição/nome do fornecedor). Ordenação: `due_date`, `amount`,
+ * `created_at` (default `due_date asc`).
+ */
+export async function getContasPagar(params?: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  status?: PayableStatus
+  supplier_id?: string
+  search?: string
+  due_after?: string
+  due_before?: string
+}): Promise<Paginated<AccountsPayable>> {
+  return fetchPaginated<AccountsPayable, RawPayable>(
     "/api/financeiro/contas-pagar",
-    { params: { status } }
+    params,
+    parsePayable
   )
-  return response.data.map(parsePayable)
 }
 
 export async function createContaPagar(data: {
@@ -259,14 +296,28 @@ export async function getBoletoPagar(id: string): Promise<BoletoPaymentInfo> {
   return { ...response.data, amount: toNumber(response.data.amount) }
 }
 
-export async function getContasReceber(
+/**
+ * Lista paginada de contas a receber (`GET /api/financeiro/contas-receber`).
+ * Filtros: `status`, `client_id`, `due_after`/`due_before`, `search` (ILIKE em
+ * número/descrição/nome do cliente). Ordenação: `due_date`, `amount`,
+ * `created_at` (default `due_date asc`).
+ */
+export async function getContasReceber(params?: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
   status?: ReceivableStatus
-): Promise<AccountsReceivable[]> {
-  const response = await apiFetch<ApiResponse<RawReceivable[]>>(
+  client_id?: string
+  search?: string
+  due_after?: string
+  due_before?: string
+}): Promise<Paginated<AccountsReceivable>> {
+  return fetchPaginated<AccountsReceivable, RawReceivable>(
     "/api/financeiro/contas-receber",
-    { params: { status } }
+    params,
+    parseReceivable
   )
-  return response.data.map(parseReceivable)
 }
 
 export async function createContaReceber(data: {
@@ -383,4 +434,48 @@ export async function getInadimplentes(): Promise<DefaulterItem[]> {
     amount_received: toNumber(raw.amount_received),
     due_date: raw.due_date,
   }))
+}
+
+// ── Aprovação de pagamento de folha (Demanda 4) ───────────────────────────────
+
+/**
+ * Fila de solicitações de pagamento de folha aguardando aprovação do Financeiro
+ * (`GET /api/financeiro/aprovacoes-folha`). Resposta é `SuccessResponse` cujo
+ * `data` é a lista de solicitações.
+ */
+export async function getAprovacoesFolha(): Promise<PayrollPaymentRequest[]> {
+  const response = await apiFetch<ApiResponse<RawPaymentRequest[]>>(
+    "/api/financeiro/aprovacoes-folha"
+  )
+  return response.data.map(parsePaymentRequest)
+}
+
+/**
+ * Aprova uma solicitação de folha. O backend valida o saldo do total: se for
+ * insuficiente, responde 400 (a mensagem deve ser exibida em toast). Ao aprovar,
+ * gera 1 movimento `saida/folha` e 1 NF `folha_pagamento` por funcionário.
+ */
+export async function aprovarFolha(
+  requestId: string
+): Promise<PayrollPaymentRequest> {
+  const response = await apiFetch<ApiResponse<RawPaymentRequest>>(
+    `/api/financeiro/aprovacoes-folha/${requestId}/aprovar`,
+    { method: "POST" }
+  )
+  return parsePaymentRequest(response.data)
+}
+
+/**
+ * Recusa uma solicitação de folha com motivo obrigatório. Os holerites voltam a
+ * `pendente`; nenhum movimento financeiro é gerado.
+ */
+export async function recusarFolha(
+  requestId: string,
+  note: string
+): Promise<PayrollPaymentRequest> {
+  const response = await apiFetch<ApiResponse<RawPaymentRequest>>(
+    `/api/financeiro/aprovacoes-folha/${requestId}/recusar`,
+    { method: "POST", body: JSON.stringify({ note }) }
+  )
+  return parsePaymentRequest(response.data)
 }

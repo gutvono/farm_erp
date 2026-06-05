@@ -640,6 +640,7 @@ _NF_RECEBIMENTO_PREFIX = "[NF-RECEBIMENTO]"
 _NF_DEVOLUCAO_PREFIX = "[NF-DEVOLUCAO]"
 _NF_TRANSPORTE_PREFIX = "[NF-TRANSPORTE]"
 _NF_SERVICO_PREFIX = "[NF-SERVICO]"
+_NF_FOLHA_PREFIX = "[NF-FOLHA]"
 
 
 def _build_purchase_notes(prefix: str, order_id: UUID, supplier_name: str, extra: str = "") -> str:
@@ -728,6 +729,60 @@ def criar_nota_servico(db: Session, order_id: UUID) -> Invoice:
         category=FinancialCategory.COMPRA,
         amount=Decimal("0"),
         description=f"NF de serviço emitida: {invoice.number} — ordem #{order.id}",
+        source_module="faturamento",
+        reference_id=invoice.id,
+    )
+
+    return invoice
+
+
+def criar_nota_folha(db: Session, entry, period) -> Invoice:
+    """Emit a payroll NF (invoice_type='folha_pagamento') for a paid holerite.
+
+    Demanda 4: chamada pelo Financeiro ao APROVAR uma solicitação de pagamento de
+    folha — 1 NF por funcionário/holerite. Molde de ``criar_nota_servico``:
+    ``client_id=None`` (não é cliente), ``total_amount = entry.net_amount``, 1 item
+    "Salário MM/AAAA — {nome}". O vínculo ao holerite é o texto
+    ``[NF-FOLHA] entry_id=<uuid> employee=<nome>`` em ``notes`` (mesmo estilo das
+    NFs de compra). Registra movimento R$0 para rastreabilidade — o débito real é
+    o ``saida/folha`` lançado pelo Financeiro na aprovação.
+    """
+    from app.modules.financeiro import service as fin_service
+    from app.modules.folha.model import Employee
+
+    employee = db.query(Employee).filter(Employee.id == entry.employee_id).first()
+    employee_name = employee.name if employee else str(entry.employee_id)
+    competency = f"{period.competency_month:02d}/{period.competency_year}"
+    total_amount = Decimal(str(entry.net_amount or 0))
+
+    description = f"Salário {competency} — {employee_name}"
+    invoice_items = [
+        {
+            "description": description,
+            "quantity": Decimal("1"),
+            "unit_price": total_amount,
+            "subtotal": total_amount,
+        }
+    ]
+    notes = f"{_NF_FOLHA_PREFIX} entry_id={entry.id} employee={employee_name}"
+
+    invoice = fat_repo.create_invoice(
+        db,
+        client_id=None,
+        items=invoice_items,
+        total_amount=total_amount,
+        sale_id=None,
+        due_date=date.today(),
+        notes=notes,
+        invoice_type="folha_pagamento",
+    )
+
+    fin_service.registrar_movimento(
+        db,
+        movement_type=MovementType.SAIDA,
+        category=FinancialCategory.FOLHA,
+        amount=Decimal("0"),
+        description=f"NF de folha emitida: {invoice.number} — {description}",
         source_module="faturamento",
         reference_id=invoice.id,
     )

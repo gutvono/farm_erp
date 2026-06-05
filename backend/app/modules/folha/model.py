@@ -14,6 +14,7 @@ from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import relationship
 from sqlalchemy.schema import UniqueConstraint
+from sqlalchemy.sql import func
 
 from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
@@ -240,3 +241,80 @@ class PayrollEntryItem(UUIDMixin, TimestampMixin, Base):
 
     entry = relationship("PayrollEntry", back_populates="items")
     event = relationship("PayrollEvent", back_populates="items")
+
+
+class PayrollPaymentRequest(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Solicitação de aprovação de pagamento de folha (Demanda 4 / D6).
+
+    Pagar funcionário(s) deixa de sair direto da conta: gera uma solicitação que
+    aparece na aba *Aprovações* do Financeiro (igual a uma compra). Só após a
+    aprovação o dinheiro sai e é emitida 1 NF de folha por funcionário
+    (`invoices.invoice_type = 'folha_pagamento'`). `status` é texto livre (não
+    enum), espelhando o padrão de status textual desejado nesta etapa:
+    `aguardando_aprovacao_financeiro` → `aprovada` | `recusada`.
+    """
+
+    __tablename__ = "payroll_payment_requests"
+
+    payroll_period_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("payroll_periods.id"),
+        nullable=False,
+        index=True,
+    )
+    request_type = Column(String(20), nullable=False)  # individual | lote
+    status = Column(
+        String(40),
+        nullable=False,
+        default="aguardando_aprovacao_financeiro",
+        index=True,
+    )
+    total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    approval_note = Column(Text, nullable=True)  # motivo da recusa, p.ex.
+    requested_at = Column(
+        DateTime(timezone=True), nullable=False, server_default=func.now()
+    )
+    decided_at = Column(DateTime(timezone=True), nullable=True)
+
+    period = relationship("PayrollPeriod")
+    entries = relationship(
+        "PayrollPaymentRequestEntry",
+        back_populates="payment_request",
+        cascade="all, delete-orphan",
+    )
+
+    def __repr__(self) -> str:
+        return f"<PayrollPaymentRequest {self.request_type} {self.status}>"
+
+
+class PayrollPaymentRequestEntry(UUIDMixin, TimestampMixin, Base):
+    """Junção solicitação ↔ holerite (sem soft delete)."""
+
+    __tablename__ = "payroll_payment_request_entries"
+    __table_args__ = (
+        UniqueConstraint(
+            "payment_request_id",
+            "payroll_entry_id",
+            name="uq_ppre_request_entry",
+        ),
+    )
+
+    payment_request_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey(
+            "payroll_payment_requests.id",
+            name="fk_ppre_request",
+            ondelete="CASCADE",
+        ),
+        nullable=False,
+        index=True,
+    )
+    payroll_entry_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("payroll_entries.id", name="fk_ppre_entry"),
+        nullable=False,
+        index=True,
+    )
+
+    payment_request = relationship("PayrollPaymentRequest", back_populates="entries")
+    entry = relationship("PayrollEntry")

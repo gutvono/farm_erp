@@ -53,6 +53,7 @@ const CANCEL_DESCRIPTIONS: Record<NfType, string> = {
   servico:
     "Sem efeito no estoque. Se a compra já foi paga, o valor será estornado; caso contrário, a(s) conta(s) a pagar em aberto serão canceladas.",
   devolucao: "Os produtos devolvidos voltarão ao estoque como itens AVARIADOS.",
+  folha: "Cancelamento de nota fiscal de folha não é suportado.",
 }
 
 // Transporte de COMPRA (frete embutido na conta a pagar) segue o princípio
@@ -72,7 +73,13 @@ const STATUS_COLORS: Record<InvoiceStatus, string> = {
   cancelada: "bg-slate-100 text-slate-600",
 }
 
-type NfType = "venda" | "recebimento" | "devolucao" | "transporte" | "servico"
+type NfType =
+  | "venda"
+  | "recebimento"
+  | "devolucao"
+  | "transporte"
+  | "servico"
+  | "folha"
 
 function detectNfType(notes: string | null): NfType | null {
   if (!notes) return null
@@ -80,6 +87,7 @@ function detectNfType(notes: string | null): NfType | null {
   if (notes.includes("[NF-DEVOLUCAO]")) return "devolucao"
   if (notes.includes("[NF-TRANSPORTE]")) return "transporte"
   if (notes.includes("[NF-SERVICO]")) return "servico"
+  if (notes.includes("[NF-FOLHA]")) return "folha"
   return null
 }
 
@@ -89,6 +97,7 @@ function getNfType(invoice: Invoice): NfType | null {
   if (invoice.invoice_type === "devolucao") return "devolucao"
   if (invoice.invoice_type === "transporte") return "transporte"
   if (invoice.invoice_type === "servico") return "servico"
+  if (invoice.invoice_type === "folha_pagamento") return "folha"
   if (invoice.sale_id && invoice.invoice_type === "normal") return "venda"
   return detectNfType(invoice.notes)
 }
@@ -202,6 +211,10 @@ async function generatePdf(invoice: Invoice, nfType: NfType) {
   }
   if (nfType === "servico") {
     await generateSimplePdf(invoice, "NOTA FISCAL DE SERVIÇO")
+    return
+  }
+  if (nfType === "folha") {
+    await generateSimplePdf(invoice, "NOTA FISCAL DE FOLHA DE PAGAMENTO")
     return
   }
 
@@ -356,8 +369,11 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
 
   const isFinal = invoice.status === "paga" || invoice.status === "cancelada"
   const isCancelled = invoice.status === "cancelada"
-  const canCancel = invoice.status === "emitida" || invoice.status === "paga"
   const nfType = getNfType(invoice)
+  // Cancelamento de NF de folha está fora de escopo (Demanda 4) — não oferecer.
+  const canCancel =
+    nfType !== "folha" &&
+    (invoice.status === "emitida" || invoice.status === "paga")
   const isNfFiscal = nfType !== null
   const orderId = extractOrderIdFromNotes(invoice.notes)
   // Transporte de COMPRA (tem order_id) segue "estorno só se pago"; transporte
@@ -469,6 +485,11 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                     Serviço
                   </Badge>
                 )}
+                {nfType === "folha" && (
+                  <Badge className="bg-teal-50 text-teal-700 border border-teal-200">
+                    Folha de pagamento
+                  </Badge>
+                )}
 
                 {invoice.sale_id && !isNfFiscal && (
                   <Badge variant="outline" className="text-xs">
@@ -487,6 +508,8 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de transporte</p>
               ) : nfType === "servico" ? (
                 <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de serviço</p>
+              ) : nfType === "folha" ? (
+                <p className="text-sm text-slate-400 mt-0.5 italic">Nota fiscal de folha de pagamento</p>
               ) : null}
 
               <p className="text-sm text-slate-500">

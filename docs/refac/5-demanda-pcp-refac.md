@@ -50,11 +50,26 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 - Alocação de pessoas: **requisitos por cargo** (não funcionários nominais). Remove
   `production_order_workers` e o endpoint `/ordens/funcionarios-em-producao`.
 - "Revisão" de máquinas/veículos = **reserva exclusiva** enquanto a OP estiver ativa.
+- **Custo de máquina/veículo entra no custo da OP** = `Σ(horas_acumuladas × stock_item.hourly_cost)`.
+  As **horas são informadas de forma INCREMENTAL** por recurso, durante a produção: cada update/colheita
+  pode trazer "horas a adicionar" para uma máquina; o valor é **somado** ao acumulado do recurso. Campo
+  **nulo/omisso = não altera** o acumulado. (`hourly_cost` já existe em `stock_items`, Demanda 3.)
+- **Padrão null-safe incremental (geral):** todo dado "alimentado ao longo da produção" (horas de máquina,
+  e quaisquer outros acumuláveis) segue a mesma regra — valor informado é somado, campo nulo no update
+  preserva o acumulado atual (espelha o `percentage_harvested`, que acumula).
+- **Insumos restritos ao papel `insumo`:** o item escolhido como insumo da OP deve pertencer a uma
+  categoria com o papel `insumo` (Configurações). Máquina/veículo/embalagem/insumo todos resolvidos por papel.
+- **Relatórios com custo discriminado:** o custo da OP/safra é quebrado por tipo —
+  insumos / pessoal / máquinas-veículos / embalagens / serviços — além do output por destino.
 
 ## Critérios de aceite
 - [ ] Talhão com hectares; OP com hectares e validação de soma ≤ total do talhão.
 - [ ] Requisitos por cargo/qtd/vínculo persistidos e exibidos; custo de pessoal recalculado.
 - [ ] Máquinas/veículos reservados (409 em conflito); embalagens consumidas.
+- [ ] Insumos da OP restritos a itens com papel `insumo` (item fora do papel → 400/oculto na UI).
+- [ ] Horas de máquina/veículo acumuladas de forma incremental (null = não altera); custo da OP soma
+      `Σ(horas × hourly_cost)`; custo total = insumos + pessoal + máquinas + embalagens + serviços.
+- [ ] Relatórios discriminam o custo por tipo (insumos/pessoal/máquinas/embalagens/serviços).
 - [ ] SKU visível na UI da OP; hectares exibidos no registro da colheita.
 - [ ] Colheita por destino grava nos 3 itens-destino corretos; sem aleatoriedade.
 - [ ] Encerrar OP antes de 100% com motivo; nova OP do restante funciona.
@@ -86,9 +101,11 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 > 5. Criar **`production_order_resources`**: `id UUID PK`, `production_order_id UUID FK (CASCADE)`,
 >    `stock_item_id UUID FK → stock_items (RESTRICT)`, `resource_role system_role NOT NULL`
 >    (`maquina`/`veiculo`/`embalagem`), `quantity NUMERIC(12,3) NULL` (usada p/ embalagem),
->    timestamps. Índices nas FKs. (A reserva de máquina/veículo é validada na service por
->    "item em OP ativa"; não precisa de constraint exclusiva no banco, mas adicione índice em
->    `stock_item_id` para a checagem ser rápida.)
+>    `accumulated_hours NUMERIC(10,2) NOT NULL DEFAULT 0` (horas de uso acumuladas para
+>    máquina/veículo — somadas de forma incremental durante a produção; base do custo
+>    `horas × hourly_cost`), timestamps. Índices nas FKs. (A reserva de máquina/veículo é validada na
+>    service por "item em OP ativa"; não precisa de constraint exclusiva no banco, mas adicione índice
+>    em `stock_item_id` para a checagem ser rápida.)
 > 6. Atualize `backend/scripts/seed.sql`: talhões com hectares, a OP concluída do seed com
 >    `hectares_used` e sacas por destino (industria/embalagem/descarte), requisitos de cargo de
 >    exemplo, e (opcional) 1 recurso de máquina. Remova referências a workers nominais e às
@@ -119,14 +136,25 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 >   Validar `position_id` existe (404). Persistir em `production_order_position_requirements`.
 > - Remover o conceito de worker nominal e o endpoint `/ordens/funcionarios-em-producao`.
 > - **Custo de pessoal** (estimado e realizado): `Σ(req.quantity × job_position.base_salary / 22 ×
->   max(1, dias))`, `dias = (data fim − início)`. Ajuste `estimated_cost`/`realized_cost` para somar
->   insumos + pessoal (por cargo) + serviços externos (que continuam existindo).
+>   max(1, dias))`, `dias = (data fim − início)`.
+> - **Custo total da OP** = insumos + pessoal (por cargo) + **máquinas/veículos** + embalagens (consumo)
+>   + serviços externos. **Máquinas/veículos:** `Σ(resource.accumulated_hours × stock_item.hourly_cost)`
+>   sobre os recursos de papel maquina/veiculo (hourly_cost nulo conta como 0). Vale para estimated e
+>   realized_cost.
+>
+> **Insumos por papel:** o seletor/validação de insumos da OP passa a exigir que o `stock_item` pertença
+> a uma categoria com o papel `insumo` (via Configurações; item fora do papel → 400). Exponha um endpoint
+> para o front listar os insumos elegíveis (ex.: `GET /api/pcp/insumos-disponiveis` ou reuse
+> `GET /api/estoque/itens?role=insumo`).
 >
 > **P4 — Recursos (máquinas/veículos/embalagens):**
-> - `ProductionOrderCreate.resources: [{ stock_item_id, resource_role, quantity? }]`.
+> - `ProductionOrderCreate.resources: [{ stock_item_id, resource_role, quantity?, hours? }]`.
 >   Valide que o `stock_item` pertence a uma categoria com o papel informado (via Configurações).
 > - **Máquina/veículo:** ao criar/iniciar, rejeitar (409) se o item já está em outra OP **ativa**
->   (status `planejada`/`em_execucao`/`pausada`/`em_producao`). Não baixam estoque.
+>   (status `planejada`/`em_execucao`/`pausada`/`em_producao`). Não baixam estoque. **Horas de uso:**
+>   acumuladas em `accumulated_hours` de forma INCREMENTAL — na criação e em cada update/colheita, um
+>   campo de "horas a adicionar" por recurso é **somado** ao acumulado; **campo nulo/omisso NÃO altera**
+>   o acumulado (regra null-safe geral: vale para qualquer dado alimentado durante a produção).
 > - **Embalagem:** trata como insumo de consumo — baixa proporcional à colheita (P6).
 > - Exponha `GET /api/pcp/recursos-disponiveis?role=maquina` (itens do papel que **não** estão
 >   reservados em OP ativa), para o front popular os selects.
@@ -147,7 +175,9 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 >   `concluida` mesmo com `progress < 100`, grava `early_closed_reason`, libera os recursos
 >   reservados e a área restante (não consome o restante de insumos). Após isso, uma nova OP no
 >   mesmo talhão para os hectares restantes é permitida (validação de P2).
-> - Atualize os relatórios (`gerar_relatorios`) para usar industria/embalagem/descarte.
+> - Atualize os relatórios (`gerar_relatorios`) para usar industria/embalagem/descarte E para
+>   **discriminar o custo por tipo**: insumos / pessoal / máquinas-veículos / embalagens / serviços
+>   (por OP e agregado da safra), além do output por destino.
 >
 > **Done quando (smoke tests — cole as saídas):**
 > 1. Criar talhão (200 ha). Criar OP usando 120 ha; criar 2ª OP de 100 ha no mesmo talhão → 400
@@ -159,6 +189,13 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 > 4. `POST /ordens/{id}/encerrar` com motivo de praga → OP `concluida`, `early_closed_reason` gravado;
 >    criar nova OP do restante de hectares ok.
 > 5. `SELECT industria_sacas, embalagem_sacas, descarte_sacas FROM production_orders WHERE id=...;`
+> 6. Insumo fora do papel: tentar criar OP com insumo de item SEM papel `insumo` → 400; com item de
+>    papel `insumo` → ok.
+> 7. Horas de máquina incrementais: criar OP com máquina e `hours=4`; em um update enviar `hours=3`
+>    (sem mexer noutros campos) → `SELECT accumulated_hours` = 7; enviar update com `hours` nulo →
+>    permanece 7; provar que o custo da OP reflete `7 × hourly_cost`.
+> 8. Custo discriminado: `gerar_relatorios` retornando o custo quebrado por insumos/pessoal/
+>    máquinas/embalagens/serviços (cole a saída).
 > - Atualize `docs/backend/pcp.md` integralmente.
 
 ---
@@ -175,12 +212,17 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 >
 > **OrdemProducaoForm (reescrita das seções):**
 > - Campo **hectares usados** (com indicação do disponível no talhão escolhido).
-> - **Insumos:** manter, mas exibir **SKU** de cada item.
+> - **Insumos:** o select de insumos lista **apenas itens com papel `insumo`** (via
+>   `getItens({role:"insumo"})` ou o endpoint de insumos-disponíveis). Exibir **SKU** de cada item.
 > - **Equipe → Requisitos por cargo:** lista dinâmica de `{ cargo (Select de getCargos),
 >   quantidade (number), vínculo (Select clt/pj/temporario) }`. Remover a seleção nominal de
 >   funcionários e o "responsável".
 > - **Recursos:** seções para **Máquinas**, **Veículos** e **Embalagens** (selects populados por
 >   `getRecursosDisponiveis(role)` — itens não reservados; embalagens com quantidade). Mostrar SKU.
+>   **Máquinas/Veículos:** campo **"horas a adicionar"** por recurso — INCREMENTAL: na criação informa as
+>   horas iniciais e, nos updates durante a produção, o valor digitado é **somado** ao acumulado;
+>   **deixar o campo vazio NÃO altera** o acumulado (regra null-safe). Exibir as **horas acumuladas** e o
+>   custo `horas × custo/hora` de cada máquina.
 > - **Serviços externos:** manter como está.
 > - Carregar ao abrir: cargos, recursos disponíveis por papel, insumos, destinos.
 >
@@ -191,7 +233,8 @@ Releia OBRIGATORIAMENTE: `docs/backend/pcp.md`, `docs/frontend/pcp.md`, `docs/da
 > **Registro da colheita:** formulário com `percentage_harvested` e os 3 campos de sacas por
 > destino (Indústria/Embalagem/Descarte). Ao digitar a %, exibir **"= X hectares"**
 > (`hectares_used × pct/100`). `ResultadoSafraDialog` passa a mostrar os 3 destinos (sem
-> Especial/Superior/Tradicional).
+> Especial/Superior/Tradicional). O `ResultadoSafraDialog`/relatório também exibe o **custo
+> discriminado** (insumos / pessoal / máquinas-veículos / embalagens / serviços), não só o total.
 >
 > **Tipos:** atualizar `Plot` (`total_hectares`), `ProductionOrder`
 > (`hectares_used`, `*_industria/embalagem/descarte`, `position_requirements`, `resources`,

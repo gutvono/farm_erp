@@ -1,6 +1,6 @@
 import os
 import uuid
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, timedelta, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
@@ -24,6 +24,7 @@ from app.modules.folha.model import (
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
+    PayrollPaymentRequest,
     PayrollPeriod,
 )
 from app.modules.folha.schemas import (
@@ -32,12 +33,13 @@ from app.modules.folha.schemas import (
     JobPositionOut,
     JobPositionUpdate,
     PayrollAutoCalculationRequest,
-    PayrollBatchResult,
     PayrollCalculationPreview,
     PayrollEntryItemOut,
     PayrollEntryOut,
     PayrollEventOut,
     PayrollManualItemUpsert,
+    PayrollPaymentRequestEntryOut,
+    PayrollPaymentRequestOut,
     PayrollPeriodOut,
 )
 from app.shared.pagination import Page, PageParams
@@ -469,13 +471,14 @@ def close_period(db: Session, period_id: UUID) -> PayrollPeriod:
         raise HTTPException(
             status_code=400, detail="Período já está fechado"
         )
-    pending = [e for e in period.entries if e.status == PayrollEntryStatus.PENDENTE]
-    if pending:
+    # Fechar exige TODAS as entries pagas — pendente ou aguardando_aprovacao bloqueiam.
+    not_paid = [e for e in period.entries if e.status != PayrollEntryStatus.PAGO]
+    if not_paid:
         raise HTTPException(
             status_code=400,
             detail=(
-                "Existem funcionários sem pagamento. "
-                "Pague todos ou remova as pendências antes de fechar."
+                "Existem funcionários sem pagamento aprovado. "
+                "Todos os holerites precisam estar pagos antes de fechar."
             ),
         )
     return folha_repo.close_period(db, period_id)
@@ -753,104 +756,171 @@ def update_entry(
     return folha_repo.recalculate_entry_totals(db, entry.id) or entry
 
 
-def pay_entry(db: Session, entry_id: UUID) -> PayrollEntry:
+# ---------------------------------------------------------------------------
+# Solicitação de pagamento (Demanda 4 — o dinheiro só se move na aprovação)
+# ---------------------------------------------------------------------------
+
+REQUEST_STATUS_PENDING = "aguardando_aprovacao_financeiro"
+REQUEST_STATUS_APPROVED = "aprovada"
+REQUEST_STATUS_REFUSED = "recusada"
+
+
+def request_individual_payment(db: Session, entry_id: UUID) -> PayrollPaymentRequest:
+    """Cria uma solicitação INDIVIDUAL e move o holerite para aguardando_aprovacao.
+
+    Não move dinheiro — apenas registra a solicitação na fila do Financeiro.
+    """
     entry = _get_entry_or_404(db, entry_id)
     if entry.status == PayrollEntryStatus.PAGO:
         raise HTTPException(
             status_code=400, detail="Funcionário já recebeu neste período"
         )
-    period = folha_repo.get_period(db, entry.payroll_period_id)
-    if not period:
-        raise HTTPException(
-            status_code=404, detail="Período do holerite não encontrado"
-        )
-    employee = db.query(Employee).filter(Employee.id == entry.employee_id).first()
-    if not employee:
-        raise HTTPException(status_code=404, detail="Funcionário não encontrado")
-
-    entry = folha_repo.recalculate_entry_totals(db, entry.id) or entry
-    amount = Decimal(str(entry.net_amount))
-    balance = fin_service.get_balance(db)
-    saldo_atual = Decimal(str(balance.saldo))
-    if saldo_atual < amount:
+    if entry.status == PayrollEntryStatus.AGUARDANDO_APROVACAO:
         raise HTTPException(
             status_code=400,
-            detail=(
-                f"Saldo insuficiente. Saldo atual: R${saldo_atual:.2f}, "
-                f"valor do holerite: R${amount:.2f}"
-            ),
+            detail="Holerite já tem solicitação de pagamento aguardando aprovação",
         )
 
-    folha_repo.mark_entry_paid(db, entry_id)
+    entry = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    total = Decimal(str(entry.net_amount))
 
-    fin_service.registrar_movimento(
+    request = folha_repo.create_payment_request(
         db,
-        movement_type=MovementType.SAIDA,
-        category=FinancialCategory.FOLHA,
-        amount=amount,
-        description=(
-            f"Pagamento de salário: {employee.name} — "
-            f"{period.competency_month:02d}/{period.competency_year}"
-        ),
-        source_module="folha",
-        reference_id=entry_id,
+        period_id=entry.payroll_period_id,
+        request_type="individual",
+        total_amount=total,
     )
+    folha_repo.add_request_entry(db, request_id=request.id, entry_id=entry.id)
+    folha_repo.set_entry_status(
+        db, entry.id, PayrollEntryStatus.AGUARDANDO_APROVACAO
+    )
+    return folha_repo.get_payment_request(db, request.id)
 
-    # Reload after multiple commits
-    reloaded = folha_repo.get_entry(db, entry_id)
-    return reloaded
 
-
-def pay_all_entries(db: Session, period_id: UUID) -> PayrollBatchResult:
+def request_batch_payment(db: Session, period_id: UUID) -> PayrollPaymentRequest:
+    """Cria UMA solicitação em LOTE com todas as entries pendentes do período."""
     period = _get_period_or_404(db, period_id)
     if period.status != PayrollPeriodStatus.ABERTA:
-        raise HTTPException(
-            status_code=400, detail="Período já está fechado"
-        )
+        raise HTTPException(status_code=400, detail="Período já está fechado")
 
     pending_entries = folha_repo.list_pending_entries_by_period(db, period_id)
+    if not pending_entries:
+        raise HTTPException(
+            status_code=400,
+            detail="Não há holerites pendentes para solicitar pagamento",
+        )
 
-    balance = fin_service.get_balance(db)
-    saldo_atual = Decimal(str(balance.saldo))
-
-    paid_count = 0
-    total_paid = Decimal("0")
-    failed_employees: list[str] = []
-
+    total = Decimal("0")
+    recalculated: list[PayrollEntry] = []
     for entry in pending_entries:
+        entry = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+        recalculated.append(entry)
+        total += Decimal(str(entry.net_amount))
+
+    request = folha_repo.create_payment_request(
+        db,
+        period_id=period_id,
+        request_type="lote",
+        total_amount=total,
+    )
+    for entry in recalculated:
+        folha_repo.add_request_entry(db, request_id=request.id, entry_id=entry.id)
+        folha_repo.set_entry_status(
+            db, entry.id, PayrollEntryStatus.AGUARDANDO_APROVACAO
+        )
+    return folha_repo.get_payment_request(db, request.id)
+
+
+# --- Helpers consumidos pelo Financeiro (fila + decisão) -------------------
+
+
+def get_payment_request_or_404(
+    db: Session, request_id: UUID
+) -> PayrollPaymentRequest:
+    request = folha_repo.get_payment_request(db, request_id)
+    if not request:
+        raise HTTPException(
+            status_code=404, detail="Solicitação de pagamento não encontrada"
+        )
+    return request
+
+
+def list_pending_payment_requests(db: Session) -> list[PayrollPaymentRequest]:
+    return folha_repo.list_payment_requests_by_status(db, REQUEST_STATUS_PENDING)
+
+
+def get_entries_of_request(
+    db: Session, request: PayrollPaymentRequest
+) -> list[PayrollEntry]:
+    return [link.entry for link in request.entries if link.entry is not None]
+
+
+def mark_entry_paid(db: Session, entry_id: UUID) -> PayrollEntry:
+    return folha_repo.set_entry_status(
+        db,
+        entry_id,
+        PayrollEntryStatus.PAGO,
+        paid_at=datetime.now(timezone.utc),
+    )
+
+
+def revert_request_entries_to_pending(
+    db: Session, request: PayrollPaymentRequest
+) -> None:
+    for link in request.entries:
+        folha_repo.set_entry_status(
+            db, link.payroll_entry_id, PayrollEntryStatus.PENDENTE
+        )
+
+
+def mark_request_decided(
+    db: Session,
+    request: PayrollPaymentRequest,
+    *,
+    status: str,
+    approval_note: Optional[str] = None,
+) -> PayrollPaymentRequest:
+    request.status = status
+    request.approval_note = approval_note
+    request.decided_at = datetime.now(timezone.utc)
+    return folha_repo.save_payment_request(db, request)
+
+
+def serialize_payment_request(db: Session, request: PayrollPaymentRequest) -> dict:
+    period = request.period
+    competency = (
+        f"{period.competency_month:02d}/{period.competency_year}" if period else ""
+    )
+    entries_out: list[PayrollPaymentRequestEntryOut] = []
+    for link in request.entries:
+        entry = link.entry
+        if not entry:
+            continue
         employee = (
             db.query(Employee).filter(Employee.id == entry.employee_id).first()
         )
-        employee_name = employee.name if employee else str(entry.employee_id)
-        entry = folha_repo.recalculate_entry_totals(db, entry.id) or entry
-        amount = Decimal(str(entry.net_amount))
-
-        if saldo_atual >= amount:
-            folha_repo.mark_entry_paid(db, entry.id)
-            fin_service.registrar_movimento(
-                db,
-                movement_type=MovementType.SAIDA,
-                category=FinancialCategory.FOLHA,
-                amount=amount,
-                description=(
-                    f"Pagamento de salário: {employee_name} — "
-                    f"{period.competency_month:02d}/{period.competency_year}"
-                ),
-                source_module="folha",
-                reference_id=entry.id,
+        entries_out.append(
+            PayrollPaymentRequestEntryOut(
+                entry_id=entry.id,
+                employee_id=entry.employee_id,
+                employee_name=employee.name if employee else "",
+                net_amount=Decimal(str(entry.net_amount)),
             )
-            saldo_atual -= amount
-            paid_count += 1
-            total_paid += amount
-        else:
-            failed_employees.append(employee_name)
-
-    return PayrollBatchResult(
-        paid_count=paid_count,
-        total_paid=total_paid,
-        insufficient_balance=len(failed_employees) > 0,
-        failed_employees=failed_employees,
-    )
+        )
+    return PayrollPaymentRequestOut(
+        id=request.id,
+        payroll_period_id=request.payroll_period_id,
+        competency=competency,
+        request_type=request.request_type,
+        status=request.status,
+        total_amount=Decimal(str(request.total_amount)),
+        approval_note=request.approval_note,
+        requested_at=request.requested_at,
+        decided_at=request.decided_at,
+        entries=entries_out,
+        created_at=request.created_at,
+        updated_at=request.updated_at,
+    ).model_dump(mode="json")
 
 
 # ---------------------------------------------------------------------------

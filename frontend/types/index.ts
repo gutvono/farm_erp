@@ -631,7 +631,7 @@ export interface PCPReport {
 // ── FOLHA DE PAGAMENTO ────────────────────────────────────────────────────────
 
 export type ContractType = "clt" | "pj" | "temporario"
-export type PayrollEntryStatus = "pendente" | "pago"
+export type PayrollEntryStatus = "pendente" | "aguardando_aprovacao" | "pago"
 export type PayrollPeriodStatus = "aberta" | "fechada"
 export type PayrollEventType = "provento" | "desconto" | "informativo"
 export type PayrollCalculationType =
@@ -696,13 +696,6 @@ export interface PayrollPeriod {
   created_at: string
 }
 
-export interface PayrollBatchResult {
-  paid_count: number
-  total_paid: number
-  insufficient_balance: boolean
-  failed_employees: string[]
-}
-
 export interface PayrollEvent {
   id: string
   description: string
@@ -756,4 +749,40 @@ export interface PayrollCalculationPreview {
   percentage: number | null
   metadata: Record<string, unknown>
   affects_net: boolean
+}
+
+// ── Aprovação de pagamento de folha (Demanda 4) ───────────────────────────────
+
+export type PayrollPaymentRequestType = "individual" | "lote"
+
+export type PayrollPaymentRequestStatus =
+  | "aguardando_aprovacao_financeiro"
+  | "aprovada"
+  | "recusada"
+
+/** Holerite incluído numa solicitação de pagamento de folha. */
+export interface PayrollPaymentRequestEntry {
+  entry_id: string
+  employee_id: string
+  employee_name: string
+  net_amount: number
+}
+
+/**
+ * Solicitação de pagamento de folha que aguarda aprovação do Financeiro.
+ * Criada na Folha ("Solicitar pagamento"); aprovada/recusada no Financeiro.
+ */
+export interface PayrollPaymentRequest {
+  id: string
+  payroll_period_id: string
+  competency: string
+  request_type: PayrollPaymentRequestType
+  status: PayrollPaymentRequestStatus
+  total_amount: number
+  approval_note: string | null
+  requested_at: string
+  decided_at: string | null
+  entries: PayrollPaymentRequestEntry[]
+  created_at: string
+  updated_at: string
 }

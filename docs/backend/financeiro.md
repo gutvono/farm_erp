@@ -29,14 +29,14 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/financeiro/movimentacoes` | Lista movimentações (filtros: movement_type, category, source_module, start_date, end_date) |
+| `GET` | `/api/financeiro/movimentacoes` | Lista **paginada `Page[T]`** (filtros: movement_type, category, source_module, start_date, end_date, `search` em description; ordenação por allowlist `{occurred_at, amount}`) |
 | `POST` | `/api/financeiro/movimentacoes` | Registra nova movimentação manual |
 
 ### Contas a Pagar
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/financeiro/contas-pagar` | Lista (filtros: status, supplier_id, due_before, due_after) |
+| `GET` | `/api/financeiro/contas-pagar` | Lista **paginada `Page[T]`** (filtros: status, supplier_id, due_before, due_after, `search` em number/description/nome do fornecedor; ordenação por allowlist `{due_date, amount, created_at}`) |
 | `POST` | `/api/financeiro/contas-pagar` | Cria nova conta |
 | `GET` | `/api/financeiro/contas-pagar/{id}` | Detalhe |
 | `PUT` | `/api/financeiro/contas-pagar/{id}` | Atualiza conta em aberto |
@@ -50,7 +50,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/financeiro/contas-receber` | Lista (filtros: status, client_id, due_before, due_after) |
+| `GET` | `/api/financeiro/contas-receber` | Lista **paginada `Page[T]`** (filtros: status, client_id, due_before, due_after, `search` em number/description/nome do cliente; ordenação por allowlist `{due_date, amount, created_at}`) |
 | `POST` | `/api/financeiro/contas-receber` | Cria nova conta |
 | `GET` | `/api/financeiro/contas-receber/{id}` | Detalhe |
 | `PUT` | `/api/financeiro/contas-receber/{id}` | Atualiza conta ativa |
@@ -61,6 +61,24 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `GET` | `/api/financeiro/contas-receber/{id}/pix` | Retorna `PixPaymentInfo`. Requer `payment_method == "pix"` |
 | `GET` | `/api/financeiro/contas-receber/{id}/boleto` | Retorna `BoletoPaymentInfo`. Requer `payment_method == "boleto"` |
 | `GET` | `/api/financeiro/relatorio-inadimplencia` | Lista clientes com contas em inadimplência |
+
+### Aprovação de folha (Demanda 4)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/financeiro/aprovacoes-folha` | Fila de solicitações de pagamento de folha em `aguardando_aprovacao_financeiro` (com período/competência, tipo `individual`/`lote`, total e os holerites/funcionários incluídos) |
+| `POST` | `/api/financeiro/aprovacoes-folha/{id}/aprovar` | Aprova: valida saldo, paga cada holerite e emite as NFs |
+| `POST` | `/api/financeiro/aprovacoes-folha/{id}/recusar` | Recusa (body `{ "note": "..." }`): holerites voltam a `pendente` |
+
+**Aprovar** (`POST .../aprovar`):
+- Valida `get_balance(db).saldo >= total` da solicitação. Senão `400 "Saldo insuficiente para aprovar o pagamento da folha"` — **sem pagamento parcial**: ou cobre o total ou recusa.
+- Para **cada** holerite da solicitação: registra `saida/folha` (`amount = net_amount`, `source_module="folha"`, `reference_id = entry.id`) — **este é o débito real**; marca a entry `pago` + `paid_at`; chama `faturamento.criar_nota_folha(db, entry, period)` (1 NF `folha_pagamento` por funcionário, com movimento de R$0 de rastreabilidade).
+- Marca a solicitação `aprovada` + `decided_at`.
+
+**Recusar** (`POST .../recusar`):
+- Todas as entries da solicitação voltam a `pendente`; a solicitação fica `recusada` + `approval_note`. **Nenhum** movimento financeiro é gerado.
+
+> A **solicitação** é criada na Folha (`/api/folha/.../solicitar-pagamento[-todos]`). O dinheiro só se move aqui, na aprovação. Ver `docs/backend/folha.md`.
 
 ## Schemas principais
 

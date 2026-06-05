@@ -207,6 +207,21 @@ Emite a NF fiscal de uma **ordem de serviço**. Chamada por `compras.complete_se
 
 > Prefixo: `_NF_SERVICO_PREFIX = "[NF-SERVICO]"` no `service.py`.
 
+## Função Pública — `criar_nota_folha` (Folha, Demanda 4)
+
+Emite a NF fiscal de **pagamento de folha** — 1 por funcionário/holerite. Chamada pelo **Financeiro** ao **aprovar** uma solicitação de pagamento de folha (`POST /api/financeiro/aprovacoes-folha/{id}/aprovar`), nunca direto pela Folha. Molde de `criar_nota_servico`.
+
+### `criar_nota_folha(db, entry, period) → Invoice`
+- `client_id`: `NULL` (não é cliente)
+- `invoice_type`: `"folha_pagamento"`
+- 1 item: `description = "Salário MM/AAAA — {nome do funcionário}"`, `quantity=1`, `unit_price = entry.net_amount`
+- `total_amount`: `entry.net_amount`
+- `due_date`: `date.today()`
+- `notes`: `"[NF-FOLHA] entry_id=<uuid> employee=<nome>"` (vínculo ao holerite pelo texto, mesmo estilo das NFs de compra)
+- Registra `financial_movement` `SAIDA/FOLHA, amount=0` para rastreabilidade. **O débito real é o `saida/folha` (= `net_amount`) lançado pelo Financeiro na aprovação**, não esta NF.
+
+> Prefixo: `_NF_FOLHA_PREFIX = "[NF-FOLHA]"` no `service.py`. Import lazy de `folha.model.Employee` para evitar ciclo.
+
 ## Função Pública — `criar_nota_transporte` (frete)
 
 Emite uma NF de transporte representando o custo de frete (`shipping_cost`) de uma venda ou de uma ordem de compra de produto. Sempre **à vista** (1 item, `quantity=1`, `unit_price=shipping_cost`), mesmo quando a venda/ordem é parcelada.

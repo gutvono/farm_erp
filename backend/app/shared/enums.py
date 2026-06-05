@@ -113,8 +113,14 @@ class PayrollPeriodStatus(str, enum.Enum):
 
 
 class PayrollEntryStatus(str, enum.Enum):
+    # Fluxo (Demanda 4 / D6): pendente → aguardando_aprovacao → pago
+    # (volta a pendente na recusa). `aguardando_aprovacao` fica POR ÚLTIMO na
+    # declaração de propósito: `ALTER TYPE ... ADD VALUE` anexa ao fim, então
+    # manter a mesma posição aqui faz o tipo do banco novo (create_all) bater
+    # com o do banco migrado. Ver migration 0017_payroll_approval.
     PENDENTE = "pendente"
     PAGO = "pago"
+    AGUARDANDO_APROVACAO = "aguardando_aprovacao"
 
 
 class PayrollEventType(str, enum.Enum):
