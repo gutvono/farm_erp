@@ -6,6 +6,10 @@ Página única com 5 abas (Tabs shadcn) que cobrem todas as operações financei
 
 A partir da **Demanda 4**, as três listas (Contas a Pagar, Contas a Receber e Movimentações) usam a **tabela paginada do sistema** (`DataTable`): a busca, os filtros e a ordenação são processados **no servidor** e a lista vem **em páginas** — você navega com **Anterior/Próxima**. Também na aba **Aprovações** entra a seção **"Pagamentos de Folha Aguardando Aprovação"**: pagar um funcionário na Folha não tira mais dinheiro direto; agora gera uma **solicitação** que o Financeiro **aprova** ou **recusa** aqui.
 
+**Polimento de UX (Demanda 4.1):**
+- Na aba **Aprovações**, cada uma das 3 filas (Ordens de Compra, Cotações, Pagamentos de Folha) tem **cabeçalho clicável** (seta + título + contagem) que **recolhe/expande** a lista. Começam abertas; é só uma preferência visual do momento (não fica salva).
+- Nas 3 tabelas do Financeiro, quando a **Descrição** é longa e fica **cortada com reticências**, ao passar o mouse aparece um **balão (tooltip) com o texto completo** — e só quando o texto está realmente cortado.
+
 ## Arquivos
 
 | Arquivo | Tipo | Descrição |
@@ -19,7 +23,10 @@ A partir da **Demanda 4**, as três listas (Contas a Pagar, Contas a Receber e M
 | `components/modules/financeiro/useContasPagar.ts` | Hook | Estado de página/ordenação/filtros das contas a pagar (carrega server-side) |
 | `components/modules/financeiro/useContasReceber.ts` | Hook | Estado das contas a receber |
 | `components/modules/financeiro/useMovimentacoesFin.ts` | Hook | Estado das movimentações do financeiro |
-| `components/modules/financeiro/AprovacoesFolha.tsx` | Componente | Seção da aba Aprovações com os pagamentos de folha (cards + Aprovar/Recusar) |
+| `components/modules/financeiro/AprovacoesFolha.tsx` | Componente | Seção (colapsável) da aba Aprovações com os pagamentos de folha (cards + Aprovar/Recusar) |
+| `components/ui/collapsible-section.tsx` | UI (novo, D4.1) | Seção com cabeçalho clicável (chevron + título + badge) que expande/recolhe — usada nas 3 filas de Aprovações |
+| `components/ui/truncated-text.tsx` | UI (novo, D4.1) | Texto em 1 linha cortado com reticências; tooltip com texto completo **só quando truncado** (detecção de overflow) |
+| `components/ui/tooltip.tsx` | UI (novo, D4.1) | Primitivo Tooltip do shadcn/Radix (`@radix-ui/react-tooltip`), renderizado em Portal (não corta dentro da tabela) |
 | `components/modules/financeiro/StatusBadge.tsx` | Componente | Badge colorido para status de contas |
 | `components/modules/financeiro/ContaPayableDetail.tsx` | Componente | Sheet lateral com detalhes, badge de pagamento e botões PIX/Boleto |
 | `components/modules/financeiro/ContaReceivableDetail.tsx` | Componente | Sheet lateral com detalhes, badge de pagamento e botões PIX/Boleto |
@@ -57,8 +64,13 @@ Amounts retornam como string no payload JSON (Pydantic + Decimal). O service con
 ## Abas
 
 ### 2. Aprovações (`approvals`) — nova
+A aba tem **3 filas**, cada uma numa **seção colapsável** (`CollapsibleSection`): **Ordens de Compra Pendentes**, **Cotações Aguardando Aprovação** e **Pagamentos de Folha Aguardando Aprovação**. Cada cabeçalho tem **seta + título + badge de contagem** e, ao ser clicado, **recolhe/expande** a lista (começa aberta; estado só de UI). Recolher uma fila **não** afeta os diálogos de aprovar/recusar — eles continuam funcionando ao reabrir.
+
+[SCREENSHOT: aba Aprovações com as 3 seções; uma delas recolhida mostrando só o cabeçalho com a contagem]
+
+**Ordens de Compra Pendentes:**
 - Lista ordens de compra com status `aguardando_aprovacao_financeiro`
-- Badge contador na aba (amarelo)
+- Badge contador na aba (amarelo) = soma das 3 filas
 - Ordens de serviço mostram `service_description`; ordens de produto mostram lista de itens
 - Botão **Aprovar** → Dialog com condições de pagamento:
   - Select `payment_method` (a_vista / parcelado / pix / boleto)
@@ -99,8 +111,9 @@ Tabela paginada (`ContasPagarTable`) com filtros e ordenação **server-side**:
 - Navegação por páginas (**Anterior / Próxima**), 20 por página.
 - Botão "Nova conta a pagar" dispara `NovaContaForm type="pagar"`.
 - Cada linha tem **Detalhes** → abre `ContaPayableDetail` como `Sheet`. No Sheet: **Pagar** (desabilitado se status final), **Cancelar conta** (com `AlertDialog`) e, conforme o método, **Ver informações PIX** / **Ver Boleto**. Após ação: toast, fecha Sheet, recarrega lista + saldo + movimentações.
+- A coluna **Descrição** mostra o texto em 1 linha; quando ele não cabe, fica **cortado com reticências** e o **texto completo aparece num tooltip ao passar o mouse** (só quando truncado). Vale para as 3 tabelas do Financeiro.
 
-[SCREENSHOT: aba Contas a Pagar com a barra de filtros (busca/datas/status) e a tabela ordenável paginada]
+[SCREENSHOT: aba Contas a Pagar com a barra de filtros (busca/datas/status), a tabela ordenável paginada e um tooltip de descrição aberto]
 
 ### 4. Contas a Receber (`receivables`)
 Tabela paginada (`ContasReceberTable`), mesmos filtros/ordenação:
@@ -118,6 +131,20 @@ Tabela paginada (`MovimentacoesTable`) com colunas Data, Descrição, Categoria,
 [SCREENSHOT: aba Movimentações com filtros de tipo/categoria/datas e a tabela paginada]
 
 ## Componentes — Props
+
+### `CollapsibleSection` (UI, D4.1)
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `title` | `string` | Título no cabeçalho clicável |
+| `count` | `number?` | Contagem no badge (oculto se 0/indefinido) |
+| `defaultOpen` | `boolean?` | Começa aberta (default `true`) |
+| `children` | `ReactNode` | Conteúdo recolhível |
+
+### `TruncatedText` (UI, D4.1)
+| Prop | Tipo | Descrição |
+|------|------|-----------|
+| `text` | `string` | Texto completo (cortado na tela, inteiro no tooltip) |
+| `className` | `string?` | Classes do span (ex.: `max-w-[280px] text-sm`) |
 
 ### `SaldoCard`
 | Prop | Tipo | Descrição |
@@ -184,4 +211,4 @@ Tabela de apresentação (estado de query no hook `useMovimentacoesFin`).
 - `react-hook-form` + `@hookform/resolvers` + `zod` — formulário de nova conta
 - `sonner` — toasts
 - `jspdf` — geração de PDF do boleto
-- `@radix-ui/react-tabs` + `@radix-ui/react-alert-dialog` — primitivos shadcn
+- `@radix-ui/react-tabs` + `@radix-ui/react-alert-dialog` + `@radix-ui/react-tooltip` (D4.1, tooltip de descrição) — primitivos shadcn

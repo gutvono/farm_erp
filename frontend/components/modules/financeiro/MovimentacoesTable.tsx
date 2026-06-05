@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { TruncatedText } from "@/components/ui/truncated-text"
 import { FinancialMovement, MovementType, Paginated } from "@/types/index"
 import { formatCurrency, formatDateTime } from "@/lib/utils"
 import { MovimentacaoFinFilters } from "./useMovimentacoesFin"
@@ -56,9 +57,7 @@ const columns: DataTableColumn<FinancialMovement>[] = [
     key: "description",
     label: "Descrição",
     render: (m) => (
-      <span className="block max-w-[280px] truncate text-sm text-slate-700">
-        {m.description}
-      </span>
+      <TruncatedText text={m.description} className="max-w-[280px] text-sm text-slate-700" />
     ),
   },
   {

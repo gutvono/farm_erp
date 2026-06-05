@@ -57,7 +57,19 @@ Página única em três abas: **Folha do Mês** (gestão de períodos e holerite
 2. Quando há período carregado:
    - Resumo: 4 cards (total da folha, total pago, total pendente, status). A linha de contagem mostra também quantos holerites estão **aguardando aprovação**.
    - Ações: `PagarTodosButton` ("Solicitar pagamento de todos", visível se aberto + há pendentes) e botão "Fechar Período" com `AlertDialog`.
-   - Tabela `EntryRow` por funcionário, com coluna de ações (editar, solicitar pagamento, gerar PDF).
+   - Tabela de holerites (`HoleritesTable`) com **filtros e ordenação client-side** + linha `EntryRow` por funcionário (ações: editar, solicitar pagamento, gerar PDF).
+
+#### Filtros, ordenação e ordem estável dos holerites (Demanda 4.1)
+A lista de holerites já vem **completa** do período selecionado; o filtro/ordenação são **só de visualização** (em memória, sem paginação).
+
+- **Ordem padrão:** alfabética por **nome** do funcionário.
+- **Ordenar (clique no cabeçalho):** Funcionário (nome), Salário base, Horas extras, Descontos e Total — alterna ↑/↓. (Contrato e Status não ordenam; Status filtra.)
+- **Filtros (menus):** **Status** (Pendente / Aguardando aprovação / Pago) e **Contrato** (CLT / PJ / Temporário). A barra mostra "X de Y holerites". Filtro vazio → "Nenhum holerite corresponde aos filtros".
+- **Ordem estável (a dor que isso resolve):** ao clicar **"Solicitar pagamento"** (ou "Solicitar pagamento de todos"), o funcionário **não muda de posição** na tabela — antes a linha "pulava" porque o status mudava. Agora a ordem depende **só do critério escolhido** (padrão: nome), nunca do status; após recarregar, a ordenação é reaplicada e a linha permanece no mesmo lugar.
+- **Importante:** o filtro é só visual. **"Solicitar pagamento de todos"** continua agindo sobre **todos os holerites pendentes do período**, mesmo que a tela esteja filtrada (ex.: filtrar Status=Pendente e clicar no botão cobre todos os pendentes, não só os visíveis).
+
+[SCREENSHOT: tabela de holerites com os menus Status/Contrato e os cabeçalhos ordenáveis]
+[SCREENSHOT: antes/depois de "Solicitar pagamento" de um funcionário — a linha continua na mesma posição, agora com o badge "Aguardando aprovação do financeiro"]
 
 ### Aba "Funcionários"
 - Filtro por contrato (Select) + toggle "Apenas ativos" (default true).
@@ -137,6 +149,13 @@ interface PayrollPaymentRequest { id; payroll_period_id; competency; // "MM/AAAA
 ```
 
 ## Componentes
+
+### `HoleritesTable` + `useHolerites` (Demanda 4.1)
+Tabela de apresentação dos holerites do período. O estado de **filtros + ordenação** vive no hook `useHolerites(entries)` (client-side); a tabela renderiza a barra de filtros (Status, Contrato), os cabeçalhos ordenáveis (nome, salário base, horas extras, descontos, total) e uma `EntryRow` por linha. A ordenação é **estável** (critério → nome → id, **nunca status**), preservando a posição da linha ao solicitar pagamento.
+
+**Props (`HoleritesTable`):** `entries: PayrollEntry[]`, `period: PayrollPeriod`, `employeeById: Map<string, Employee>`, `loading: boolean`, `onChanged: () => void`
+
+**Retorno (`useHolerites`):** `rows` (filtrado+ordenado), `sort {by,dir}`, `toggleSort(key)`, `filters {status?,contract_type?}`, `setFilters(next)`
 
 ### `FuncionarioCard`
 Card de funcionário com foto/avatar circular (54×54), nome, **nome do cargo** (`position_name`), badge de contrato (CLT azul / PJ roxo / Temporário laranja), salário base e data de admissão. Badge "Inativo" se `is_active = false`. Ações (apenas se ativo): "Editar" (callback) e "Demitir" (AlertDialog com custo calculado).

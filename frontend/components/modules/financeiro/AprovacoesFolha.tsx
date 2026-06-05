@@ -23,6 +23,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
+import { CollapsibleSection } from "@/components/ui/collapsible-section"
 import { aprovarFolha, recusarFolha } from "@/services/financeiro"
 import { PayrollPaymentRequest } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
@@ -85,26 +86,18 @@ export function AprovacoesFolha({
 
   return (
     <>
-      <div className="flex items-center gap-2 pt-4">
-        <h3 className="text-sm font-semibold text-slate-700">
-          Pagamentos de Folha Aguardando Aprovação
-        </h3>
-        {requests.length > 0 && (
-          <span className="rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
-            {requests.length}
-          </span>
-        )}
-      </div>
-
-      {loading ? (
-        <p className="text-sm text-slate-500">Carregando...</p>
-      ) : requests.length === 0 ? (
-        <p className="text-sm text-slate-500">
-          Nenhum pagamento de folha aguardando aprovação
-        </p>
-      ) : (
-        <div className="space-y-3">
-          {requests.map((req) => (
+      <CollapsibleSection
+        title="Pagamentos de Folha Aguardando Aprovação"
+        count={requests.length}
+      >
+        {loading ? (
+          <p className="text-sm text-slate-500">Carregando...</p>
+        ) : requests.length === 0 ? (
+          <p className="text-sm text-slate-500">
+            Nenhum pagamento de folha aguardando aprovação
+          </p>
+        ) : (
+          requests.map((req) => (
             <Card key={req.id} className="border-yellow-200">
               <CardHeader className="pb-3">
                 <div className="flex items-start justify-between gap-3">
@@ -165,9 +158,9 @@ export function AprovacoesFolha({
                 </div>
               </CardHeader>
             </Card>
-          ))}
-        </div>
-      )}
+          ))
+        )}
+      </CollapsibleSection>
 
       {/* AlertDialog: aprovar pagamento de folha */}
       <AlertDialog

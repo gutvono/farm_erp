@@ -11,6 +11,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { TruncatedText } from "@/components/ui/truncated-text"
 import { AccountsPayable, Paginated, PayableStatus } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { StatusBadge } from "./StatusBadge"
@@ -60,9 +61,10 @@ export function ContasPagarTable({
       key: "description",
       label: "Descrição",
       render: (c) => (
-        <span className="block max-w-[260px] truncate text-sm font-medium text-slate-800">
-          {c.description}
-        </span>
+        <TruncatedText
+          text={c.description}
+          className="max-w-[260px] text-sm font-medium text-slate-800"
+        />
       ),
     },
     {

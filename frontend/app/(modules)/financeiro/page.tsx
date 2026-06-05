@@ -50,6 +50,7 @@ import { MovimentacoesTable } from "@/components/modules/financeiro/Movimentacoe
 import { ContasPagarTable } from "@/components/modules/financeiro/ContasPagarTable"
 import { ContasReceberTable } from "@/components/modules/financeiro/ContasReceberTable"
 import { AprovacoesFolha } from "@/components/modules/financeiro/AprovacoesFolha"
+import { CollapsibleSection } from "@/components/ui/collapsible-section"
 import { useContasPagar } from "@/components/modules/financeiro/useContasPagar"
 import { useContasReceber } from "@/components/modules/financeiro/useContasReceber"
 import { useMovimentacoesFin } from "@/components/modules/financeiro/useMovimentacoesFin"
@@ -435,21 +436,18 @@ export default function FinanceiroPage() {
 
           {/* ── Aba Aprovações ── */}
           <TabsContent value="approvals" className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold text-slate-700">
-                Ordens de Compra Pendentes
-              </h3>
-            </div>
-
-            {pendingLoading ? (
-              <p className="text-sm text-slate-500">Carregando...</p>
-            ) : pendingOrders.length === 0 ? (
-              <div className="py-12 text-center text-slate-400">
-                Nenhuma ordem aguardando aprovação
-              </div>
-            ) : (
-              <div className="space-y-3">
-                {pendingOrders.map((order) => (
+            <CollapsibleSection
+              title="Ordens de Compra Pendentes"
+              count={pendingOrders.length}
+            >
+              {pendingLoading ? (
+                <p className="text-sm text-slate-500">Carregando...</p>
+              ) : pendingOrders.length === 0 ? (
+                <div className="py-12 text-center text-slate-400">
+                  Nenhuma ordem aguardando aprovação
+                </div>
+              ) : (
+                pendingOrders.map((order) => (
                   <Card key={order.id} className="border-yellow-200">
                     <CardHeader className="pb-3">
                       <div className="flex items-start justify-between gap-3">
@@ -510,31 +508,23 @@ export default function FinanceiroPage() {
                       </div>
                     </CardHeader>
                   </Card>
-                ))}
-              </div>
-            )}
+                ))
+              )}
+            </CollapsibleSection>
 
             {/* ── Cotações Aguardando Aprovação ── */}
-            <div className="flex items-center gap-2 pt-4">
-              <h3 className="text-sm font-semibold text-slate-700">
-                Cotações Aguardando Aprovação
-              </h3>
-              {cotacoesPendentes.length > 0 && (
-                <span className="rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
-                  {cotacoesPendentes.length}
-                </span>
-              )}
-            </div>
-
-            {cotacoesLoading ? (
-              <p className="text-sm text-slate-500">Carregando...</p>
-            ) : cotacoesPendentes.length === 0 ? (
-              <p className="text-sm text-slate-500">
-                Nenhuma cotação aguardando aprovação
-              </p>
-            ) : (
-              <div className="space-y-3">
-                {cotacoesPendentes.map((q) => {
+            <CollapsibleSection
+              title="Cotações Aguardando Aprovação"
+              count={cotacoesPendentes.length}
+            >
+              {cotacoesLoading ? (
+                <p className="text-sm text-slate-500">Carregando...</p>
+              ) : cotacoesPendentes.length === 0 ? (
+                <p className="text-sm text-slate-500">
+                  Nenhuma cotação aguardando aprovação
+                </p>
+              ) : (
+                cotacoesPendentes.map((q) => {
                   const proposal = winningProposal(q)
                   const isService = q.order_type === "servico"
                   return (
@@ -607,9 +597,9 @@ export default function FinanceiroPage() {
                       </CardHeader>
                     </Card>
                   )
-                })}
-              </div>
-            )}
+                })
+              )}
+            </CollapsibleSection>
 
             {/* ── Pagamentos de Folha Aguardando Aprovação ── */}
             <AprovacoesFolha
