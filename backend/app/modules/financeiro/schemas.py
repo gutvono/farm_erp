@@ -171,6 +171,10 @@ class PaymentMethodUpdate(BaseModel):
     payment_method: PaymentMethod
 
 
+class PayrollApprovalRefuse(BaseModel):
+    note: str = Field(min_length=1, max_length=2000)
+
+
 class PixPaymentInfo(BaseModel):
     pix_key: str
     pix_code: str

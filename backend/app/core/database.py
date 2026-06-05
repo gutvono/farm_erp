@@ -57,6 +57,8 @@ from app.modules.folha.model import (  # noqa: E402, F401
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
+    PayrollPaymentRequest,
+    PayrollPaymentRequestEntry,
     PayrollPeriod,
 )
 from app.modules.pcp.model import (  # noqa: E402, F401

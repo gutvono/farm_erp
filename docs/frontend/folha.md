@@ -2,7 +2,9 @@
 
 ## Visão Geral
 
-Página única em três abas: **Folha do Mês** (gestão de períodos e holerites), **Funcionários** (cadastro com foto, demissão e edição) e **Cargos** (cadastro dos cargos da fazenda). Toda operação que movimenta dinheiro (pagamento individual, pagamento em lote, demissão) é executada via API e gera movimento financeiro no backend.
+Página única em três abas: **Folha do Mês** (gestão de períodos e holerites), **Funcionários** (cadastro com foto, demissão e edição) e **Cargos** (cadastro dos cargos da fazenda).
+
+> **Demanda 4 — pagar virou "solicitar pagamento".** Antes, "Pagar" tirava dinheiro direto da Conta Corrente. Agora, pagar um funcionário (individual ou em lote) **não move dinheiro**: cria uma **solicitação de pagamento** que vai para a aba **Aprovações** do Financeiro. O dinheiro só sai quando o Financeiro **aprova** — e aí é emitida **uma nota fiscal de folha por funcionário**. Enquanto aguarda, o holerite fica **"Aguardando aprovação do financeiro"** e seu botão fica **bloqueado**. Se o Financeiro **recusar**, o holerite volta a **Pendente**. (A demissão continua lançando o custo direto no Financeiro.)
 
 > A partir da Demanda 2, **cargo deixou de ser um texto livre** digitado no cadastro do funcionário e passou a ser um **item cadastrável** (aba **Cargos**). No cadastro de funcionário, o cargo é escolhido num **menu suspenso**, e o salário do cargo é **sugerido automaticamente** (mas pode ser alterado).
 
@@ -53,9 +55,9 @@ Página única em três abas: **Folha do Mês** (gestão de períodos e holerite
 ### Aba "Folha do Mês"
 1. `PeriodoSelector` no topo: mês + ano + botão "Abrir Período" (idempotente).
 2. Quando há período carregado:
-   - Resumo: 4 cards (total da folha, total pago, total pendente, status).
-   - Ações: `PagarTodosButton` (visível se aberto + há pendentes) e botão "Fechar Período" com `AlertDialog`.
-   - Tabela `EntryRow` por funcionário, com coluna de ações (editar, pagar, gerar PDF).
+   - Resumo: 4 cards (total da folha, total pago, total pendente, status). A linha de contagem mostra também quantos holerites estão **aguardando aprovação**.
+   - Ações: `PagarTodosButton` ("Solicitar pagamento de todos", visível se aberto + há pendentes) e botão "Fechar Período" com `AlertDialog`.
+   - Tabela `EntryRow` por funcionário, com coluna de ações (editar, solicitar pagamento, gerar PDF).
 
 ### Aba "Funcionários"
 - Filtro por contrato (Select) + toggle "Apenas ativos" (default true).
@@ -92,9 +94,14 @@ fecharPeriodo(id): Promise<PayrollPeriod>
 
 // Entries
 updateEntry(id, { overtime_amount, deductions }): Promise<PayrollEntry>
-pagarEntry(id): Promise<PayrollEntry>
-pagarTodos(period_id): Promise<PayrollBatchResult>
+solicitarPagamento(entryId): Promise<PayrollPaymentRequest>          // individual
+solicitarPagamentoTodos(periodId): Promise<PayrollPaymentRequest>    // lote
 ```
+
+> Os antigos `pagarEntry`/`pagarTodos` (pagamento direto) foram **removidos** — o
+> backend não tem mais rota de pagamento direto na Folha. A aprovação/recusa da
+> solicitação acontece no **Financeiro** (`getAprovacoesFolha`/`aprovarFolha`/
+> `recusarFolha`, ver `docs/frontend/financeiro.md`).
 
 **Multipart upload:** `createFuncionario` chama `fetch` diretamente (em vez de `apiFetch`) porque o helper força `Content-Type: application/json`. O service mantém `credentials: "include"` para o cookie de sessão e replica o tratamento 401 → redirect /login. Esse é o único ponto fora do `apiFetch` no módulo.
 
@@ -108,7 +115,7 @@ pagarTodos(period_id): Promise<PayrollBatchResult>
 
 ```typescript
 type ContractType = "clt" | "pj" | "temporario"
-type PayrollEntryStatus = "pendente" | "pago"
+type PayrollEntryStatus = "pendente" | "aguardando_aprovacao" | "pago"
 type PayrollPeriodStatus = "aberta" | "fechada"
 
 interface JobPosition { id; name; description; base_salary; is_active }
@@ -122,7 +129,11 @@ interface PayrollEntry { id; payroll_period_id; employee_id; employee_name;
 interface PayrollPeriod { id; reference_month; reference_year; status;
   total_amount; entries; created_at }
 
-interface PayrollBatchResult { paid_count; total_paid; insufficient_balance; failed_employees }
+// Solicitação de pagamento (Demanda 4) — criada na Folha, decidida no Financeiro
+interface PayrollPaymentRequest { id; payroll_period_id; competency; // "MM/AAAA"
+  request_type: "individual" | "lote"; status; total_amount; approval_note;
+  requested_at; decided_at; entries: { entry_id; employee_id; employee_name; net_amount }[];
+  created_at; updated_at }
 ```
 
 ## Componentes
@@ -155,9 +166,10 @@ Select de mês (1-12 nomes em português) + Input number ano (default mês/ano a
 **Props:** `activePeriod: PayrollPeriod | null`, `onPeriodLoaded: (p: PayrollPeriod) => void`
 
 ### `EntryRow`
-Linha da tabela de holerites: avatar pequeno + nome, badge de contrato, salário base, horas extras (verde + sinal +), descontos (vermelho + sinal -), total destacado em bold, badge de status (pendente amarelo / pago verde). Ações por linha:
+Linha da tabela de holerites: avatar pequeno + nome, badge de contrato, salário base, horas extras (verde + sinal +), descontos (vermelho + sinal -), total destacado em bold, badge de status (pendente amarelo / **aguardando aprovação âmbar** / pago verde). Ações por linha:
 - Botão editar (Pencil) → abre `EntryEditForm` (apenas se `aberta` + `pendente`).
-- Botão "Pagar" individual com loading (apenas se `aberta` + `pendente`). Erro de saldo insuficiente do backend é repassado direto no toast.
+- Botão **"Solicitar pagamento"** individual com loading (apenas se `aberta` + `pendente`). Cria a solicitação e mostra o toast *"Enviado para aprovação do financeiro"*.
+- Quando o holerite está **aguardando aprovação**, no lugar do botão aparece um botão **bloqueado** "Aguardando aprovação" (e o badge de status "Aguardando aprovação do financeiro").
 - Botão `HoleritePDF` sempre visível.
 
 **Props:** `entry: PayrollEntry`, `period: PayrollPeriod`, `employee?: Employee`, `onChanged: () => void`
@@ -180,28 +192,32 @@ Botão "PDF" que dinamicamente importa `jsPDF` (`await import("jspdf")`) — evi
 **Props:** `entry: PayrollEntry`, `period: PayrollPeriod`, `employee?: Employee`
 
 ### `PagarTodosButton`
-Botão verde "Pagar Todos (R$ X)" calculando o total das pendências localmente. AlertDialog de confirmação antes da chamada. Após a resposta, abre `ResultadoPagamentoDialog` com o breakdown. Toast `warning` se houve `insufficient_balance`, `success` se todos pagos.
+Botão verde **"Solicitar pagamento de todos (R$ X)"** calculando o total das pendências localmente. AlertDialog de confirmação explicando que será criada **uma única solicitação** e que os holerites ficam **aguardando aprovação do financeiro**. Após confirmar, mostra o toast *"Enviado para aprovação do financeiro"* e recarrega o período (todos os pendentes viram **aguardando aprovação**, bloqueando os botões individuais).
 
 **Props:** `periodId: string`, `pendingEntries: PayrollEntry[]`, `onSuccess: () => void`
 
-### `ResultadoPagamentoDialog`
-Dialog com ícone CheckCircle2 verde (sucesso) ou AlertTriangle amarelo (saldo insuficiente). Texto: "X funcionário(s) pago(s) — Total: R$ Y". Se `failed_employees` não vazio, seção vermelha lista os nomes que não foram pagos por saldo insuficiente, com instrução de reforçar o saldo.
-
-**Props:** `open`, `onOpenChange`, `result: PayrollBatchResult | null`
-
-## Fluxo: Criação de Período → Pagamento
+## Fluxo: Criação de Período → Solicitação → Aprovação
 
 1. Usuário escolhe mês/ano no `PeriodoSelector` e clica "Abrir Período".
 2. `createOrGetPeriodo` chama `POST /api/folha/periodos` (idempotente). Backend:
    - Se já existe → retorna o período existente (com entries).
    - Se novo → cria 1 entry por funcionário **ativo** com `total_amount = base_salary`, status `pendente`.
 3. Tabela exibe holerites. Usuário pode editar `overtime_amount`/`deductions` por entry — backend recalcula `total_amount`.
-4. Pagamento individual (`pagarEntry`) ou em lote (`pagarTodos`):
-   - Backend valida saldo da Conta Corrente.
-   - Saldo OK → marca `pago`, gera movimento `saida/folha`.
-   - Saldo insuficiente individual → 400 com mensagem da API.
-   - Saldo insuficiente em lote → registra em `failed_employees` e segue.
-5. Fechar período (`fecharPeriodo`) só é aceito se **todas** as entries estão pagas. Caso contrário toast com mensagem do backend.
+4. **Solicitar pagamento** individual (`solicitarPagamento`) ou em lote (`solicitarPagamentoTodos`):
+   - **Não** move dinheiro. O(s) holerite(s) passa(m) a **aguardando aprovação** e o botão fica bloqueado.
+   - No lote, **todos** os pendentes do período entram numa **única** solicitação e bloqueiam de uma vez.
+   - A solicitação aparece na aba **Aprovações** do Financeiro.
+5. **No Financeiro** (ver `docs/frontend/financeiro.md`): **Aprovar** → cada holerite vira **pago**, gera movimento `saida/folha` e emite **1 NF `folha_pagamento` por funcionário** (o saldo é validado no backend; se insuficiente, toast de erro). **Recusar** (com motivo) → holerites voltam a **pendente**.
+6. Fechar período (`fecharPeriodo`) só é aceito se **todas** as entries estão **pagas** (holerites pendentes ou aguardando aprovação bloqueiam o fechamento). Caso contrário, toast com a mensagem do backend.
+
+### Passo a passo (ótica do usuário) — Solicitar pagamento
+1. Na aba **Folha do Mês**, com o período **aberto**, localize o funcionário na tabela.
+2. Clique em **"Solicitar pagamento"** na linha dele (ou em **"Solicitar pagamento de todos"** no topo para a folha inteira).
+3. O holerite passa a exibir **"Aguardando aprovação do financeiro"** e o botão fica **bloqueado**. Aparece o aviso *"Enviado para aprovação do financeiro"*.
+4. O pagamento se concretiza (ou é recusado) na aba **Aprovações** do **Financeiro**. Aprovado → status **Pago**; recusado → volta a **Pendente** e o botão é liberado novamente.
+
+[SCREENSHOT: linha do holerite com o botão "Solicitar pagamento"]
+[SCREENSHOT: holerite "Aguardando aprovação do financeiro" com o botão bloqueado]
 
 ## Fluxo: Demissão
 
@@ -248,5 +264,5 @@ Dialog com ícone CheckCircle2 verde (sucesso) ou AlertTriangle amarelo (saldo i
 - Loading explícito em todas as ações assíncronas (botões trocam para "Processando..." / "Pagando..." / etc.).
 - Toasts via `sonner` em sucesso/erro/aviso.
 - Erros do backend são exibidos verbatim (mensagem original em português vinda do `apiFetch`).
-- AlertDialog para todas as operações destrutivas/irreversíveis: demissão, fechar período, pagar todos.
-- Períodos fechados ficam read-only (sem botões de pagar/editar nos `EntryRow`; sem botão "Fechar" na barra).
+- AlertDialog para confirmações relevantes: demissão, fechar período, solicitar pagamento de todos.
+- Períodos fechados ficam read-only (sem botões de solicitar pagamento/editar nos `EntryRow`; sem botão "Fechar" na barra).

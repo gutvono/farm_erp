@@ -163,11 +163,14 @@ export default function FolhaPage() {
   const summary = useMemo(() => {
     if (!period) return null
     const pending = period.entries.filter((e) => e.status === "pendente")
+    const awaiting = period.entries.filter(
+      (e) => e.status === "aguardando_aprovacao"
+    )
     const paid = period.entries.filter((e) => e.status === "pago")
     const totalPending = pending.reduce((s, e) => s + e.total_amount, 0)
     const totalPaid = paid.reduce((s, e) => s + e.total_amount, 0)
     const total = period.entries.reduce((s, e) => s + e.total_amount, 0)
-    return { pending, paid, totalPending, totalPaid, total }
+    return { pending, awaiting, paid, totalPending, totalPaid, total }
   }, [period])
 
   const activeEmployeesCount = employees.filter((e) => e.is_active).length
@@ -251,6 +254,9 @@ export default function FolhaPage() {
                     {period.entries.length !== 1 ? "s" : ""} ·{" "}
                     {summary?.pending.length ?? 0} pendente
                     {(summary?.pending.length ?? 0) !== 1 ? "s" : ""}
+                    {(summary?.awaiting.length ?? 0) > 0 && (
+                      <> · {summary?.awaiting.length} aguardando aprovação</>
+                    )}
                   </span>
 
                   <div className="flex items-center gap-2">

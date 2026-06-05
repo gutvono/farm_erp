@@ -12,6 +12,8 @@ from app.modules.folha.model import (
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
+    PayrollPaymentRequest,
+    PayrollPaymentRequestEntry,
     PayrollPeriod,
 )
 from app.shared.enums import (
@@ -582,6 +584,25 @@ def mark_entry_paid(db: Session, entry_id: UUID) -> Optional[PayrollEntry]:
     return entry
 
 
+def set_entry_status(
+    db: Session,
+    entry_id: UUID,
+    status: PayrollEntryStatus,
+    *,
+    paid_at: Optional[datetime] = None,
+) -> Optional[PayrollEntry]:
+    """Generic entry status transition (aguardando_aprovacao, pendente, pago)."""
+    entry = get_entry(db, entry_id)
+    if not entry:
+        return None
+    entry.status = status
+    entry.paid_at = paid_at
+    db.add(entry)
+    db.commit()
+    db.refresh(entry)
+    return entry
+
+
 def list_pending_entries_by_period(
     db: Session, period_id: UUID
 ) -> list[PayrollEntry]:
@@ -804,3 +825,82 @@ def recalculate_entry_totals(
     db.refresh(entry)
     _ = entry.items
     return entry
+
+
+# ---------------------------------------------------------------------------
+# Payroll Payment Requests (aprovação de folha — Demanda 4)
+# ---------------------------------------------------------------------------
+
+
+def create_payment_request(
+    db: Session,
+    *,
+    period_id: UUID,
+    request_type: str,
+    total_amount: Decimal,
+) -> PayrollPaymentRequest:
+    request = PayrollPaymentRequest(
+        payroll_period_id=period_id,
+        request_type=request_type,
+        status="aguardando_aprovacao_financeiro",
+        total_amount=total_amount,
+    )
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    return request
+
+
+def add_request_entry(
+    db: Session, *, request_id: UUID, entry_id: UUID
+) -> PayrollPaymentRequestEntry:
+    link = PayrollPaymentRequestEntry(
+        payment_request_id=request_id,
+        payroll_entry_id=entry_id,
+    )
+    db.add(link)
+    db.commit()
+    db.refresh(link)
+    return link
+
+
+def get_payment_request(
+    db: Session, request_id: UUID
+) -> Optional[PayrollPaymentRequest]:
+    request = (
+        db.query(PayrollPaymentRequest)
+        .filter(
+            PayrollPaymentRequest.id == request_id,
+            PayrollPaymentRequest.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if request:
+        _ = request.entries
+    return request
+
+
+def list_payment_requests_by_status(
+    db: Session, status: str
+) -> list[PayrollPaymentRequest]:
+    requests = (
+        db.query(PayrollPaymentRequest)
+        .filter(
+            PayrollPaymentRequest.status == status,
+            PayrollPaymentRequest.deleted_at.is_(None),
+        )
+        .order_by(PayrollPaymentRequest.requested_at.asc())
+        .all()
+    )
+    for r in requests:
+        _ = r.entries
+    return requests
+
+
+def save_payment_request(
+    db: Session, request: PayrollPaymentRequest
+) -> PayrollPaymentRequest:
+    db.add(request)
+    db.commit()
+    db.refresh(request)
+    return request

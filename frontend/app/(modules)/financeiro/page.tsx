@@ -43,17 +43,20 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { CashFlowChart } from "@/components/modules/dashboard/CashFlowChart"
 import { SaldoCard } from "@/components/modules/financeiro/SaldoCard"
-import { ContaRow } from "@/components/modules/financeiro/ContaRow"
 import { ContaPayableDetail } from "@/components/modules/financeiro/ContaPayableDetail"
 import { ContaReceivableDetail } from "@/components/modules/financeiro/ContaReceivableDetail"
 import { NovaContaForm } from "@/components/modules/financeiro/NovaContaForm"
 import { MovimentacoesTable } from "@/components/modules/financeiro/MovimentacoesTable"
+import { ContasPagarTable } from "@/components/modules/financeiro/ContasPagarTable"
+import { ContasReceberTable } from "@/components/modules/financeiro/ContasReceberTable"
+import { AprovacoesFolha } from "@/components/modules/financeiro/AprovacoesFolha"
+import { useContasPagar } from "@/components/modules/financeiro/useContasPagar"
+import { useContasReceber } from "@/components/modules/financeiro/useContasReceber"
+import { useMovimentacoesFin } from "@/components/modules/financeiro/useMovimentacoesFin"
 import {
-  getContasPagar,
-  getContasReceber,
+  getAprovacoesFolha,
   getFluxoCaixaChartData,
   getInadimplentes,
-  getMovimentacoes,
   getSaldo,
 } from "@/services/financeiro"
 import {
@@ -71,29 +74,12 @@ import {
   Balance,
   CashFlowPoint,
   DefaulterItem,
-  FinancialMovement,
-  PayableStatus,
+  PayrollPaymentRequest,
   PurchaseOrder,
   Quotation,
   QuotationProposal,
-  ReceivableStatus,
 } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
-
-const PAYABLE_STATUSES: { value: string; label: string }[] = [
-  { value: "all", label: "Todos" },
-  { value: "em_aberto", label: "Em aberto" },
-  { value: "paga", label: "Paga" },
-  { value: "cancelada", label: "Cancelada" },
-]
-
-const RECEIVABLE_STATUSES: { value: string; label: string }[] = [
-  { value: "all", label: "Todos" },
-  { value: "em_aberto", label: "Em aberto" },
-  { value: "parcialmente_pago", label: "Parcialmente pago" },
-  { value: "quitado", label: "Quitado" },
-  { value: "cancelada", label: "Cancelada" },
-]
 
 export default function FinanceiroPage() {
   const [balance, setBalance] = useState<Balance | null>(null)
@@ -101,22 +87,18 @@ export default function FinanceiroPage() {
   const [cashFlow, setCashFlow] = useState<CashFlowPoint[]>([])
   const [defaulters, setDefaulters] = useState<DefaulterItem[]>([])
 
-  const [payables, setPayables] = useState<AccountsPayable[]>([])
-  const [payableStatus, setPayableStatus] = useState<string>("all")
-  const [payablesLoading, setPayablesLoading] = useState(false)
+  // Contas a pagar / receber / movimentações — estado paginado nos hooks
+  const payables = useContasPagar()
+  const receivables = useContasReceber()
+  const movements = useMovimentacoesFin()
+
   const [selectedPayable, setSelectedPayable] =
     useState<AccountsPayable | null>(null)
   const [payableSheetOpen, setPayableSheetOpen] = useState(false)
 
-  const [receivables, setReceivables] = useState<AccountsReceivable[]>([])
-  const [receivableStatus, setReceivableStatus] = useState<string>("all")
-  const [receivablesLoading, setReceivablesLoading] = useState(false)
   const [selectedReceivable, setSelectedReceivable] =
     useState<AccountsReceivable | null>(null)
   const [receivableSheetOpen, setReceivableSheetOpen] = useState(false)
-
-  const [movements, setMovements] = useState<FinancialMovement[]>([])
-  const [movementsLoading, setMovementsLoading] = useState(false)
 
   // Aprovações
   const [pendingOrders, setPendingOrders] = useState<PurchaseOrder[]>([])
@@ -140,6 +122,10 @@ export default function FinanceiroPage() {
   const [rejectQuotationNote, setRejectQuotationNote] = useState("")
   const [rejectingQuotation, setRejectingQuotation] = useState(false)
 
+  // Pagamentos de folha aguardando aprovação
+  const [payrollRequests, setPayrollRequests] = useState<PayrollPaymentRequest[]>([])
+  const [payrollLoading, setPayrollLoading] = useState(false)
+
   const loadOverview = useCallback(async () => {
     setBalanceLoading(true)
     try {
@@ -157,56 +143,6 @@ export default function FinanceiroPage() {
       toast.error(message)
     } finally {
       setBalanceLoading(false)
-    }
-  }, [])
-
-  const loadPayables = useCallback(async () => {
-    setPayablesLoading(true)
-    try {
-      const status =
-        payableStatus === "all" ? undefined : (payableStatus as PayableStatus)
-      const data = await getContasPagar(status)
-      setPayables(data)
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Erro ao carregar contas a pagar"
-      toast.error(message)
-    } finally {
-      setPayablesLoading(false)
-    }
-  }, [payableStatus])
-
-  const loadReceivables = useCallback(async () => {
-    setReceivablesLoading(true)
-    try {
-      const status =
-        receivableStatus === "all"
-          ? undefined
-          : (receivableStatus as ReceivableStatus)
-      const data = await getContasReceber(status)
-      setReceivables(data)
-    } catch (err) {
-      const message =
-        err instanceof Error
-          ? err.message
-          : "Erro ao carregar contas a receber"
-      toast.error(message)
-    } finally {
-      setReceivablesLoading(false)
-    }
-  }, [receivableStatus])
-
-  const loadMovements = useCallback(async () => {
-    setMovementsLoading(true)
-    try {
-      const data = await getMovimentacoes()
-      setMovements(data)
-    } catch (err) {
-      const message =
-        err instanceof Error ? err.message : "Erro ao carregar movimentações"
-      toast.error(message)
-    } finally {
-      setMovementsLoading(false)
     }
   }, [])
 
@@ -238,15 +174,29 @@ export default function FinanceiroPage() {
     }
   }, [])
 
+  const loadPayrollRequests = useCallback(async () => {
+    setPayrollLoading(true)
+    try {
+      const data = await getAprovacoesFolha()
+      setPayrollRequests(data)
+    } catch (err) {
+      const message =
+        err instanceof Error
+          ? err.message
+          : "Erro ao carregar pagamentos de folha"
+      toast.error(message)
+    } finally {
+      setPayrollLoading(false)
+    }
+  }, [])
+
   useEffect(() => {
     loadOverview()
-    loadMovements()
-  }, [loadOverview, loadMovements])
+  }, [loadOverview])
 
-  useEffect(() => { loadPayables() }, [loadPayables])
-  useEffect(() => { loadReceivables() }, [loadReceivables])
   useEffect(() => { loadPendingOrders() }, [loadPendingOrders])
   useEffect(() => { loadCotacoesPendentes() }, [loadCotacoesPendentes])
+  useEffect(() => { loadPayrollRequests() }, [loadPayrollRequests])
 
   function handlePayableClick(conta: AccountsPayable) {
     setSelectedPayable(conta)
@@ -259,11 +209,19 @@ export default function FinanceiroPage() {
   }
 
   async function refreshAfterPayableChange() {
-    await Promise.all([loadPayables(), loadOverview(), loadMovements()])
+    await Promise.all([payables.reload(), loadOverview(), movements.reload()])
   }
 
   async function refreshAfterReceivableChange() {
-    await Promise.all([loadReceivables(), loadOverview(), loadMovements()])
+    await Promise.all([receivables.reload(), loadOverview(), movements.reload()])
+  }
+
+  async function refreshAfterPayrollDecision() {
+    await Promise.all([
+      loadPayrollRequests(),
+      loadOverview(),
+      movements.reload(),
+    ])
   }
 
   function calcApproveInstallmentPreview() {
@@ -305,7 +263,7 @@ export default function FinanceiroPage() {
         await concluirServico(orderId)
         toast.success(`Serviço de ${supplierName} aprovado e enviado para pagamento`)
         setApproveTarget(null)
-        await Promise.all([loadPendingOrders(), loadPayables()])
+        await Promise.all([loadPendingOrders(), payables.reload()])
       } else {
         toast.success(`Ordem de ${supplierName} aprovada`)
         setApproveTarget(null)
@@ -379,6 +337,9 @@ export default function FinanceiroPage() {
     }
   }
 
+  const approvalsCount =
+    pendingOrders.length + cotacoesPendentes.length + payrollRequests.length
+
   return (
     <RootLayout title="Financeiro">
       <div className="space-y-6">
@@ -394,9 +355,9 @@ export default function FinanceiroPage() {
             <TabsTrigger value="overview">Visão Geral</TabsTrigger>
             <TabsTrigger value="approvals" className="relative">
               Aprovações
-              {pendingOrders.length + cotacoesPendentes.length > 0 && (
+              {approvalsCount > 0 && (
                 <span className="ml-1.5 rounded-full bg-yellow-500 text-white text-xs px-1.5 py-0.5 leading-none">
-                  {pendingOrders.length + cotacoesPendentes.length}
+                  {approvalsCount}
                 </span>
               )}
             </TabsTrigger>
@@ -649,27 +610,17 @@ export default function FinanceiroPage() {
                 })}
               </div>
             )}
+
+            {/* ── Pagamentos de Folha Aguardando Aprovação ── */}
+            <AprovacoesFolha
+              requests={payrollRequests}
+              loading={payrollLoading}
+              onChanged={refreshAfterPayrollDecision}
+            />
           </TabsContent>
 
           <TabsContent value="payables" className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="w-52">
-                <Select
-                  value={payableStatus}
-                  onValueChange={setPayableStatus}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filtrar por status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {PAYABLE_STATUSES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex items-center justify-end">
               <NovaContaForm
                 type="pagar"
                 onSuccess={refreshAfterPayableChange}
@@ -682,23 +633,17 @@ export default function FinanceiroPage() {
               />
             </div>
 
-            {payablesLoading && (
-              <p className="text-sm text-slate-500">Carregando...</p>
-            )}
-            {!payablesLoading && payables.length === 0 && (
-              <p className="text-sm text-slate-500">
-                Nenhuma conta encontrada
-              </p>
-            )}
-            <div className="space-y-2">
-              {payables.map((conta) => (
-                <ContaRow
-                  key={conta.id}
-                  conta={conta}
-                  onClick={() => handlePayableClick(conta)}
-                />
-              ))}
-            </div>
+            <ContasPagarTable
+              data={payables.data}
+              loading={payables.loading}
+              page={payables.page}
+              sort={payables.sort}
+              onPageChange={payables.setPage}
+              onSortChange={payables.toggleSort}
+              filters={payables.filters}
+              onFiltersChange={payables.setFilters}
+              onSelect={handlePayableClick}
+            />
 
             <ContaPayableDetail
               conta={selectedPayable}
@@ -709,24 +654,7 @@ export default function FinanceiroPage() {
           </TabsContent>
 
           <TabsContent value="receivables" className="space-y-4">
-            <div className="flex items-center justify-between gap-4">
-              <div className="w-52">
-                <Select
-                  value={receivableStatus}
-                  onValueChange={setReceivableStatus}
-                >
-                  <SelectTrigger>
-                    <SelectValue placeholder="Filtrar por status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {RECEIVABLE_STATUSES.map((s) => (
-                      <SelectItem key={s.value} value={s.value}>
-                        {s.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
+            <div className="flex items-center justify-end">
               <NovaContaForm
                 type="receber"
                 onSuccess={refreshAfterReceivableChange}
@@ -739,23 +667,17 @@ export default function FinanceiroPage() {
               />
             </div>
 
-            {receivablesLoading && (
-              <p className="text-sm text-slate-500">Carregando...</p>
-            )}
-            {!receivablesLoading && receivables.length === 0 && (
-              <p className="text-sm text-slate-500">
-                Nenhuma conta encontrada
-              </p>
-            )}
-            <div className="space-y-2">
-              {receivables.map((conta) => (
-                <ContaRow
-                  key={conta.id}
-                  conta={conta}
-                  onClick={() => handleReceivableClick(conta)}
-                />
-              ))}
-            </div>
+            <ContasReceberTable
+              data={receivables.data}
+              loading={receivables.loading}
+              page={receivables.page}
+              sort={receivables.sort}
+              onPageChange={receivables.setPage}
+              onSortChange={receivables.toggleSort}
+              filters={receivables.filters}
+              onFiltersChange={receivables.setFilters}
+              onSelect={handleReceivableClick}
+            />
 
             <ContaReceivableDetail
               conta={selectedReceivable}
@@ -767,8 +689,14 @@ export default function FinanceiroPage() {
 
           <TabsContent value="movements">
             <MovimentacoesTable
-              movements={movements}
-              loading={movementsLoading}
+              data={movements.data}
+              loading={movements.loading}
+              page={movements.page}
+              sort={movements.sort}
+              onPageChange={movements.setPage}
+              onSortChange={movements.toggleSort}
+              filters={movements.filters}
+              onFiltersChange={movements.setFilters}
             />
           </TabsContent>
         </Tabs>

@@ -48,8 +48,8 @@ nome do enum.
 |--------|-------------|------------|
 | `users`, `clients`, `suppliers`, `employees`, `job_positions` | ✅ | entidades cadastrais |
 | `stock_items`, `plots`, `stock_categories` | ✅ | cadastros base |
-| `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events` | ✅ | operações de negócio e catálogos |
-| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items` | ❌ | itens filhos (cascateados pelo pai) |
+| `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events`, `payroll_payment_requests` | ✅ | operações de negócio e catálogos |
+| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items`, `payroll_payment_request_entries` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
 | `category_role_assignments` | ❌ | tabela de ligação M:N (hard delete; CASCADE da categoria) |
 | `app_settings` | ❌ | key-value de configuração |
@@ -290,7 +290,7 @@ Faturas emitidas (automáticas ou avulsas). Fluxo `emitida → paga → cancelad
 | `sale_id` | FK `sales.id` NULL | Venda de origem |
 | `issue_date`, `due_date` | `DATE` | Datas |
 | `total_amount` | `NUMERIC(12,2)` | Total |
-| `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `transporte`, `devolucao`. Indexado (`idx_invoices_invoice_type`) para o despacho do cancelamento |
+| `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `transporte`, `devolucao`, `folha_pagamento` (NF de folha, Demanda 4). Indexado (`idx_invoices_invoice_type`) para o despacho do cancelamento |
 | `installment_number` | `INTEGER` NULL | Número desta parcela (ex.: 2) |
 | `installment_total` | `INTEGER` NULL | Total de parcelas (ex.: 3) |
 | `parent_invoice_id` | FK `invoices.id` NULL | Fatura-pai em parcelamentos (indexado `ix_invoices_parent_invoice_id`, usado para achar a cadeia parcelada) |
@@ -387,7 +387,10 @@ Status: `aberta → fechada`.
 
 #### `payroll_entries`
 Lançamentos por funcionário/competência. UNIQUE
-(`payroll_period_id`, `employee_id`). Status: `pendente → pago`.
+(`payroll_period_id`, `employee_id`). Status (`payroll_entry_status`):
+`pendente → aguardando_aprovacao → pago` (volta a `pendente` na recusa da
+aprovação financeira — Demanda 4). O valor `aguardando_aprovacao` foi adicionado
+ao enum na migration 0017.
 
 Fórmula do `net_amount`:
 ```
@@ -429,6 +432,51 @@ Itens de folha por holerite. UNIQUE (`payroll_entry_id`, `payroll_event_id`).
 | `percentage` | `NUMERIC(7,2)` NULL | Percentual aplicado |
 | `metadata` | `JSONB` | Parâmetros específicos, ex.: horário noturno |
 | `source` | ENUM `payroll_item_source` | `manual` \| `automatic` |
+
+#### `payroll_payment_requests`
+Solicitação de aprovação de pagamento de folha (Demanda 4 / D6 — entidade de
+negócio → soft delete). Pagar funcionário(s) deixa de sair direto da conta: gera
+uma solicitação que aparece na aba *Aprovações* do Financeiro (igual a uma
+compra). Só após a aprovação o dinheiro sai e é emitida 1 NF de folha por
+funcionário.
+
+| Coluna | Tipo | Nulo? | Default | Significado (negócio) |
+|--------|------|-------|---------|-----------------------|
+| `id` | `UUID` PK | não | — | Identificador da solicitação |
+| `payroll_period_id` | `UUID` FK → `payroll_periods.id` | não | — | Competência da folha |
+| `request_type` | `VARCHAR(20)` | não | — | `individual` (um holerite) \| `lote` (vários) |
+| `status` | `VARCHAR(40)` (texto, não enum) | não | `aguardando_aprovacao_financeiro` | `aguardando_aprovacao_financeiro` → `aprovada` \| `recusada` |
+| `total_amount` | `NUMERIC(12,2)` | não | 0 | Valor total solicitado |
+| `approval_note` | `TEXT` | sim | — | Observação/motivo (ex.: recusa) |
+| `requested_at` | `TIMESTAMPTZ` | não | `now()` | Quando a solicitação foi criada |
+| `decided_at` | `TIMESTAMPTZ` | sim | — | Quando o Financeiro decidiu |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | `now()` | Auditoria |
+| `deleted_at` | `TIMESTAMPTZ` | sim | — | **Soft delete** (NULL = ativa) |
+
+FK: `payroll_payment_requests_payroll_period_id_fkey`. Índices:
+`ix_payroll_payment_requests_payroll_period_id`,
+`ix_payroll_payment_requests_status`, `ix_payroll_payment_requests_deleted_at`.
+
+#### `payroll_payment_request_entries`
+Junção solicitação ↔ holerite (sem soft delete) — quais holerites compõem a
+solicitação.
+
+| Coluna | Tipo | Nulo? | Significado (negócio) |
+|--------|------|-------|-----------------------|
+| `id` | `UUID` PK | não | Identificador |
+| `payment_request_id` | `UUID` FK → `payroll_payment_requests.id` (`fk_ppre_request`, **ON DELETE CASCADE**) | não | Solicitação pai |
+| `payroll_entry_id` | `UUID` FK → `payroll_entries.id` (`fk_ppre_entry`) | não | Holerite incluído |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | Auditoria |
+
+Constraint: `uq_ppre_request_entry` UNIQUE (`payment_request_id`,
+`payroll_entry_id`) — impede o mesmo holerite duplicado numa solicitação.
+Índices: `ix_payroll_payment_request_entries_payment_request_id`,
+`ix_payroll_payment_request_entries_payroll_entry_id`.
+
+> **NF de folha (sem migration).** Ao aprovar, o Backend emite 1 NF por
+> funcionário com `invoices.invoice_type = 'folha_pagamento'`. Como `invoice_type`
+> já é `VARCHAR(50)`, esse é apenas um **novo valor de string** — não exigiu
+> alteração de schema nesta demanda.
 
 ---
 
@@ -542,7 +590,10 @@ stock_categories ──◀ stock_items ──── stock_movements (ledger)
 app_settings (key-value; harvest_destination_*_item_id → stock_items, sem FK)
 
 job_positions ──◀ employees ──── payroll_entries ──── payroll_periods
-                       │
+                       │                  ▲                  ▲
+                       │                  │                  │
+                       │   payroll_payment_request_entries   │
+                       │                  └── payroll_payment_requests ──┘
                        └──── payroll_entry_items ──── payroll_events
 
 plots ──┬──── production_orders ──┬── production_inputs ──▶ stock_items
@@ -719,14 +770,35 @@ para FK:
 remove `category_id` e dropa `app_settings`, `category_role_assignments`,
 `stock_categories` e o tipo `system_role` (reversibilidade testada).
 
-A migration **`0016_drop_stock_category`** (`down_revision` `0015_stock_categories`,
-**head atual**) faz o **DROP físico** de `stock_items.category` e, em seguida, do
+A migration **`0016_drop_stock_category`** (`down_revision` `0015_stock_categories`)
+faz o **DROP físico** de `stock_items.category` e, em seguida, do
 tipo `stock_category` (nessa ordem — `DROP TYPE` falha com coluna dependente). O
 `downgrade()` recria o tipo e a coluna (nullable, sem repopular). O atributo
 `StockItem.category` foi **removido** do model (substituído por uma relationship
 `category` → `StockCategory`), mantendo `alembic check` limpo (model × banco em
 sincronia). O **guard de `create_all`** da 0015 continua necessário: em banco novo
 ele recria tipo+coluna para o backfill e a 0016 os remove logo após.
+
+### Aprovação da folha — solicitações + novo status (Demanda 4)
+
+A migration **`0017_payroll_approval`** (`down_revision` `0016_drop_stock_category`,
+**head atual**) introduz o fluxo de aprovação financeira da folha:
+
+1. Adiciona o valor `aguardando_aprovacao` ao enum `payroll_entry_status` via
+   `ALTER TYPE … ADD VALUE IF NOT EXISTS`, dentro de um `autocommit_block`
+   (`ADD VALUE` não pode rodar em transação no Postgres — mesmo padrão da `0002`).
+2. Cria `payroll_payment_requests` e `payroll_payment_request_entries`.
+
+**Idempotência do enum × `create_all`:** o valor também está na classe enum
+Python (`PayrollEntryStatus`, por último para casar com o append do `ADD VALUE`).
+Em banco novo, o `0001` (`create_all`) já cria o tipo COM `aguardando_aprovacao`,
+então o `ADD VALUE IF NOT EXISTS` da 0017 é **no-op** — sem o `IF NOT EXISTS` o
+`reset_db` quebraria por valor duplicado.
+
+`0017.downgrade()` dropa as 2 tabelas mas **deixa o valor `aguardando_aprovacao`
+no enum**: o Postgres não remove valores de enum de forma simples/segura (mesma
+estratégia documentada na `0002`); é inócuo, pois nenhuma linha o referencia após
+o drop.
 
 ---
 

@@ -1,14 +1,8 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
+import { Badge } from "@/components/ui/badge"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -16,18 +10,12 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Badge } from "@/components/ui/badge"
-import { Button } from "@/components/ui/button"
-import { FinancialMovement } from "@/types/index"
+import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { FinancialMovement, MovementType, Paginated } from "@/types/index"
 import { formatCurrency, formatDateTime } from "@/lib/utils"
+import { MovimentacaoFinFilters } from "./useMovimentacoesFin"
 
-interface MovimentacoesTableProps {
-  movements: FinancialMovement[]
-  loading?: boolean
-}
-
-const PAGE_SIZE = 50
-const ALL_MODULES = "__all__"
+const ALL = "all"
 
 const KNOWN_MODULES = [
   "comercial",
@@ -39,50 +27,223 @@ const KNOWN_MODULES = [
   "pcp",
 ]
 
+const CATEGORIES: { value: string; label: string }[] = [
+  { value: "venda", label: "Venda" },
+  { value: "compra", label: "Compra" },
+  { value: "folha", label: "Folha" },
+  { value: "producao", label: "Produção" },
+  { value: "ajuste", label: "Ajuste" },
+  { value: "recebimento", label: "Recebimento" },
+  { value: "pagamento", label: "Pagamento" },
+  { value: "saldo_inicial", label: "Saldo inicial" },
+  { value: "outro", label: "Outro" },
+]
+
+const CATEGORY_LABELS: Record<string, string> = Object.fromEntries(
+  CATEGORIES.map((c) => [c.value, c.label])
+)
+
+const columns: DataTableColumn<FinancialMovement>[] = [
+  {
+    key: "occurred_at",
+    label: "Data",
+    sortable: true,
+    render: (m) => (
+      <span className="text-xs text-slate-500">{formatDateTime(m.occurred_at)}</span>
+    ),
+  },
+  {
+    key: "description",
+    label: "Descrição",
+    render: (m) => (
+      <span className="block max-w-[280px] truncate text-sm text-slate-700">
+        {m.description}
+      </span>
+    ),
+  },
+  {
+    key: "category",
+    label: "Categoria",
+    render: (m) => (
+      <span className="text-sm text-slate-600">
+        {CATEGORY_LABELS[m.category] ?? m.category}
+      </span>
+    ),
+  },
+  {
+    key: "source_module",
+    label: "Módulo",
+    render: (m) => (
+      <span className="text-xs text-slate-500">{m.source_module ?? "—"}</span>
+    ),
+  },
+  {
+    key: "movement_type",
+    label: "Tipo",
+    render: (m) =>
+      m.movement_type === "entrada" ? (
+        <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
+          Entrada
+        </Badge>
+      ) : (
+        <Badge className="bg-red-100 text-red-800 hover:bg-red-100">Saída</Badge>
+      ),
+  },
+  {
+    key: "amount",
+    label: "Valor",
+    sortable: true,
+    align: "right",
+    render: (m) => (
+      <span
+        className={
+          m.movement_type === "entrada"
+            ? "font-medium text-green-600"
+            : "font-medium text-red-600"
+        }
+      >
+        {formatCurrency(m.amount)}
+      </span>
+    ),
+  },
+]
+
+interface MovimentacoesTableProps {
+  data: Paginated<FinancialMovement>
+  loading: boolean
+  page: number
+  sort: { by: string; dir: "asc" | "desc" }
+  onPageChange: (page: number) => void
+  onSortChange: (key: string) => void
+  filters: MovimentacaoFinFilters
+  onFiltersChange: (filters: MovimentacaoFinFilters) => void
+}
+
 export function MovimentacoesTable({
-  movements,
+  data,
   loading,
+  page,
+  sort,
+  onPageChange,
+  onSortChange,
+  filters,
+  onFiltersChange,
 }: MovimentacoesTableProps) {
-  const [moduleFilter, setModuleFilter] = useState<string>(ALL_MODULES)
-  const [page, setPage] = useState(0)
-
-  const availableModules = useMemo(() => {
-    const set = new Set<string>()
-    movements.forEach((m) => {
-      if (m.source_module) set.add(m.source_module)
-    })
-    KNOWN_MODULES.forEach((k) => set.add(k))
-    return Array.from(set).sort()
-  }, [movements])
-
-  const filtered = useMemo(() => {
-    if (moduleFilter === ALL_MODULES) return movements
-    return movements.filter((m) => m.source_module === moduleFilter)
-  }, [movements, moduleFilter])
-
-  const totalPages = Math.max(1, Math.ceil(filtered.length / PAGE_SIZE))
-  const currentPage = Math.min(page, totalPages - 1)
-  const pageItems = filtered.slice(
-    currentPage * PAGE_SIZE,
-    (currentPage + 1) * PAGE_SIZE
-  )
-
-  function handleModuleChange(value: string) {
-    setModuleFilter(value)
-    setPage(0)
-  }
+  // Módulos da página atual + os fixos + o filtro ativo, para que o módulo
+  // selecionado nunca suma da lista mesmo fora da página exibida.
+  const sourceModules = Array.from(
+    new Set(
+      [
+        ...KNOWN_MODULES,
+        ...data.items.map((m) => m.source_module),
+        filters.source_module,
+      ].filter((mod): mod is string => Boolean(mod))
+    )
+  ).sort()
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between gap-4">
-        <div className="w-60">
-          <Select value={moduleFilter} onValueChange={handleModuleChange}>
-            <SelectTrigger>
-              <SelectValue placeholder="Filtrar por módulo" />
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Buscar</Label>
+          <Input
+            value={filters.search ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, search: e.target.value || undefined })
+            }
+            placeholder="Descrição..."
+            className="w-56"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">De</Label>
+          <Input
+            type="date"
+            value={filters.start_date ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, start_date: e.target.value || undefined })
+            }
+            className="w-40"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Até</Label>
+          <Input
+            type="date"
+            value={filters.end_date ?? ""}
+            onChange={(e) =>
+              onFiltersChange({ ...filters, end_date: e.target.value || undefined })
+            }
+            className="w-40"
+          />
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Tipo</Label>
+          <Select
+            value={filters.movement_type ?? ALL}
+            onValueChange={(value) =>
+              onFiltersChange({
+                ...filters,
+                movement_type: value === ALL ? undefined : (value as MovementType),
+              })
+            }
+          >
+            <SelectTrigger className="w-36">
+              <SelectValue placeholder="Tipo" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value={ALL_MODULES}>Todos os módulos</SelectItem>
-              {availableModules.map((mod) => (
+              <SelectItem value={ALL}>Todos os tipos</SelectItem>
+              <SelectItem value="entrada">Entrada</SelectItem>
+              <SelectItem value="saida">Saída</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Categoria</Label>
+          <Select
+            value={filters.category ?? ALL}
+            onValueChange={(value) =>
+              onFiltersChange({
+                ...filters,
+                category: value === ALL ? undefined : value,
+              })
+            }
+          >
+            <SelectTrigger className="w-44">
+              <SelectValue placeholder="Categoria" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Todas as categorias</SelectItem>
+              {CATEGORIES.map((c) => (
+                <SelectItem key={c.value} value={c.value}>
+                  {c.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Módulo</Label>
+          <Select
+            value={filters.source_module ?? ALL}
+            onValueChange={(value) =>
+              onFiltersChange({
+                ...filters,
+                source_module: value === ALL ? undefined : value,
+              })
+            }
+          >
+            <SelectTrigger className="w-40">
+              <SelectValue placeholder="Módulo" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL}>Todos os módulos</SelectItem>
+              {sourceModules.map((mod) => (
                 <SelectItem key={mod} value={mod}>
                   {mod}
                 </SelectItem>
@@ -90,100 +251,22 @@ export function MovimentacoesTable({
             </SelectContent>
           </Select>
         </div>
-        <p className="text-xs text-slate-500">
-          {filtered.length} movimentações
-        </p>
       </div>
 
-      <div className="rounded-lg border border-slate-200">
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Data</TableHead>
-              <TableHead>Descrição</TableHead>
-              <TableHead>Módulo</TableHead>
-              <TableHead>Tipo</TableHead>
-              <TableHead className="text-right">Valor</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {loading && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-slate-500">
-                  Carregando...
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading && pageItems.length === 0 && (
-              <TableRow>
-                <TableCell colSpan={5} className="text-center text-slate-500">
-                  Nenhuma movimentação encontrada
-                </TableCell>
-              </TableRow>
-            )}
-            {!loading &&
-              pageItems.map((m) => (
-                <TableRow key={m.id}>
-                  <TableCell className="text-xs text-slate-500">
-                    {formatDateTime(m.occurred_at)}
-                  </TableCell>
-                  <TableCell className="max-w-md truncate">
-                    {m.description}
-                  </TableCell>
-                  <TableCell className="text-xs text-slate-500">
-                    {m.source_module ?? "—"}
-                  </TableCell>
-                  <TableCell>
-                    {m.movement_type === "entrada" ? (
-                      <Badge className="bg-green-100 text-green-800 hover:bg-green-100">
-                        Entrada
-                      </Badge>
-                    ) : (
-                      <Badge className="bg-red-100 text-red-800 hover:bg-red-100">
-                        Saída
-                      </Badge>
-                    )}
-                  </TableCell>
-                  <TableCell className="text-right font-medium">
-                    <span
-                      className={
-                        m.movement_type === "entrada"
-                          ? "text-green-600"
-                          : "text-red-600"
-                      }
-                    >
-                      {formatCurrency(m.amount)}
-                    </span>
-                  </TableCell>
-                </TableRow>
-              ))}
-          </TableBody>
-        </Table>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-slate-500">
-          Página {currentPage + 1} de {totalPages}
-        </p>
-        <div className="flex gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.max(0, p - 1))}
-            disabled={currentPage === 0}
-          >
-            Anterior
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
-            disabled={currentPage >= totalPages - 1}
-          >
-            Próximo
-          </Button>
-        </div>
-      </div>
+      <DataTable<FinancialMovement>
+        columns={columns}
+        rows={data.items}
+        loading={loading}
+        emptyMessage="Nenhuma movimentação encontrada"
+        page={page}
+        pageSize={data.page_size}
+        total={data.total}
+        pages={data.pages}
+        onPageChange={onPageChange}
+        sort={sort}
+        onSortChange={onSortChange}
+        rowKey={(m) => m.id}
+      />
     </div>
   )
 }
