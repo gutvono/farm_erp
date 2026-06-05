@@ -19,17 +19,8 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
-import { Inventory, StockCategory } from "@/types/index"
+import { Inventory } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
-
-const CATEGORY_LABELS: Record<StockCategory, string> = {
-  cafe: "Café",
-  insumo: "Insumo",
-  equipamento: "Equipamento",
-  veiculo: "Veículo",
-  embalagem: "Embalagem",
-  outro: "Outro",
-}
 
 interface InventarioModalProps {
   open: boolean
@@ -100,7 +91,7 @@ export function InventarioModal({
         const row = [
           item.name,
           item.sku,
-          CATEGORY_LABELS[item.category],
+          item.category_name,
           item.unit,
           String(item.quantity_on_hand),
           formatCurrency(item.unit_cost),
@@ -191,7 +182,7 @@ export function InventarioModal({
                       <TableCell className="font-medium">{item.name}</TableCell>
                       <TableCell className="text-slate-500 text-sm">{item.sku}</TableCell>
                       <TableCell>
-                        <Badge variant="outline">{CATEGORY_LABELS[item.category]}</Badge>
+                        <Badge variant="outline">{item.category_name}</Badge>
                       </TableCell>
                       <TableCell>{item.unit}</TableCell>
                       <TableCell className="text-right">{item.quantity_on_hand}</TableCell>

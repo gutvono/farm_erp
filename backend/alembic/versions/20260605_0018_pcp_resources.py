@@ -1,20 +1,17 @@
-"""pcp_equipamentos_veiculos_embalagens
+"""pcp resources
 
-Adiciona suporte a equipamentos, veículos e embalagens nas ordens de produção:
+Adds PCP production resources after the stock category refactor:
 
-- Adiciona o valor 'embalagem' ao enum stock_category.
-- Cria 3 novas tabelas associativas para ordens de produção:
-    * production_equipments  (reserva — não consome estoque, quantidade inteira)
-    * production_vehicles    (reserva — não consome estoque, quantidade inteira)
-    * production_packagings  (consumível — abate estoque, quantidade inteira, com custo)
+- ensures the configurable stock category "Embalagem" has the system role
+  `embalagem`;
+- creates resource association tables for production orders:
+  * production_equipments: reserved resources, integer quantity;
+  * production_vehicles: reserved resources, integer quantity;
+  * production_packagings: consumable resources, integer quantity and cost.
 
-Embalagens funcionam como insumos (são consumidas proporcionalmente nas colheitas),
-mas com quantidade restrita a inteiros. Equipamentos e veículos são "reservados"
-enquanto a ordem está ativa e ficam indisponíveis para outras ordens.
-
-Revision ID: 0010_pcp_eq_veic_emb
-Revises: 0009_pcp_workers_services
-Create Date: 2026-06-01
+Revision ID: 0018_pcp_resources
+Revises: 0017_payroll_approval
+Create Date: 2026-06-05
 
 """
 from typing import Sequence, Union
@@ -24,24 +21,41 @@ from alembic import op
 
 
 # revision identifiers, used by Alembic.
-# NB: version_num é VARCHAR(32) — manter o id <= 32 caracteres.
-revision: str = "0010_pcp_eq_veic_emb"
-down_revision: Union[str, None] = "0009_pcp_workers_services"
+revision: str = "0018_pcp_resources"
+down_revision: Union[str, None] = "0017_payroll_approval"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
 
 def upgrade() -> None:
-    # a) Adicionar 'embalagem' ao enum stock_category — precisa rodar fora de
-    # transação porque ALTER TYPE ... ADD VALUE não é transacional no Postgres.
-    with op.get_context().autocommit_block():
-        op.execute(
-            "ALTER TYPE stock_category ADD VALUE IF NOT EXISTS 'embalagem'"
-        )
-
     insp = sa.inspect(op.get_bind())
 
-    # b) production_equipments
+    # stock_category was removed by 0016. Packaging semantics now come from the
+    # configurable category + system role mapping.
+    op.execute(
+        """
+        INSERT INTO stock_categories (id, name, description, is_active)
+        VALUES (
+            '66666666-6666-6666-6666-666666660006',
+            'Embalagem',
+            'Embalagens consumidas nas ordens de producao',
+            TRUE
+        )
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
+    op.execute(
+        """
+        INSERT INTO category_role_assignments (id, category_id, role)
+        VALUES (
+            '77777777-7777-7777-7777-777777770007',
+            '66666666-6666-6666-6666-666666660006',
+            'embalagem'
+        )
+        ON CONFLICT (id) DO NOTHING
+        """
+    )
+
     if not insp.has_table("production_equipments"):
         op.create_table(
             "production_equipments",
@@ -93,7 +107,6 @@ def upgrade() -> None:
         "ON production_equipments (stock_item_id)"
     )
 
-    # c) production_vehicles
     if not insp.has_table("production_vehicles"):
         op.create_table(
             "production_vehicles",
@@ -145,7 +158,6 @@ def upgrade() -> None:
         "ON production_vehicles (stock_item_id)"
     )
 
-    # d) production_packagings (com custo, como insumos)
     if not insp.has_table("production_packagings"):
         op.create_table(
             "production_packagings",
@@ -211,8 +223,7 @@ def upgrade() -> None:
 
 
 def downgrade() -> None:
-    # Drop tabelas (índices caem junto).
-    op.drop_table("production_packagings")
-    op.drop_table("production_vehicles")
-    op.drop_table("production_equipments")
-    # Valores de enum não podem ser removidos no Postgres — 'embalagem' permanece.
+    # Keep the Embalagem category/role to avoid breaking existing stock_items FKs.
+    op.execute("DROP TABLE IF EXISTS production_packagings")
+    op.execute("DROP TABLE IF EXISTS production_vehicles")
+    op.execute("DROP TABLE IF EXISTS production_equipments")

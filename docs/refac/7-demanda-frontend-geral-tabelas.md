@@ -24,7 +24,7 @@ Padronizar todas as listagens do sistema em tabela paginada, sem perder funciona
 | Faturamento | Faturas | parte na Demanda 1; **filtros avançados pedidos pelo cliente** (ver nota abaixo) |
 | Financeiro | Pagar/Receber/Movimentações | feito na Demanda 4 — só conferir |
 | Estoque | Itens, Recebimentos | Movimentações já na Demanda 0/3 |
-| Folha | Funcionários, Holerites, Cargos | parte nas Demandas 2/4 |
+| Folha | Funcionários, Holerites, Cargos | parte nas Demandas 2/4. **Holerites: filtros (Status, Contrato) + ordenação (nome/salário/extras/descontos/total) + ordem estável ENTREGUES na Demanda 4.1** — tabela **CLIENT-SIDE** (escopo dado pelo período via `GET /folha/periodos/{id}/entries`), portanto **ISENTA de paginação server-side**. A D7 faz só o **restyle visual** (cards→`DataTable`/headers consistentes) reaproveitando `useHolerites`/`HoleritesTable` já existentes, **sem** introduzir paginação server nem mexer no backend. |
 | PCP | Ordens, Talhões, Atividades | parte na Demanda 5 |
 | Dashboard | listas/quadros, se houver | manter KPIs/gráficos |
 
@@ -33,6 +33,7 @@ Padronizar todas as listagens do sistema em tabela paginada, sem perder funciona
   coluna) ou no detalhe (Sheet/Dialog ao clicar na linha). Manter botões de editar, cancelar,
   status, PDF etc.
 - **Paginação server-side** em todas as listas (consumindo `Page[T]`). Ordenação por colunas-chave.
+  - **Exceção (Demanda 4.1): a tabela de Holerites da Folha é CLIENT-SIDE** — a lista já vem completa, escopada pelo período selecionado (`GET /folha/periodos/{id}/entries`). Filtros/ordenação/ordem-estável já existem (`useHolerites`/`HoleritesTable`). **Não** paginar server-side nem mexer no backend; a D7 só faz restyle visual reaproveitando o que existe.
 - Manter a identidade visual shadcn/Tailwind já usada; responsivo.
 - **Faturamento — filtros avançados (pedido do cliente, 2026-06-03):** a tela de Faturas deve, além
   da tabela paginada, oferecer **ordenação por colunas** (emissão, vencimento, valor, número),

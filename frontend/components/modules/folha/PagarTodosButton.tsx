@@ -14,10 +14,9 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { pagarTodos } from "@/services/folha"
-import { PayrollBatchResult, PayrollEntry } from "@/types/index"
+import { solicitarPagamentoTodos } from "@/services/folha"
+import { PayrollEntry } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
-import { ResultadoPagamentoDialog } from "./ResultadoPagamentoDialog"
 
 interface PagarTodosButtonProps {
   periodId: string
@@ -31,8 +30,6 @@ export function PagarTodosButton({
   onSuccess,
 }: PagarTodosButtonProps) {
   const [confirmOpen, setConfirmOpen] = useState(false)
-  const [resultOpen, setResultOpen] = useState(false)
-  const [result, setResult] = useState<PayrollBatchResult | null>(null)
   const [loading, setLoading] = useState(false)
 
   const totalPending = pendingEntries.reduce((sum, e) => sum + e.total_amount, 0)
@@ -41,19 +38,13 @@ export function PagarTodosButton({
     setLoading(true)
     setConfirmOpen(false)
     try {
-      const res = await pagarTodos(periodId)
-      setResult(res)
-      setResultOpen(true)
-      if (res.insufficient_balance) {
-        toast.warning(
-          `${res.paid_count} pago(s) — ${res.failed_employees.length} sem saldo`
-        )
-      } else {
-        toast.success(`${res.paid_count} funcionário(s) pago(s) com sucesso`)
-      }
+      await solicitarPagamentoTodos(periodId)
+      toast.success("Enviado para aprovação do financeiro")
       onSuccess()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao pagar holerites")
+      toast.error(
+        err instanceof Error ? err.message : "Erro ao solicitar pagamento"
+      )
     } finally {
       setLoading(false)
     }
@@ -69,34 +60,35 @@ export function PagarTodosButton({
         <Wallet className="h-4 w-4 mr-1" />
         {loading
           ? "Processando..."
-          : `Pagar Todos (${formatCurrency(totalPending)})`}
+          : `Solicitar pagamento de todos (${formatCurrency(totalPending)})`}
       </Button>
 
       <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Pagar todos os funcionários pendentes?</AlertDialogTitle>
+            <AlertDialogTitle>
+              Solicitar pagamento de todos os pendentes?
+            </AlertDialogTitle>
             <AlertDialogDescription>
-              Total a pagar: <strong>{formatCurrency(totalPending)}</strong> em{" "}
-              {pendingEntries.length} holerite{pendingEntries.length !== 1 ? "s" : ""}.
-              O saldo da Conta Corrente será verificado para cada pagamento e os que não
-              tiverem saldo serão listados ao final.
+              Será criada uma única solicitação de{" "}
+              <strong>{formatCurrency(totalPending)}</strong> em{" "}
+              {pendingEntries.length} holerite
+              {pendingEntries.length !== 1 ? "s" : ""}. Os holerites ficam{" "}
+              <strong>aguardando aprovação do financeiro</strong> e o pagamento só
+              é efetivado após a aprovação.
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>
             <AlertDialogCancel>Cancelar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm} className="bg-green-600 hover:bg-green-700">
-              Confirmar pagamento
+            <AlertDialogAction
+              onClick={handleConfirm}
+              className="bg-green-600 hover:bg-green-700"
+            >
+              Solicitar pagamento
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
-
-      <ResultadoPagamentoDialog
-        open={resultOpen}
-        onOpenChange={setResultOpen}
-        result={result}
-      />
     </>
   )
 }

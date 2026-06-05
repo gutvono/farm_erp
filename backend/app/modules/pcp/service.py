@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from sqlalchemy.orm import Session
 
 from app.modules.compras.model import Supplier
+from app.modules.configuracoes import service as config_service
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
 from app.modules.estoque.model import StockItem
@@ -46,7 +47,7 @@ from app.shared.enums import (
     FinancialCategory,
     MovementType,
     ProductionOrderStatus,
-    StockCategory,
+    SystemRole,
 )
 
 
@@ -74,6 +75,10 @@ def _stock_map(db: Session, stock_ids: list[UUID]) -> dict[UUID, StockItem]:
         return {}
     rows = db.query(StockItem).filter(StockItem.id.in_(stock_ids)).all()
     return {s.id: s for s in rows}
+
+
+def _stock_ids_by_role(db: Session, role: SystemRole) -> set[UUID]:
+    return set(config_service.get_item_ids_by_role(db, role))
 
 
 def _quantize3(value: Decimal) -> Decimal:
@@ -197,6 +202,10 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
         + [pk.stock_item_id for pk in data.packagings]
     )
     smap = _stock_map(db, all_resource_ids)
+    maquina_item_ids = _stock_ids_by_role(db, SystemRole.MAQUINA)
+    veiculo_item_ids = _stock_ids_by_role(db, SystemRole.VEICULO)
+    embalagem_item_ids = _stock_ids_by_role(db, SystemRole.EMBALAGEM)
+    insumo_item_ids = _stock_ids_by_role(db, SystemRole.INSUMO)
 
     # Validate inputs (stock items)
     for pi in data.inputs:
@@ -215,7 +224,7 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
                 status_code=404,
                 detail=f"Equipamento não encontrado: {eq.stock_item_id}",
             )
-        if item.category != StockCategory.EQUIPAMENTO:
+        if item.id not in maquina_item_ids:
             raise HTTPException(
                 status_code=400,
                 detail=f"Item '{item.name}' não é da categoria Equipamento",
@@ -229,7 +238,7 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
                 status_code=404,
                 detail=f"Veículo não encontrado: {vh.stock_item_id}",
             )
-        if item.category != StockCategory.VEICULO:
+        if item.id not in veiculo_item_ids:
             raise HTTPException(
                 status_code=400,
                 detail=f"Item '{item.name}' não é da categoria Veículo",
@@ -243,7 +252,7 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
                 status_code=404,
                 detail=f"Embalagem não encontrada: {pk.stock_item_id}",
             )
-        if item.category != StockCategory.EMBALAGEM:
+        if item.id not in embalagem_item_ids:
             raise HTTPException(
                 status_code=400,
                 detail=f"Item '{item.name}' não é da categoria Embalagem",
@@ -333,7 +342,7 @@ def create_order(db: Session, data: ProductionOrderCreate) -> ProductionOrder:
     input_cost_map = {
         s.id: Decimal(str(s.unit_cost))
         for s in smap.values()
-        if s.category == StockCategory.INSUMO
+        if s.id in insumo_item_ids
     }
 
     workers_data = [
@@ -424,13 +433,16 @@ def listar_funcionarios_em_producao(db: Session) -> list[UUID]:
 
 def _listar_recursos_em_uso(
     db: Session,
-    category: StockCategory,
+    role: SystemRole,
     committed: dict[UUID, int],
 ) -> list[dict]:
+    item_ids = _stock_ids_by_role(db, role)
+    if not item_ids:
+        return []
     items = (
         db.query(StockItem)
         .filter(
-            StockItem.category == category,
+            StockItem.id.in_(item_ids),
             StockItem.deleted_at.is_(None),
         )
         .order_by(StockItem.name.asc())
@@ -455,12 +467,12 @@ def _listar_recursos_em_uso(
 
 def listar_equipamentos_em_uso(db: Session) -> list[dict]:
     committed = pcp_repo.get_committed_equipments(db)
-    return _listar_recursos_em_uso(db, StockCategory.EQUIPAMENTO, committed)
+    return _listar_recursos_em_uso(db, SystemRole.MAQUINA, committed)
 
 
 def listar_veiculos_em_uso(db: Session) -> list[dict]:
     committed = pcp_repo.get_committed_vehicles(db)
-    return _listar_recursos_em_uso(db, StockCategory.VEICULO, committed)
+    return _listar_recursos_em_uso(db, SystemRole.VEICULO, committed)
 
 
 def soft_delete_order(db: Session, order_id: UUID) -> ProductionOrder:
@@ -550,10 +562,19 @@ def _simulate_harvest(
 
 
 def _find_quality_item(db: Session, quality_keyword: str) -> Optional[StockItem]:
+    # Demanda 3: a categoria deixou de ser enum fixo. "Itens de café" (o produto
+    # final da produção) passam a ser resolvidos pelo PAPEL `produto_final` da
+    # categoria (via Configurações), preservando a semântica anterior
+    # da categoria Cafe no modelo legado). A refatoracao profunda do PCP e a Demanda 5.
+    from app.modules.configuracoes import service as config_service
+
+    item_ids = config_service.get_item_ids_by_role(db, SystemRole.PRODUTO_FINAL)
+    if not item_ids:
+        return None
     items = (
         db.query(StockItem)
         .filter(
-            StockItem.category == StockCategory.CAFE,
+            StockItem.id.in_(item_ids),
             StockItem.deleted_at.is_(None),
         )
         .all()

@@ -129,10 +129,10 @@ export default function PCPPage() {
   }, [])
 
   useEffect(() => {
-    getItens({ category: "insumo" }).then(setInsumos).catch(() => {})
-    getItens({ category: "equipamento" }).then(setEquipamentos).catch(() => {})
-    getItens({ category: "veiculo" }).then(setVeiculos).catch(() => {})
-    getItens({ category: "embalagem" }).then(setEmbalagens).catch(() => {})
+    getItens({ role: "insumo" }).then(setInsumos).catch(() => {})
+    getItens({ role: "maquina" }).then(setEquipamentos).catch(() => {})
+    getItens({ role: "veiculo" }).then(setVeiculos).catch(() => {})
+    getItens({ role: "embalagem" }).then(setEmbalagens).catch(() => {})
     loadAvailability()
   }, [loadAvailability])
 

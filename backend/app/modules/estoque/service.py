@@ -34,6 +34,13 @@ def _get_item_or_404(db: Session, item_id: UUID) -> StockItem:
     return item
 
 
+def _assert_category_exists(db: Session, category_id: UUID) -> None:
+    from app.modules.configuracoes import repository as config_repo
+
+    if not config_repo.get_category(db, category_id):
+        raise HTTPException(status_code=404, detail="Categoria não encontrada")
+
+
 def _notify_below_minimum(db: Session, item: StockItem) -> None:
     if Decimal(item.quantity_on_hand) < Decimal(item.minimum_stock):
         from app.modules.dashboard.service import criar_notificacao
@@ -62,6 +69,8 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
             status_code=409, detail=f"SKU '{data.sku}' já está em uso"
         )
 
+    _assert_category_exists(db, data.category_id)
+
     item = estoque_repo.create_item(db, data)
 
     # Register internal financial movement (R$0.00 — item cadastrado)
@@ -78,8 +87,25 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
     return item
 
 
-def list_items(db: Session, *, category=None, below_minimum: bool = False) -> list[StockItem]:
-    return estoque_repo.list_items(db, category=category, below_minimum=below_minimum)
+def list_items(
+    db: Session,
+    *,
+    category_id: Optional[UUID] = None,
+    role=None,
+    below_minimum: bool = False,
+) -> list[StockItem]:
+    # Filtro por papel (role) é resolvido aqui em ids de itens, via Configurações.
+    item_ids: Optional[list[UUID]] = None
+    if role is not None:
+        from app.modules.configuracoes import service as config_service
+
+        item_ids = config_service.get_item_ids_by_role(db, role)
+    return estoque_repo.list_items(
+        db,
+        category_id=category_id,
+        item_ids=item_ids,
+        below_minimum=below_minimum,
+    )
 
 
 def get_item(db: Session, item_id: UUID) -> StockItem:
@@ -88,6 +114,8 @@ def get_item(db: Session, item_id: UUID) -> StockItem:
 
 def update_item(db: Session, item_id: UUID, data: StockItemUpdate) -> StockItem:
     _get_item_or_404(db, item_id)
+    if data.category_id is not None:
+        _assert_category_exists(db, data.category_id)
     item = estoque_repo.update_item(db, item_id, data)
     return item
 
@@ -171,6 +199,8 @@ def list_movements_paginated(
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
 ) -> Page[StockMovementOut]:
     movements, total = estoque_repo.list_movements_paginated(
         db,
@@ -178,6 +208,8 @@ def list_movements_paginated(
         stock_item_id=stock_item_id,
         movement_type=movement_type,
         source_module=source_module,
+        start_date=start_date,
+        end_date=end_date,
     )
     items = [StockMovementOut.from_model(m) for m in movements]
     return Page.create(items=items, total=total, params=params)
@@ -227,7 +259,7 @@ def obter_ou_criar_item_avariado(db: Session, original: StockItem) -> StockItem:
     data = StockItemCreate(
         sku=damaged_sku,
         name=f"{original.name} (AVARIADO)",
-        category=original.category,
+        category_id=original.category_id,
         unit=original.unit,
         minimum_stock=Decimal("0"),
         unit_cost=Decimal("0"),

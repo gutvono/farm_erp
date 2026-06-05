@@ -246,9 +246,20 @@ Em seguida, registra a saída via `estoque_service.registrar_saida` com
 - Distribuição entre qualidades: especial 15–25%, superior 45–55%, tradicional restante.
 
 ### 4. Entrada no estoque (por qualidade)
-Identifica items na categoria `cafe` cujo nome contenha a palavra-chave
-(`especial`, `superior`, `tradicional`) e registra entrada com `unit_cost=0`.
-Em seguida, registra movimento agregado de entrada no Financeiro.
+Identifica os itens de café cujo nome contenha a palavra-chave (`especial`,
+`superior`, `tradicional`) e registra entrada com `unit_cost=0`. Em seguida,
+registra movimento agregado de entrada no Financeiro.
+
+> **Demanda 3 — categoria por papel:** a categoria deixou de ser enum fixo
+> (`StockItem.category == StockCategory.CAFE`). Os "itens de café" passam a ser
+> resolvidos pelo **papel `produto_final`** da categoria, via
+> `configuracoes.service.get_item_ids_by_role(db, SystemRole.PRODUTO_FINAL)`
+> (`_find_quality_item`). Adotou-se `produto_final` porque o café é o **produto
+> final** da produção de safra — preserva exatamente a semântica anterior (a
+> categoria "Café" recebe os papéis `produto_final` + `produto_vendavel` no
+> seed/migration). Para o PCP enxergar a produção, a categoria dos itens de café
+> precisa ter o papel `produto_final` atribuído em Configurações. A refatoração
+> profunda do PCP é a Demanda 5; aqui o objetivo foi apenas não quebrar.
 
 ### 5. Snapshot e persistência
 Persiste um `ProductionHarvest` com:
@@ -444,4 +455,4 @@ Migração `0002_pcp_planejada_status` (arquivo `alembic/versions/20260416_0002_
 - Todas as respostas usam `SuccessResponse` do `app.shared.responses`
 - Validação de entrada via Pydantic (`schemas.py`)
 - Ordens retornam sempre com `inputs` populados (via `repository` que força o carregamento)
-- A detecção de qualidade (especial/superior/tradicional) usa match por substring case-insensitive no `StockItem.name` dentro da categoria `cafe`
+- A detecção de qualidade (especial/superior/tradicional) usa match por substring case-insensitive no `StockItem.name` entre os itens com o papel `produto_final` (Demanda 3 — antes era a categoria enum `cafe`; ver fluxo "Entrada no estoque por qualidade")

@@ -1,3 +1,4 @@
+from datetime import datetime
 from typing import Optional
 from uuid import UUID
 
@@ -16,7 +17,7 @@ from app.modules.estoque.schemas import (
     StockMovementCreate,
     StockMovementOut,
 )
-from app.shared.enums import MovementType, StockCategory
+from app.shared.enums import MovementType, SystemRole
 from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
@@ -30,12 +31,15 @@ router = APIRouter()
 
 @router.get("/itens", response_model=SuccessResponse)
 def list_items(
-    category: Optional[StockCategory] = None,
+    category_id: Optional[UUID] = None,
+    role: Optional[SystemRole] = None,
     below_minimum: bool = False,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    items = estoque_service.list_items(db, category=category, below_minimum=below_minimum)
+    items = estoque_service.list_items(
+        db, category_id=category_id, role=role, below_minimum=below_minimum
+    )
     data = [StockItemOut.from_model(i).model_dump(mode="json") for i in items]
     return success("Itens listados com sucesso", data)
 
@@ -94,6 +98,8 @@ def list_movements(
     stock_item_id: Optional[UUID] = None,
     movement_type: Optional[MovementType] = None,
     source_module: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
     params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -104,6 +110,8 @@ def list_movements(
         stock_item_id=stock_item_id,
         movement_type=movement_type,
         source_module=source_module,
+        start_date=start_date,
+        end_date=end_date,
     )
 
 

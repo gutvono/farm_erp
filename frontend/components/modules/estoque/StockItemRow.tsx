@@ -17,26 +17,8 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { deleteItem } from "@/services/estoque"
-import { StockItem, StockCategory } from "@/types/index"
+import { StockItem } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
-
-const CATEGORY_LABELS: Record<StockCategory, string> = {
-  cafe: "Café",
-  insumo: "Insumo",
-  equipamento: "Equipamento",
-  veiculo: "Veículo",
-  embalagem: "Embalagem",
-  outro: "Outro",
-}
-
-const CATEGORY_COLORS: Record<StockCategory, string> = {
-  cafe: "bg-amber-100 text-amber-800",
-  insumo: "bg-green-100 text-green-800",
-  equipamento: "bg-blue-100 text-blue-800",
-  veiculo: "bg-purple-100 text-purple-800",
-  embalagem: "bg-pink-100 text-pink-800",
-  outro: "bg-slate-100 text-slate-700",
-}
 
 interface StockItemRowProps {
   item: StockItem
@@ -79,9 +61,7 @@ export function StockItemRow({ item, onClick, onEdit, onDeleted }: StockItemRowP
       </div>
 
       <div className="hidden md:flex items-center gap-6 mx-4">
-        <Badge className={CATEGORY_COLORS[item.category]}>
-          {CATEGORY_LABELS[item.category]}
-        </Badge>
+        <Badge className="bg-slate-100 text-slate-700">{item.category_name}</Badge>
         <span className="text-sm text-slate-600 w-20 text-right">
           {item.quantity_on_hand} {item.unit}
         </span>

@@ -7,7 +7,6 @@ from app.core.database import Base
 from app.shared.base_model import SoftDeleteMixin, TimestampMixin, UUIDMixin
 from app.shared.enums import (
     MovementType,
-    StockCategory,
     StockUnit,
     sa_enum_values,
 )
@@ -18,14 +17,13 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
 
     sku = Column(String(64), unique=True, nullable=False, index=True)
     name = Column(String(255), nullable=False, index=True)
-    category = Column(
-        SAEnum(
-            StockCategory,
-            name="stock_category",
-            values_callable=sa_enum_values,
-        ),
+    # Categoria é FK (`category_id` → stock_categories). Um item tem UMA categoria
+    # (decisão D2). O antigo enum livre `category` foi removido fisicamente na
+    # migration 0016_drop_stock_category (Demanda 3).
+    category_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("stock_categories.id", name="fk_stock_items_category"),
         nullable=False,
-        default=StockCategory.OUTRO,
         index=True,
     )
     unit = Column(
@@ -40,6 +38,9 @@ class StockItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     description = Column(Text, nullable=True)
 
     movements = relationship("StockMovement", back_populates="stock_item")
+    # Categoria cadastrável (configuracoes.StockCategory). Resolvida pela FK
+    # category_id; usada para expor category_name no StockItemOut.
+    category = relationship("StockCategory")
 
     def __repr__(self) -> str:
         return f"<StockItem {self.sku} {self.name}>"

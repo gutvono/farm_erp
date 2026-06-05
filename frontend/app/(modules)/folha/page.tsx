@@ -13,13 +13,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import {
-  Table,
-  TableBody,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AlertDialog,
@@ -32,7 +25,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { CargosTab } from "@/components/modules/folha/CargosTab"
-import { EntryRow } from "@/components/modules/folha/EntryRow"
+import { HoleritesTable } from "@/components/modules/folha/HoleritesTable"
 import { FuncionarioCard } from "@/components/modules/folha/FuncionarioCard"
 import { FuncionarioForm } from "@/components/modules/folha/FuncionarioForm"
 import { PagarTodosButton } from "@/components/modules/folha/PagarTodosButton"
@@ -163,11 +156,14 @@ export default function FolhaPage() {
   const summary = useMemo(() => {
     if (!period) return null
     const pending = period.entries.filter((e) => e.status === "pendente")
+    const awaiting = period.entries.filter(
+      (e) => e.status === "aguardando_aprovacao"
+    )
     const paid = period.entries.filter((e) => e.status === "pago")
     const totalPending = pending.reduce((s, e) => s + e.total_amount, 0)
     const totalPaid = paid.reduce((s, e) => s + e.total_amount, 0)
     const total = period.entries.reduce((s, e) => s + e.total_amount, 0)
-    return { pending, paid, totalPending, totalPaid, total }
+    return { pending, awaiting, paid, totalPending, totalPaid, total }
   }, [period])
 
   const activeEmployeesCount = employees.filter((e) => e.is_active).length
@@ -251,6 +247,9 @@ export default function FolhaPage() {
                     {period.entries.length !== 1 ? "s" : ""} ·{" "}
                     {summary?.pending.length ?? 0} pendente
                     {(summary?.pending.length ?? 0) !== 1 ? "s" : ""}
+                    {(summary?.awaiting.length ?? 0) > 0 && (
+                      <> · {summary?.awaiting.length} aguardando aprovação</>
+                    )}
                   </span>
 
                   <div className="flex items-center gap-2">
@@ -274,44 +273,14 @@ export default function FolhaPage() {
                   </div>
                 </div>
 
-                {/* Tabela */}
-                {periodLoading ? (
-                  <div className="py-12 text-center text-slate-400">
-                    Carregando...
-                  </div>
-                ) : period.entries.length === 0 ? (
-                  <div className="py-12 text-center text-slate-400">
-                    Nenhum holerite gerado para este período
-                  </div>
-                ) : (
-                  <div className="rounded-md border bg-white">
-                    <Table>
-                      <TableHeader>
-                        <TableRow>
-                          <TableHead>Funcionário</TableHead>
-                          <TableHead>Contrato</TableHead>
-                          <TableHead className="text-right">Salário base</TableHead>
-                          <TableHead className="text-right">Horas extras</TableHead>
-                          <TableHead className="text-right">Descontos</TableHead>
-                          <TableHead className="text-right">Total</TableHead>
-                          <TableHead>Status</TableHead>
-                          <TableHead className="text-right">Ações</TableHead>
-                        </TableRow>
-                      </TableHeader>
-                      <TableBody>
-                        {period.entries.map((entry) => (
-                          <EntryRow
-                            key={entry.id}
-                            entry={entry}
-                            period={period}
-                            employee={employeeById.get(entry.employee_id)}
-                            onChanged={reloadPeriod}
-                          />
-                        ))}
-                      </TableBody>
-                    </Table>
-                  </div>
-                )}
+                {/* Tabela de holerites (filtros + ordenação client-side) */}
+                <HoleritesTable
+                  entries={period.entries}
+                  period={period}
+                  employeeById={employeeById}
+                  loading={periodLoading}
+                  onChanged={reloadPeriod}
+                />
               </>
             )}
           </TabsContent>

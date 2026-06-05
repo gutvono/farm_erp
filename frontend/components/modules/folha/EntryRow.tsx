@@ -7,7 +7,7 @@ import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { TableCell, TableRow } from "@/components/ui/table"
-import { pagarEntry } from "@/services/folha"
+import { solicitarPagamento } from "@/services/folha"
 import {
   ContractType,
   Employee,
@@ -33,11 +33,13 @@ const CONTRACT_CLASS: Record<ContractType, string> = {
 
 const STATUS_CLASS: Record<PayrollEntryStatus, string> = {
   pendente: "bg-yellow-100 text-yellow-800 hover:bg-yellow-100",
+  aguardando_aprovacao: "bg-amber-100 text-amber-800 hover:bg-amber-100",
   pago: "bg-green-100 text-green-800 hover:bg-green-100",
 }
 
 const STATUS_LABEL: Record<PayrollEntryStatus, string> = {
   pendente: "Pendente",
+  aguardando_aprovacao: "Aguardando aprovação do financeiro",
   pago: "Pago",
 }
 
@@ -50,21 +52,24 @@ interface EntryRowProps {
 
 export function EntryRow({ entry, period, employee, onChanged }: EntryRowProps) {
   const [editOpen, setEditOpen] = useState(false)
-  const [paying, setPaying] = useState(false)
+  const [requesting, setRequesting] = useState(false)
 
   const canEdit = period.status === "aberta" && entry.status === "pendente"
+  const awaitingApproval = entry.status === "aguardando_aprovacao"
   const initial = entry.employee_name.trim().charAt(0).toUpperCase()
 
-  async function handlePagar() {
-    setPaying(true)
+  async function handleSolicitar() {
+    setRequesting(true)
     try {
-      await pagarEntry(entry.id)
-      toast.success(`Holerite de ${entry.employee_name} pago`)
+      await solicitarPagamento(entry.id)
+      toast.success("Enviado para aprovação do financeiro")
       onChanged()
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao pagar holerite")
+      toast.error(
+        err instanceof Error ? err.message : "Erro ao solicitar pagamento"
+      )
     } finally {
-      setPaying(false)
+      setRequesting(false)
     }
   }
 
@@ -117,8 +122,13 @@ export function EntryRow({ entry, period, employee, onChanged }: EntryRowProps) 
               </Button>
             )}
             {canEdit && (
-              <Button size="sm" onClick={handlePagar} disabled={paying}>
-                {paying ? "..." : "Pagar"}
+              <Button size="sm" onClick={handleSolicitar} disabled={requesting}>
+                {requesting ? "..." : "Solicitar pagamento"}
+              </Button>
+            )}
+            {awaitingApproval && (
+              <Button size="sm" variant="outline" disabled title="Aguardando aprovação do financeiro">
+                Aguardando aprovação
               </Button>
             )}
             <HoleritePDF entry={entry} period={period} employee={employee} />

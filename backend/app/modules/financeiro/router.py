@@ -24,6 +24,7 @@ from app.modules.financeiro.schemas import (
     FinancialMovementOut,
     PayPayableRequest,
     PaymentMethodUpdate,
+    PayrollApprovalRefuse,
     PixPaymentInfo,
     ReceivePaymentRequest,
 )
@@ -33,6 +34,7 @@ from app.shared.enums import (
     FinancialCategory,
     MovementType,
 )
+from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -67,26 +69,26 @@ def get_cash_flow(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/movimentacoes", response_model=SuccessResponse)
+@router.get("/movimentacoes", response_model=Page[FinancialMovementOut])
 def list_movements(
     movement_type: Optional[MovementType] = None,
     category: Optional[FinancialCategory] = None,
     source_module: Optional[str] = None,
     start_date: Optional[datetime] = None,
     end_date: Optional[datetime] = None,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    movements = fin_service.list_movements(
+) -> Page[FinancialMovementOut]:
+    return fin_service.list_movements_paginated(
         db,
+        params=params,
         movement_type=movement_type,
         category=category,
         source_module=source_module,
         start_date=start_date,
         end_date=end_date,
     )
-    data = [FinancialMovementOut.model_validate(m).model_dump(mode="json") for m in movements]
-    return success("Movimentações listadas com sucesso", data)
 
 
 @router.post("/movimentacoes", response_model=SuccessResponse, status_code=201)
@@ -107,24 +109,24 @@ def create_movement(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/contas-pagar", response_model=SuccessResponse)
+@router.get("/contas-pagar", response_model=Page[AccountPayableOut])
 def list_payables(
     status: Optional[AccountPayableStatus] = None,
     supplier_id: Optional[UUID] = None,
     due_before: Optional[date] = None,
     due_after: Optional[date] = None,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    payables = fin_service.list_payables(
+) -> Page[AccountPayableOut]:
+    return fin_service.list_payables_paginated(
         db,
+        params=params,
         status=status,
         supplier_id=supplier_id,
         due_before=due_before,
         due_after=due_after,
     )
-    data = [AccountPayableOut.model_validate(p).model_dump(mode="json") for p in payables]
-    return success("Contas a pagar listadas com sucesso", data)
 
 
 @router.post("/contas-pagar", response_model=SuccessResponse, status_code=201)
@@ -239,24 +241,24 @@ def get_payable_boleto(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/contas-receber", response_model=SuccessResponse)
+@router.get("/contas-receber", response_model=Page[AccountReceivableOut])
 def list_receivables(
     status: Optional[AccountReceivableStatus] = None,
     client_id: Optional[UUID] = None,
     due_before: Optional[date] = None,
     due_after: Optional[date] = None,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    receivables = fin_service.list_receivables(
+) -> Page[AccountReceivableOut]:
+    return fin_service.list_receivables_paginated(
         db,
+        params=params,
         status=status,
         client_id=client_id,
         due_before=due_before,
         due_after=due_after,
     )
-    data = [AccountReceivableOut.model_validate(r).model_dump(mode="json") for r in receivables]
-    return success("Contas a receber listadas com sucesso", data)
 
 
 @router.post("/contas-receber", response_model=SuccessResponse, status_code=201)
@@ -391,3 +393,42 @@ def list_defaulters(
     items = fin_service.list_defaulters(db)
     data = [item.model_dump(mode="json") for item in items]
     return success("Relatório de inadimplência obtido com sucesso", data)
+
+
+# ---------------------------------------------------------------------------
+# Aprovação de folha (Demanda 4)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/aprovacoes-folha", response_model=SuccessResponse)
+def list_payroll_approvals(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = fin_service.list_payroll_approvals(db)
+    return success("Aprovações de folha listadas com sucesso", data)
+
+
+@router.post(
+    "/aprovacoes-folha/{request_id}/aprovar", response_model=SuccessResponse
+)
+def approve_payroll_request(
+    request_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = fin_service.approve_payroll_request(db, request_id)
+    return success("Pagamento de folha aprovado com sucesso", data)
+
+
+@router.post(
+    "/aprovacoes-folha/{request_id}/recusar", response_model=SuccessResponse
+)
+def refuse_payroll_request(
+    request_id: UUID,
+    body: PayrollApprovalRefuse,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = fin_service.refuse_payroll_request(db, request_id, body.note)
+    return success("Pagamento de folha recusado", data)

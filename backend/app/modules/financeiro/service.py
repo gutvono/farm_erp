@@ -17,8 +17,10 @@ from app.modules.financeiro.model import (
 )
 from app.modules.financeiro.schemas import (
     AccountPayableCreate,
+    AccountPayableOut,
     AccountPayableUpdate,
     AccountReceivableCreate,
+    AccountReceivableOut,
     AccountReceivableUpdate,
     BalanceOut,
     BoletoPaymentInfo,
@@ -26,8 +28,10 @@ from app.modules.financeiro.schemas import (
     CashFlowOut,
     DefaulterItem,
     FinancialMovementCreate,
+    FinancialMovementOut,
     PixPaymentInfo,
 )
+from app.shared.pagination import Page, PageParams
 from app.shared.enums import (
     AccountPayableStatus,
     AccountReceivableStatus,
@@ -164,6 +168,29 @@ def list_movements(db: Session, **filters) -> list[FinancialMovement]:
     return fin_repo.list_movements(db, **filters)
 
 
+def list_movements_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    movement_type: Optional[MovementType] = None,
+    category: Optional[FinancialCategory] = None,
+    source_module: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> Page[FinancialMovementOut]:
+    movements, total = fin_repo.list_movements_paginated(
+        db,
+        params=params,
+        movement_type=movement_type,
+        category=category,
+        source_module=source_module,
+        start_date=start_date,
+        end_date=end_date,
+    )
+    items = [FinancialMovementOut.model_validate(m) for m in movements]
+    return Page.create(items=items, total=total, params=params)
+
+
 # ---------------------------------------------------------------------------
 # Balance & Cash Flow
 # ---------------------------------------------------------------------------
@@ -242,6 +269,27 @@ def create_payable(db: Session, body: AccountPayableCreate) -> AccountPayable:
 
 def list_payables(db: Session, **filters) -> list[AccountPayable]:
     return fin_repo.list_payables(db, **filters)
+
+
+def list_payables_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    status: Optional[AccountPayableStatus] = None,
+    supplier_id: Optional[UUID] = None,
+    due_before: Optional[date] = None,
+    due_after: Optional[date] = None,
+) -> Page[AccountPayableOut]:
+    payables, total = fin_repo.list_payables_paginated(
+        db,
+        params=params,
+        status=status,
+        supplier_id=supplier_id,
+        due_before=due_before,
+        due_after=due_after,
+    )
+    items = [AccountPayableOut.model_validate(p) for p in payables]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_payable(db: Session, payable_id: UUID) -> AccountPayable:
@@ -393,6 +441,27 @@ def create_receivable(db: Session, body: AccountReceivableCreate) -> AccountRece
 
 def list_receivables(db: Session, **filters) -> list[AccountReceivable]:
     return fin_repo.list_receivables(db, **filters)
+
+
+def list_receivables_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    status: Optional[AccountReceivableStatus] = None,
+    client_id: Optional[UUID] = None,
+    due_before: Optional[date] = None,
+    due_after: Optional[date] = None,
+) -> Page[AccountReceivableOut]:
+    receivables, total = fin_repo.list_receivables_paginated(
+        db,
+        params=params,
+        status=status,
+        client_id=client_id,
+        due_before=due_before,
+        due_after=due_after,
+    )
+    items = [AccountReceivableOut.model_validate(r) for r in receivables]
+    return Page.create(items=items, total=total, params=params)
 
 
 def cancelar_contas_receber(
@@ -745,3 +814,90 @@ def list_defaulters(db: Session) -> list[DefaulterItem]:
         )
         for receivable, client in receivables
     ]
+
+
+# ---------------------------------------------------------------------------
+# Aprovação de folha (Demanda 4 — o dinheiro só se move na aprovação)
+# ---------------------------------------------------------------------------
+
+
+def list_payroll_approvals(db: Session) -> list[dict]:
+    """Fila de solicitações de pagamento de folha aguardando aprovação."""
+    from app.modules.folha import service as folha_service
+
+    requests = folha_service.list_pending_payment_requests(db)
+    return [folha_service.serialize_payment_request(db, r) for r in requests]
+
+
+def approve_payroll_request(db: Session, request_id: UUID) -> dict:
+    """Aprova uma solicitação de folha: paga, lança movimentos e emite NFs.
+
+    Espelha a aprovação do Compras. Valida saldo >= total (sem pagamento parcial:
+    ou cobre o total ou recusa). Para cada holerite da solicitação: registra o
+    movimento ``SAIDA/FOLHA`` (o débito real), marca a entry ``pago`` e emite a NF
+    de folha. Marca a solicitação ``aprovada`` + ``decided_at``.
+    """
+    from app.modules.faturamento import service as fat_service
+    from app.modules.folha import service as folha_service
+
+    request = folha_service.get_payment_request_or_404(db, request_id)
+    if request.status != folha_service.REQUEST_STATUS_PENDING:
+        raise HTTPException(
+            status_code=400, detail="Solicitação de pagamento já foi decidida"
+        )
+
+    total = Decimal(str(request.total_amount))
+    saldo = Decimal(str(get_balance(db).saldo))
+    if saldo < total:
+        raise HTTPException(
+            status_code=400,
+            detail="Saldo insuficiente para aprovar o pagamento da folha",
+        )
+
+    period = request.period
+    competency = (
+        f"{period.competency_month:02d}/{period.competency_year}" if period else ""
+    )
+    entries = folha_service.get_entries_of_request(db, request)
+    for entry in entries:
+        amount = Decimal(str(entry.net_amount))
+        employee = entry.employee
+        employee_name = employee.name if employee else str(entry.employee_id)
+        registrar_movimento(
+            db,
+            movement_type=MovementType.SAIDA,
+            category=FinancialCategory.FOLHA,
+            amount=amount,
+            description=f"Pagamento de salário: {employee_name} — {competency}",
+            source_module="folha",
+            reference_id=entry.id,
+        )
+        folha_service.mark_entry_paid(db, entry.id)
+        fat_service.criar_nota_folha(db, entry, period)
+
+    folha_service.mark_request_decided(
+        db, request, status=folha_service.REQUEST_STATUS_APPROVED
+    )
+    reloaded = folha_service.get_payment_request_or_404(db, request_id)
+    return folha_service.serialize_payment_request(db, reloaded)
+
+
+def refuse_payroll_request(db: Session, request_id: UUID, note: str) -> dict:
+    """Recusa uma solicitação: holerites voltam a ``pendente``; sem movimento."""
+    from app.modules.folha import service as folha_service
+
+    request = folha_service.get_payment_request_or_404(db, request_id)
+    if request.status != folha_service.REQUEST_STATUS_PENDING:
+        raise HTTPException(
+            status_code=400, detail="Solicitação de pagamento já foi decidida"
+        )
+
+    folha_service.revert_request_entries_to_pending(db, request)
+    folha_service.mark_request_decided(
+        db,
+        request,
+        status=folha_service.REQUEST_STATUS_REFUSED,
+        approval_note=note,
+    )
+    reloaded = folha_service.get_payment_request_or_404(db, request_id)
+    return folha_service.serialize_payment_request(db, reloaded)

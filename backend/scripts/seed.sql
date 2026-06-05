@@ -109,26 +109,63 @@ INSERT INTO payroll_events (
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos + 3 embalagens = 12)
--- quantity_on_hand reflete o estado pós produção/compra já representado no seed.
+-- 5b. STOCK CATEGORIES (categorias configuraveis - D2) + papeis de sistema (D3)
+--     Ids fixos espelham a migration 0015 (referenciados por stock_items.category_id).
 -- -----------------------------------------------------------------------------
-INSERT INTO stock_items (id, sku, name, category, unit, minimum_stock, unit_cost, quantity_on_hand, description) VALUES
--- Cafés (sacas de 60kg)
-('55555555-5555-5555-5555-555555555001', 'CAFE-ESP', 'Café Arábica Especial (saca 60kg)',   'cafe',        'saca',    10.000, 900.00,   9.000,   'Café especial, pontuação SCA 85+'),
-('55555555-5555-5555-5555-555555555002', 'CAFE-SUP', 'Café Arábica Superior (saca 60kg)',   'cafe',        'saca',    20.000, 650.00,  17.000,   'Café superior, SCA 80-84'),
-('55555555-5555-5555-5555-555555555003', 'CAFE-TRA', 'Café Arábica Tradicional (saca 60kg)','cafe',        'saca',    20.000, 450.00,  -1.000,   'Café tradicional, SCA <80'),
--- Insumos
-('55555555-5555-5555-5555-555555555011', 'INS-FERT', 'Fertilizante NPK 20-05-20',           'insumo',      'kg',     100.000,  12.00, 500.000,   'Fertilizante granulado para cafeeiro'),
-('55555555-5555-5555-5555-555555555012', 'INS-ADUB', 'Adubo Orgânico',                      'insumo',      'kg',     100.000,   8.00, 200.000,   'Adubo composto orgânico'),
-('55555555-5555-5555-5555-555555555013', 'INS-PEST', 'Pesticida Fungicida',                 'insumo',      'litro',   20.000,  25.00,  15.000,   'Fungicida de contato - abaixo do mínimo'),
-('55555555-5555-5555-5555-555555555014', 'INS-CALC', 'Calcário Dolomítico',                 'insumo',      'kg',     200.000,   3.00, 300.000,   'Correção de acidez do solo'),
--- Equipamentos / veículos
-('55555555-5555-5555-5555-555555555021', 'EQP-TRA01', 'Trator New Holland T6',              'veiculo',     'unidade',  1.000, 185000.00, 1.000,  'Trator 140cv com implementos'),
-('55555555-5555-5555-5555-555555555022', 'EQP-COL01', 'Colheitadeira Jacto Máster',         'equipamento', 'unidade',  1.000, 250000.00, 1.000,  'Colheitadeira automotriz para café'),
--- Embalagens
-('55555555-5555-5555-5555-555555555031', 'EMB-SACA60', 'Saca de juta 60kg',                 'embalagem',   'unidade', 50.000,   8.50,  500.000,  'Saca padrão para café beneficiado'),
-('55555555-5555-5555-5555-555555555032', 'EMB-BIGBAG', 'Big bag 600kg',                     'embalagem',   'unidade', 10.000,  45.00,   80.000,  'Big bag para granel'),
-('55555555-5555-5555-5555-555555555033', 'EMB-CAIXA',  'Caixa papelão 10kg',                'embalagem',   'unidade',100.000,   3.20, 1000.000,  'Caixa para café torrado/embalado')
+INSERT INTO stock_categories (id, name, description, is_active) VALUES
+('66666666-6666-6666-6666-666666660001', 'Cafe',        'Cafe em sacas (produto final/vendavel)', TRUE),
+('66666666-6666-6666-6666-666666660002', 'Insumo',      'Fertilizantes, defensivos e correcoes',  TRUE),
+('66666666-6666-6666-6666-666666660003', 'Veiculo',     'Veiculos e tratores',                    TRUE),
+('66666666-6666-6666-6666-666666660004', 'Equipamento', 'Maquinas e equipamentos',                TRUE),
+('66666666-6666-6666-6666-666666660005', 'Outro',       'Itens diversos / refugo',                TRUE),
+('66666666-6666-6666-6666-666666660006', 'Embalagem',   'Embalagens consumidas nas ordens de producao', TRUE)
+ON CONFLICT (id) DO NOTHING;
+
+-- Papeis de sistema por categoria (M:N). Cafe tem DOIS papeis. "Outro" recebe
+-- produto_descartado (demo) para hospedar o item-destino de Descarte da colheita.
+INSERT INTO category_role_assignments (id, category_id, role) VALUES
+('77777777-7777-7777-7777-777777770001', '66666666-6666-6666-6666-666666660001', 'produto_final'),
+('77777777-7777-7777-7777-777777770002', '66666666-6666-6666-6666-666666660001', 'produto_vendavel'),
+('77777777-7777-7777-7777-777777770003', '66666666-6666-6666-6666-666666660002', 'insumo'),
+('77777777-7777-7777-7777-777777770004', '66666666-6666-6666-6666-666666660003', 'veiculo'),
+('77777777-7777-7777-7777-777777770005', '66666666-6666-6666-6666-666666660004', 'maquina'),
+('77777777-7777-7777-7777-777777770006', '66666666-6666-6666-6666-666666660005', 'produto_descartado'),
+('77777777-7777-7777-7777-777777770007', '66666666-6666-6666-6666-666666660006', 'embalagem')
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 6. STOCK ITEMS (3 cafes + 4 insumos + 2 equipamentos + 1 descarte + 3 embalagens = 13)
+-- quantity_on_hand reflete o estado pos producao/compra ja representado no seed.
+-- Categoria via category_id (enum `category` legado foi removido na migration 0016).
+-- -----------------------------------------------------------------------------
+INSERT INTO stock_items (id, sku, name, category_id, unit, minimum_stock, unit_cost, quantity_on_hand, description) VALUES
+-- Cafes (sacas de 60kg) -> categoria Cafe
+('55555555-5555-5555-5555-555555555001', 'CAFE-ESP', 'Cafe Arabica Especial (saca 60kg)',    '66666666-6666-6666-6666-666666660001', 'saca',    10.000, 900.00,   9.000,   'Cafe especial, pontuacao SCA 85+'),
+('55555555-5555-5555-5555-555555555002', 'CAFE-SUP', 'Cafe Arabica Superior (saca 60kg)',    '66666666-6666-6666-6666-666666660001', 'saca',    20.000, 650.00,  17.000,   'Cafe superior, SCA 80-84'),
+('55555555-5555-5555-5555-555555555003', 'CAFE-TRA', 'Cafe Arabica Tradicional (saca 60kg)', '66666666-6666-6666-6666-666666660001', 'saca',    20.000, 450.00,  -1.000,   'Cafe tradicional, SCA <80'),
+-- Insumos -> categoria Insumo
+('55555555-5555-5555-5555-555555555011', 'INS-FERT', 'Fertilizante NPK 20-05-20',            '66666666-6666-6666-6666-666666660002', 'kg',     100.000,  12.00, 500.000,   'Fertilizante granulado para cafeeiro'),
+('55555555-5555-5555-5555-555555555012', 'INS-ADUB', 'Adubo Organico',                       '66666666-6666-6666-6666-666666660002', 'kg',     100.000,   8.00, 200.000,   'Adubo composto organico'),
+('55555555-5555-5555-5555-555555555013', 'INS-PEST', 'Pesticida Fungicida',                  '66666666-6666-6666-6666-666666660002', 'litro',   20.000,  25.00,  15.000,   'Fungicida de contato - abaixo do minimo'),
+('55555555-5555-5555-5555-555555555014', 'INS-CALC', 'Calcario Dolomitico',                  '66666666-6666-6666-6666-666666660002', 'kg',     200.000,   3.00, 300.000,   'Correcao de acidez do solo'),
+-- Veiculo / Equipamento
+('55555555-5555-5555-5555-555555555021', 'EQP-TRA01', 'Trator New Holland T6',               '66666666-6666-6666-6666-666666660003', 'unidade',  1.000, 185000.00, 1.000,  'Trator 140cv com implementos'),
+('55555555-5555-5555-5555-555555555022', 'EQP-COL01', 'Colheitadeira Jacto Master',          '66666666-6666-6666-6666-666666660004', 'unidade',  1.000, 250000.00, 1.000,  'Colheitadeira automotriz para cafe'),
+-- Item-destino de Descarte da colheita (categoria Outro -> produto_descartado)
+('55555555-5555-5555-5555-555555555031', 'CAFE-DESC', 'Cafe Descarte (refugo)',              '66666666-6666-6666-6666-666666660005', 'saca',     0.000,   0.00,   0.000,   'Cafe descartado (refugo da colheita)'),
+-- Embalagens -> categoria Embalagem
+('55555555-5555-5555-5555-555555555034', 'EMB-SACA60', 'Saca de juta 60kg',                  '66666666-6666-6666-6666-666666660006', 'unidade', 50.000,   8.50,  500.000,  'Saca padrao para cafe beneficiado'),
+('55555555-5555-5555-5555-555555555035', 'EMB-BIGBAG', 'Big bag 600kg',                      '66666666-6666-6666-6666-666666660006', 'unidade', 10.000,  45.00,   80.000,  'Big bag para granel'),
+('55555555-5555-5555-5555-555555555036', 'EMB-CAIXA',  'Caixa papelao 10kg',                 '66666666-6666-6666-6666-666666660006', 'unidade',100.000,   3.20, 1000.000,  'Caixa para cafe torrado/embalado')
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 6b. APP SETTINGS (key-value de configuracao) - itens-destino da colheita (D1)
+-- -----------------------------------------------------------------------------
+INSERT INTO app_settings (id, key, value) VALUES
+('88888888-8888-8888-8888-888888880001', 'harvest_destination_industria_item_id', '55555555-5555-5555-5555-555555555002'),
+('88888888-8888-8888-8888-888888880002', 'harvest_destination_embalagem_item_id', '55555555-5555-5555-5555-555555555001'),
+('88888888-8888-8888-8888-888888880003', 'harvest_destination_descarte_item_id',  '55555555-5555-5555-5555-555555555031')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -448,7 +485,7 @@ ON CONFLICT (id) DO NOTHING;
 --   3 clientes (1 inadimplente)
 --   3 fornecedores
 --   8 funcionários (3 CLT, 3 PJ, 2 Temp)
---   12 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira, 3 embalagens)
+--   13 itens de estoque (3 cafés, 4 insumos, 1 trator, 1 colheitadeira, 1 descarte, 3 embalagens)
 --   2 talhões, 3 atividades
 --   1 ordem de produção concluída (100 sacas), 2 trabalhadores, 1 serviço externo
 --   2 ordens de compra (1 concluída, 1 aprovada gerada pela Cotação 1)

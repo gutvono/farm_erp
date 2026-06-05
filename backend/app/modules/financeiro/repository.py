@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional, Type
 from uuid import UUID
 
-from sqlalchemy import func
+from sqlalchemy import func, or_
 from sqlalchemy.orm import Session
 
 from app.modules.financeiro.model import (
@@ -17,6 +17,24 @@ from app.shared.enums import (
     FinancialCategory,
     MovementType,
 )
+from app.shared.pagination import PageParams, paginate_query
+
+
+# Allowlists de ordenação (coluna fora da lista cai no default, nunca 500).
+PAYABLE_ORDER_COLUMNS = {
+    "due_date": AccountPayable.due_date,
+    "amount": AccountPayable.amount,
+    "created_at": AccountPayable.created_at,
+}
+RECEIVABLE_ORDER_COLUMNS = {
+    "due_date": AccountReceivable.due_date,
+    "amount": AccountReceivable.amount,
+    "created_at": AccountReceivable.created_at,
+}
+MOVEMENT_ORDER_COLUMNS = {
+    "occurred_at": FinancialMovement.occurred_at,
+    "amount": FinancialMovement.amount,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -82,6 +100,45 @@ def list_movements(
     if end_date:
         query = query.filter(FinancialMovement.occurred_at <= end_date)
     return query.order_by(FinancialMovement.occurred_at.desc()).all()
+
+
+def list_movements_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    movement_type: Optional[MovementType] = None,
+    category: Optional[FinancialCategory] = None,
+    source_module: Optional[str] = None,
+    start_date: Optional[datetime] = None,
+    end_date: Optional[datetime] = None,
+) -> tuple[list[FinancialMovement], int]:
+    """List financial movements with filters + generic pagination/ordering.
+
+    ``params.search`` matches the description (ILIKE); ``start_date``/``end_date``
+    filter ``occurred_at``. Default order is ``occurred_at desc``.
+    """
+    query = db.query(FinancialMovement)
+    if movement_type:
+        query = query.filter(FinancialMovement.movement_type == movement_type)
+    if category:
+        query = query.filter(FinancialMovement.category == category)
+    if source_module:
+        query = query.filter(FinancialMovement.source_module == source_module)
+    if start_date:
+        query = query.filter(FinancialMovement.occurred_at >= start_date)
+    if end_date:
+        query = query.filter(FinancialMovement.occurred_at <= end_date)
+    if params.search:
+        query = query.filter(
+            FinancialMovement.description.ilike(f"%{params.search}%")
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=MOVEMENT_ORDER_COLUMNS,
+        default_order=FinancialMovement.occurred_at.desc(),
+        tiebreaker=FinancialMovement.id,
+    )
 
 
 def sum_by_type(db: Session, movement_type: MovementType) -> Decimal:
@@ -179,6 +236,50 @@ def list_payables(
     if due_after:
         query = query.filter(AccountPayable.due_date >= due_after)
     return query.order_by(AccountPayable.due_date.asc()).all()
+
+
+def list_payables_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    status: Optional[AccountPayableStatus] = None,
+    supplier_id: Optional[UUID] = None,
+    due_before: Optional[date] = None,
+    due_after: Optional[date] = None,
+) -> tuple[list[AccountPayable], int]:
+    """List payables with filters + generic pagination/ordering.
+
+    ``params.search`` matches the payable number/description OR the supplier name
+    (ILIKE, via outer join). Default order is ``due_date asc``.
+    """
+    query = db.query(AccountPayable).filter(AccountPayable.deleted_at.is_(None))
+    if status:
+        query = query.filter(AccountPayable.status == status)
+    if supplier_id:
+        query = query.filter(AccountPayable.supplier_id == supplier_id)
+    if due_before:
+        query = query.filter(AccountPayable.due_date <= due_before)
+    if due_after:
+        query = query.filter(AccountPayable.due_date >= due_after)
+    if params.search:
+        from app.modules.compras.model import Supplier
+
+        like = f"%{params.search}%"
+        query = query.outerjoin(Supplier, Supplier.id == AccountPayable.supplier_id)
+        query = query.filter(
+            or_(
+                AccountPayable.number.ilike(like),
+                AccountPayable.description.ilike(like),
+                Supplier.name.ilike(like),
+            )
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=PAYABLE_ORDER_COLUMNS,
+        default_order=AccountPayable.due_date.asc(),
+        tiebreaker=AccountPayable.id,
+    )
 
 
 def list_payables_by_order(
@@ -289,6 +390,50 @@ def list_receivables(
     if due_after:
         query = query.filter(AccountReceivable.due_date >= due_after)
     return query.order_by(AccountReceivable.due_date.asc()).all()
+
+
+def list_receivables_paginated(
+    db: Session,
+    *,
+    params: PageParams,
+    status: Optional[AccountReceivableStatus] = None,
+    client_id: Optional[UUID] = None,
+    due_before: Optional[date] = None,
+    due_after: Optional[date] = None,
+) -> tuple[list[AccountReceivable], int]:
+    """List receivables with filters + generic pagination/ordering.
+
+    ``params.search`` matches the receivable number/description OR the client name
+    (ILIKE, via outer join). Default order is ``due_date asc``.
+    """
+    query = db.query(AccountReceivable).filter(AccountReceivable.deleted_at.is_(None))
+    if status:
+        query = query.filter(AccountReceivable.status == status)
+    if client_id:
+        query = query.filter(AccountReceivable.client_id == client_id)
+    if due_before:
+        query = query.filter(AccountReceivable.due_date <= due_before)
+    if due_after:
+        query = query.filter(AccountReceivable.due_date >= due_after)
+    if params.search:
+        from app.modules.comercial.model import Client
+
+        like = f"%{params.search}%"
+        query = query.outerjoin(Client, Client.id == AccountReceivable.client_id)
+        query = query.filter(
+            or_(
+                AccountReceivable.number.ilike(like),
+                AccountReceivable.description.ilike(like),
+                Client.name.ilike(like),
+            )
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=RECEIVABLE_ORDER_COLUMNS,
+        default_order=AccountReceivable.due_date.asc(),
+        tiebreaker=AccountReceivable.id,
+    )
 
 
 def list_receivables_by_refs(

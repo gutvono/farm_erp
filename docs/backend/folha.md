@@ -2,7 +2,7 @@
 
 ## Overview
 
-Módulo responsável pela gestão de **cargos**, funcionários, criação de períodos mensais de folha (holerites), ajustes de horas extras/descontos, pagamento individual ou em lote e demissões. Toda operação que movimenta dinheiro (pagamento, demissão) gera movimentos financeiros e, quando aplicável, contas a pagar.
+Módulo responsável pela gestão de **cargos**, funcionários, criação de períodos mensais de folha (holerites), ajustes de horas extras/descontos, **solicitação** de pagamento (individual ou em lote) e demissões. A partir da **Demanda 4**, pagar deixou de sair direto da conta: a Folha cria uma **solicitação de pagamento** que vai para a fila de aprovação do Financeiro — o dinheiro só se move quando o Financeiro **aprova** (e aí 1 NF `folha_pagamento` é emitida por funcionário). A demissão segue lançando movimento + conta a pagar diretamente.
 
 A partir da **Demanda 2**, o cargo do funcionário deixou de ser texto livre e passou a ser uma **entidade cadastrável** (`job_positions`), referenciada por FK (`employees.position_id`). O antigo campo `employees.role` foi removido fisicamente (migration `0014`).
 
@@ -54,8 +54,8 @@ A foto é gravada em `settings.upload_dir/employees/{uuid}_{filename}` e exposta
 | `GET` | `/api/folha/periodos` | Lista períodos (ordem DESC por ano/mês) |
 | `POST` | `/api/folha/periodos` | Cria ou recupera o período para `reference_month`/`reference_year`. Idempotente. |
 | `GET` | `/api/folha/periodos/{id}` | Detalhe com entries populadas |
-| `POST` | `/api/folha/periodos/{id}/fechar` | Fecha o período (exige todos os holerites pagos) |
-| `POST` | `/api/folha/periodos/{id}/pagar-todos` | Pagamento em lote dos holerites pendentes |
+| `POST` | `/api/folha/periodos/{id}/fechar` | Fecha o período (exige **todos** os holerites `pago`) |
+| `POST` | `/api/folha/periodos/{id}/solicitar-pagamento-todos` | **Solicita** o pagamento em lote (todas as entries `pendente` → `aguardando_aprovacao`); cria 1 solicitação. Não move dinheiro |
 
 ### Holerites (Payroll Entries)
 
@@ -63,7 +63,7 @@ A foto é gravada em `settings.upload_dir/employees/{uuid}_{filename}` e exposta
 |--------|------|-----------|
 | `GET` | `/api/folha/periodos/{period_id}/entries` | Lista holerites do período |
 | `PATCH` | `/api/folha/entries/{id}` | Atualiza `overtime_amount` e `deductions`; recalcula `total_amount` |
-| `POST` | `/api/folha/entries/{id}/pagar` | Paga o holerite individual (valida saldo) |
+| `POST` | `/api/folha/entries/{id}/solicitar-pagamento` | **Solicita** o pagamento individual (entry `pendente` → `aguardando_aprovacao`); cria 1 solicitação. Não move dinheiro |
 | `GET` | `/api/folha/eventos` | Lista eventos de folha ativos |
 | `GET` | `/api/folha/entries/{id}/itens` | Lista itens detalhados do holerite |
 | `POST` | `/api/folha/entries/{id}/itens` | Lança/atualiza item manual |
@@ -224,40 +224,51 @@ TERMINATION_COST = {
 ### Períodos
 - `POST /periodos` é idempotente: se já existe período para `month/year`, retorna o existente (sem recriar entries).
 - Ao criar um novo período, o serviço cria uma `PayrollEntry` por funcionário **ativo** com `base_salary` atual, `overtime_amount=0`, `deductions=0`, `total_amount=base_salary`, `status=pendente`.
-- Fechar período exige que **nenhuma** entry esteja pendente. Caso contrário retorna `400 "Existem funcionários sem pagamento..."`.
+- Fechar período exige que **todas** as entries estejam `pago`. Se houver alguma `pendente` **ou** `aguardando_aprovacao`, retorna `400 "Existem funcionários sem pagamento aprovado..."`.
 - Ao fechar, `total_amount` do período é recalculado somando `net_amount` de todas as entries e gravado; `closed_at` recebe `now()`.
 
-### Holerites
+### Holerites — máquina de estados (Demanda 4)
+
+```
+pendente ──/solicitar-pagamento──▶ aguardando_aprovacao ──(Financeiro aprova)──▶ pago
+   ▲                                      │
+   └──────────(Financeiro recusa)─────────┘
+```
+
+- `pendente`: holerite calculado, ainda sem solicitação de pagamento.
+- `aguardando_aprovacao`: existe uma solicitação na fila do Financeiro; **o dinheiro ainda NÃO saiu**.
+- `pago`: o Financeiro **aprovou** — só então o `saida/folha` é lançado e a NF de folha emitida. Status final do holerite no período.
+
+### Holerites — regras
 - `PATCH /entries/{id}` só funciona em período `aberta` **e** entry `pendente`. Bloqueios retornam `400`.
 - `total_amount` (coluna `net_amount` no model) é sempre calculado no serviço/repo; nunca aceita valor do cliente.
 - Itens detalhados ficam em `payroll_entry_items` e sempre referenciam um evento em `payroll_events`.
-- `provento` com `affects_net=true` aumenta o líquido.
-- `desconto` com `affects_net=true` reduz o líquido.
-- `informativo` ou `affects_net=false` aparece no holerite, mas não altera o líquido. O FGTS usa esta regra.
-- Ao aplicar cálculos em um holerite legado, o serviço cria itens equivalentes para salário base, horas extras e descontos já agregados antes do recálculo.
-- `POST /entries/{id}/pagar`:
-  - Valida que entry existe e está `pendente`.
-  - Consulta saldo atual via `fin_service.get_balance(db)`.
-  - Se saldo < `total_amount`: `400 "Saldo insuficiente. Saldo atual: R${saldo:.2f}, valor do holerite: R${total:.2f}"`.
-  - Marca `status=pago`, `paid_at=now()`.
-  - Gera `saida/folha` no Financeiro com descrição `"Pagamento de salário: {nome} — MM/AAAA"`.
+- `provento`/`desconto` com `affects_net=true` aumentam/reduzem o líquido; `informativo`/`affects_net=false` não altera (ex.: FGTS).
 
-### Pagamento em lote (`pay_all_entries`)
-- Aplicável apenas em período `aberta`.
-- Consulta o saldo **uma vez** no início e mantém um saldo local decrementado a cada pagamento.
-- Itera sobre as entries `pendentes` por ordem de criação:
-  - Se saldo local ≥ `total_amount` → paga (marca `pago`, subtrai do saldo local, gera movimento `saida/folha`) e incrementa `paid_count`/`total_paid`.
-  - Caso contrário, adiciona o nome do funcionário em `failed_employees` e continua (o lote **nunca** interrompe por saldo insuficiente — registra e segue).
-- Retorna `PayrollBatchResult` com `insufficient_balance=True` sempre que houver algum `failed_employees`.
+### Solicitação de pagamento (Demanda 4 — o dinheiro só se move na aprovação)
+
+> **Os endpoints antigos `/entries/{id}/pagar` e `/periodos/{id}/pagar-todos` foram REMOVIDOS.** Eles tiravam dinheiro direto da conta. Agora pagar é um pedido que passa pela aprovação do Financeiro (igual a uma compra). Decisão: **remoção** (não redirecionamento) — não existe mais nenhum caminho em Folha que mova dinheiro; o débito só ocorre na aprovação.
+
+- `POST /entries/{id}/solicitar-pagamento` (individual):
+  - Valida que a entry está `pendente` (se já `aguardando_aprovacao` → `400 "...já tem solicitação..."`; se `pago` → `400 "Funcionário já recebeu..."`).
+  - Recalcula o líquido, cria um `payroll_payment_request` (`request_type=individual`, `total = net_amount`) + 1 vínculo na junção, e move a entry para `aguardando_aprovacao`.
+  - **Não** registra movimento financeiro — o saldo do Financeiro não muda.
+- `POST /periodos/{id}/solicitar-pagamento-todos` (lote):
+  - Período deve estar `aberta`. Pega **todas** as entries `pendente`; se não houver nenhuma → `400`.
+  - Cria **uma** request (`request_type=lote`, `total = Σ net_amount`) e move todas as entries para `aguardando_aprovacao`.
+  - **Não** move dinheiro.
+
+A **aprovação/recusa** acontece no Financeiro (ver `docs/backend/financeiro.md` → "Aprovação de folha"). Na aprovação: 1 `saida/folha` por holerite (o débito real), entry → `pago`, e 1 NF `folha_pagamento` por funcionário. Na recusa: as entries voltam a `pendente` e **nenhum** movimento é gerado.
 
 ## Integrações com outros módulos
 
 | Origem | Evento | Integração |
 |--------|--------|------------|
-| Folha | Pagamento individual / lote | `fin_service.registrar_movimento(SAIDA, FOLHA, amount=total_amount, source_module="folha", reference_id=entry.id)` |
+| Folha | Solicitar pagamento (individual/lote) | Cria `payroll_payment_request` + move entries para `aguardando_aprovacao`. **Sem** movimento financeiro |
+| Financeiro | Aprovar solicitação de folha | Por holerite: `registrar_movimento(SAIDA, FOLHA, amount=net_amount, source_module="folha", reference_id=entry.id)` + `faturamento.criar_nota_folha` |
 | Folha | Demissão | `fin_service.registrar_movimento(SAIDA, FOLHA, amount=cost)` + `fin_service.criar_conta_pagar(..., due_date=today+10d)` |
 
-Validação de saldo antes do pagamento usa `fin_service.get_balance(db).saldo` como fonte única da verdade.
+A validação de saldo (`get_balance(db).saldo >= total`) acontece na **aprovação**, no Financeiro.
 
 ## Constantes
 
@@ -317,7 +328,7 @@ Unique constraint `uq_payroll_period_competency (competency_year, competency_mon
 | `absences_quantity`, `absences_value` | NUMERIC default 0 |
 | `deductions_value` (= `deductions`) | NUMERIC(12,2) default 0 |
 | `net_amount` (= `total_amount`) | NUMERIC(12,2) default 0 |
-| `status` | enum (`pendente`/`pago`) indexado |
+| `status` | enum (`pendente`/`aguardando_aprovacao`/`pago`) indexado |
 | `paid_at` | TIMESTAMPTZ nullable |
 | `created_at`, `updated_at` | TIMESTAMPTZ |
 
@@ -364,6 +375,31 @@ Campos legados seguem preenchidos:
 - `deductions_value`: soma dos descontos que afetam líquido.
 - `net_amount`: líquido recalculado e usado pelos pagamentos.
 
+### `payroll_payment_requests` (Demanda 4, soft delete)
+Solicitação de aprovação de pagamento de folha (fila do Financeiro).
+
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `payroll_period_id` | UUID FK → payroll_periods, indexado |
+| `request_type` | VARCHAR(20) — `individual` \| `lote` |
+| `status` | VARCHAR(40) textual — `aguardando_aprovacao_financeiro` → `aprovada` \| `recusada`, indexado |
+| `total_amount` | NUMERIC(12,2) — soma dos `net_amount` incluídos |
+| `approval_note` | TEXT nullable (motivo da recusa) |
+| `requested_at` | TIMESTAMPTZ (default now) |
+| `decided_at` | TIMESTAMPTZ nullable |
+| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
+
+### `payroll_payment_request_entries` (junção, sem soft delete)
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `payment_request_id` | UUID FK → payroll_payment_requests (`fk_ppre_request`, CASCADE), indexado |
+| `payroll_entry_id` | UUID FK → payroll_entries (`fk_ppre_entry`), indexado |
+| `created_at`, `updated_at` | TIMESTAMPTZ |
+
+Unique `uq_ppre_request_entry (payment_request_id, payroll_entry_id)`.
+
 ## Migrations
 
 `0003_folha_extra_columns` (arquivo `alembic/versions/20260416_0003_folha_extra_columns.py`):
@@ -396,6 +432,10 @@ Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQ
 - `upgrade()`: **DROP físico** de `employees.role` (`DROP COLUMN IF EXISTS role`), depois que o Backend parou de ler/escrever o campo. O dado canônico do cargo é `position_id`.
 - `downgrade()`: recria a coluna `role VARCHAR(100) NULLABLE` (não repopula — quem precisar do texto resolve via `JOIN job_positions`).
 - O atributo `role` foi removido do model `Employee` para manter `alembic check` limpo (model × banco em sincronia).
+
+`0017_payroll_approval` (arquivo `alembic/versions/20260604_0017_payroll_approval.py`) — **Demanda 4** (DBA):
+- Adiciona o valor `aguardando_aprovacao` ao enum `payroll_entry_status` (via `ALTER TYPE ... ADD VALUE` em `autocommit_block`).
+- Cria as tabelas `payroll_payment_requests` (soft delete) e `payroll_payment_request_entries` (junção). O Backend da Demanda 4 implementa o fluxo de solicitação/aprovação sobre elas (sem nova migration).
 
 > **Convenção:** `alembic_version.version_num` é `VARCHAR(32)` — o `revision id` de cada migration deve ter no máximo 32 caracteres (por isso `0008_fix_payroll_desc_index` e não o nome completo do arquivo).
 

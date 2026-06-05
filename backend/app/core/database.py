@@ -30,6 +30,11 @@ def get_db() -> Generator[Session, None, None]:
 # Import all models so Alembic autogenerate can detect them.
 # Order matters: referenced tables must be imported before tables that reference them.
 from app.modules.auth.model import User, UserSession  # noqa: E402, F401
+from app.modules.configuracoes.model import (  # noqa: E402, F401
+    AppSetting,
+    CategoryRoleAssignment,
+    StockCategory,
+)
 from app.modules.estoque.model import StockItem, StockMovement  # noqa: E402, F401
 from app.modules.comercial.model import Client, Sale, SaleItem  # noqa: E402, F401
 from app.modules.compras.model import (  # noqa: E402, F401
@@ -52,6 +57,8 @@ from app.modules.folha.model import (  # noqa: E402, F401
     PayrollEntry,
     PayrollEntryItem,
     PayrollEvent,
+    PayrollPaymentRequest,
+    PayrollPaymentRequestEntry,
     PayrollPeriod,
 )
 from app.modules.pcp.model import (  # noqa: E402, F401

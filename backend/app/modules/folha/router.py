@@ -256,17 +256,18 @@ def close_period(
 
 
 @router.post(
-    "/periodos/{period_id}/pagar-todos", response_model=SuccessResponse
+    "/periodos/{period_id}/solicitar-pagamento-todos",
+    response_model=SuccessResponse,
 )
-def pay_all_entries(
+def request_batch_payment(
     period_id: UUID,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    result = folha_service.pay_all_entries(db, period_id)
+    request = folha_service.request_batch_payment(db, period_id)
     return success(
-        "Pagamento em lote processado",
-        result.model_dump(mode="json"),
+        "Solicitação de pagamento em lote enviada para aprovação",
+        folha_service.serialize_payment_request(db, request),
     )
 
 
@@ -390,14 +391,16 @@ def update_entry(
     )
 
 
-@router.post("/entries/{entry_id}/pagar", response_model=SuccessResponse)
-def pay_entry(
+@router.post(
+    "/entries/{entry_id}/solicitar-pagamento", response_model=SuccessResponse
+)
+def request_individual_payment(
     entry_id: UUID,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    entry = folha_service.pay_entry(db, entry_id)
+    request = folha_service.request_individual_payment(db, entry_id)
     return success(
-        "Holerite pago com sucesso",
-        folha_service.serialize_entry(db, entry),
+        "Solicitação de pagamento enviada para aprovação",
+        folha_service.serialize_payment_request(db, request),
     )

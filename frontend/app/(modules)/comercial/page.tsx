@@ -71,7 +71,7 @@ export default function ComercialPage() {
   useEffect(() => { loadClients() }, [loadClients])
 
   useEffect(() => {
-    getItens({ category: "cafe" }).then(setStockItems).catch(() => {})
+    getItens({ role: "produto_vendavel" }).then(setStockItems).catch(() => {})
   }, [])
 
   const delinquentCount = clients.filter((c) => c.is_delinquent).length

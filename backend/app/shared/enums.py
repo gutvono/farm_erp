@@ -14,20 +14,32 @@ class ContractType(str, enum.Enum):
     TEMPORARIO = "temporario"
 
 
-class StockCategory(str, enum.Enum):
-    CAFE = "cafe"
-    INSUMO = "insumo"
-    VEICULO = "veiculo"
-    EQUIPAMENTO = "equipamento"
-    EMBALAGEM = "embalagem"
-    OUTRO = "outro"
-
-
 class StockUnit(str, enum.Enum):
     SACA = "saca"
     LITRO = "litro"
     KG = "kg"
     UNIDADE = "unidade"
+
+
+class SystemRole(str, enum.Enum):
+    """Papel de sistema atribuído a uma categoria de estoque (Demanda 3 / D3).
+
+    Como as categorias passam a ser livres (tabela `stock_categories`), o
+    sistema não consegue "adivinhar" o que é máquina/veículo/insumo etc. Este
+    enum é o vocabulário fixo que o admin mapeia para cada categoria
+    (`category_role_assignments`), e que PCP/Comercial consomem para entender
+    os itens. A ORDEM aqui define a ordem dos valores no tipo Postgres
+    `system_role` (via `sa_enum_values`) — espelhada na migration 0015.
+    """
+
+    MAQUINA = "maquina"
+    VEICULO = "veiculo"
+    EMBALAGEM = "embalagem"
+    INSUMO = "insumo"
+    PRODUTO_FINAL = "produto_final"
+    PRODUTO_INACABADO = "produto_inacabado"
+    PRODUTO_DESCARTADO = "produto_descartado"
+    PRODUTO_VENDAVEL = "produto_vendavel"
 
 
 class MovementType(str, enum.Enum):
@@ -101,8 +113,14 @@ class PayrollPeriodStatus(str, enum.Enum):
 
 
 class PayrollEntryStatus(str, enum.Enum):
+    # Fluxo (Demanda 4 / D6): pendente → aguardando_aprovacao → pago
+    # (volta a pendente na recusa). `aguardando_aprovacao` fica POR ÚLTIMO na
+    # declaração de propósito: `ALTER TYPE ... ADD VALUE` anexa ao fim, então
+    # manter a mesma posição aqui faz o tipo do banco novo (create_all) bater
+    # com o do banco migrado. Ver migration 0017_payroll_approval.
     PENDENTE = "pendente"
     PAGO = "pago"
+    AGUARDANDO_APROVACAO = "aguardando_aprovacao"
 
 
 class PayrollEventType(str, enum.Enum):

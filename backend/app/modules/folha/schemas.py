@@ -394,3 +394,30 @@ class PayrollBatchResult(BaseModel):
     total_paid: Decimal
     insufficient_balance: bool
     failed_employees: list[str]
+
+
+# ---------------------------------------------------------------------------
+# Payroll Payment Requests (aprovação de folha — Demanda 4)
+# ---------------------------------------------------------------------------
+
+
+class PayrollPaymentRequestEntryOut(BaseModel):
+    entry_id: UUID
+    employee_id: UUID
+    employee_name: str
+    net_amount: Decimal
+
+
+class PayrollPaymentRequestOut(BaseModel):
+    id: UUID
+    payroll_period_id: UUID
+    competency: str  # "MM/AAAA"
+    request_type: str  # individual | lote
+    status: str  # aguardando_aprovacao_financeiro | aprovada | recusada
+    total_amount: Decimal
+    approval_note: Optional[str] = None
+    requested_at: datetime
+    decided_at: Optional[datetime] = None
+    entries: list[PayrollPaymentRequestEntryOut] = Field(default_factory=list)
+    created_at: datetime
+    updated_at: datetime
