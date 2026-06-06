@@ -49,7 +49,7 @@ nome do enum.
 | `users`, `clients`, `suppliers`, `employees`, `job_positions` | ✅ | entidades cadastrais |
 | `stock_items`, `plots`, `stock_categories` | ✅ | cadastros base |
 | `sales`, `purchase_orders`, `invoices`, `accounts_payable`, `accounts_receivable`, `production_orders`, `plot_activities`, `payroll_periods`, `payroll_events`, `payroll_payment_requests` | ✅ | operações de negócio e catálogos |
-| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_workers`, `production_order_services`, `payroll_entries`, `payroll_entry_items`, `payroll_payment_request_entries` | ❌ | itens filhos (cascateados pelo pai) |
+| `sale_items`, `purchase_order_items`, `purchase_order_receipts`, `invoice_items`, `production_inputs`, `production_order_position_requirements`, `production_order_resources`, `production_order_services`, `production_harvests`, `payroll_entries`, `payroll_entry_items`, `payroll_payment_request_entries` | ❌ | itens filhos (cascateados pelo pai) |
 | `stock_movements`, `financial_movements` | ❌ | ledger imutável — auditoria |
 | `category_role_assignments` | ❌ | tabela de ligação M:N (hard delete; CASCADE da categoria) |
 | `app_settings` | ❌ | key-value de configuração |
@@ -482,6 +482,16 @@ Constraint: `uq_ppre_request_entry` UNIQUE (`payment_request_id`,
 
 ### PCP (Produção)
 
+> **Demanda 5 (PCP refac, migration `0018_pcp_refac`):** o talhão passa a ter
+> **área em hectares**; a OP usa uma **fração de hectares** do talhão e pode ser
+> **encerrada por praga** antes de 100%; a colheita deixa de ser por qualidade
+> (especial/superior/tradicional) e passa a ser **por destino**
+> (Indústria/Embalagem/Descarte), cada destino apontando para um item-destino
+> configurado em `app_settings` (D1); a alocação de pessoas deixa de ser nominal
+> (`production_order_workers` foi **removida**) e vira **requisitos por cargo**; e
+> a OP passa a referenciar **recursos de estoque** (máquinas/veículos reservados,
+> embalagens consumidas).
+
 #### `plots`
 Talhões da fazenda.
 
@@ -489,6 +499,7 @@ Talhões da fazenda.
 |--------|------|-----------|
 | `name`, `location`, `variety` | `VARCHAR` | Identificação |
 | `capacity_sacas` | `NUMERIC(12,3)` | Capacidade em sacas de 60kg |
+| `total_hectares` | `NUMERIC(10,2)` NOT NULL default 0 | **Área total do talhão (ha).** Base do controle de área: `Σ(hectares_used das OPs ativas) ≤ total_hectares` |
 
 #### `production_orders`
 Execuções de safra. Suporta colheitas parciais com acompanhamento de progresso.
@@ -502,12 +513,14 @@ Status (`production_order_status`): `planejada → em_producao → em_execucao |
 | `start_date` | `DATE` NULL | Data de início |
 | `expected_end_date` | `DATE` NULL | Previsão de conclusão |
 | `executed_at` | `TIMESTAMPTZ` | Data da produção (preenchida ao concluir) |
+| `hectares_used` | `NUMERIC(10,2)` NOT NULL default 0 | **Fração de área do talhão alocada à OP.** Validada contra `plot.total_hectares` (regra no Backend) |
 | `total_sacas` | `NUMERIC(12,3)` | Total produzido |
-| `especial_sacas`, `superior_sacas`, `tradicional_sacas` | `NUMERIC(12,3)` | Por qualidade |
-| `estimated_cost` | `NUMERIC(12,2)` default 0 | Custo estimado dos insumos |
+| `industria_sacas`, `embalagem_sacas`, `descarte_sacas` | `NUMERIC(12,3)` NOT NULL default 0 | **Sacas colhidas acumuladas por destino** (substituem `especial/superior/tradicional`). Cada destino = um item-destino de `app_settings` |
+| `estimated_cost` | `NUMERIC(12,2)` default 0 | Custo estimado |
 | `realized_cost` | `NUMERIC(12,2)` default 0 | Custo realizado |
 | `total_cost` | `NUMERIC(12,2)` | Custo total dos insumos consumidos |
 | `harvest_progress` | `NUMERIC(5,2)` default 0 | Percentual colhido (0–100) |
+| `early_closed_reason` | `TEXT` NULL | **Motivo do encerramento antecipado (praga).** Preenchido quando a OP é concluída antes de 100%; NULL = encerramento normal |
 
 #### `production_harvests`
 Registra cada colheita parcial de uma ordem. Append-only — sem soft delete.
@@ -517,26 +530,44 @@ Registra cada colheita parcial de uma ordem. Append-only — sem soft delete.
 | `production_order_id` | FK `production_orders.id` CASCADE | Ordem pai |
 | `harvest_number` | `INTEGER` | Sequencial da colheita (1, 2, 3…) |
 | `percentage_harvested` | `NUMERIC(5,2)` | % colhida nesta rodada |
+| `hectares_harvested` | `NUMERIC(10,2)` NULL | Área colhida na rodada = `production_order.hectares_used × pct/100` |
 | `sacks_total` | `NUMERIC(8,2)` default 0 | Total de sacas desta colheita |
-| `sacks_especial`, `sacks_superior`, `sacks_tradicional` | `NUMERIC(8,2)` | Por qualidade |
+| `sacks_industria`, `sacks_embalagem`, `sacks_descarte` | `NUMERIC(8,2)` NOT NULL default 0 | **Sacas desta colheita por destino** (substituem `especial/superior/tradicional`) |
 | `inputs_consumed` | `JSON` NULL | Snapshot dos insumos consumidos |
 | `is_final` | `BOOLEAN` default false | `true` quando atinge 100% |
 | `harvested_at` | `TIMESTAMPTZ` default now() | Data/hora da colheita |
 
 #### `production_inputs`
-Insumos consumidos na produção (CASCADE).
+Insumos consumidos na produção (CASCADE). A partir da Demanda 5, o item escolhido deve pertencer a uma categoria com o papel `insumo` (validação no Backend).
 
-#### `production_order_workers`
-Funcionários alocados na ordem de produção, com snapshot de salário. Append-only — sem soft delete. Substitui o antigo `production_orders.responsible_employee_id`: a responsabilidade é controlada por `is_responsible`.
+#### `production_order_position_requirements`
+**Requisitos de mão de obra por CARGO** de uma OP (substitui a alocação nominal de funcionários do antigo `production_order_workers`). Em vez de nomear pessoas, a OP declara de quantas pessoas de cada cargo precisa e com qual vínculo (ex.: `MOTORISTA × 2 (clt)`). O custo de pessoal estimado/realizado sai de `Σ(quantidade × job_position.base_salary / 22 × max(1, dias))` (regra no Backend). Append-only — sem soft delete.
 
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
-| `production_order_id` | FK `production_orders.id` CASCADE (`fk_pow_order`) | Ordem pai |
-| `employee_id` | FK `employees.id` RESTRICT (`fk_pow_employee`) | Funcionário alocado |
-| `salary_snapshot` | `NUMERIC(12,2)` | Salário do funcionário no momento da alocação |
-| `is_responsible` | `BOOLEAN` default false | Indica o responsável pela ordem |
+| `production_order_id` | FK `production_orders.id` CASCADE (`fk_popr_order`) | Ordem pai |
+| `position_id` | FK `job_positions.id` RESTRICT (`fk_popr_position`) | Cargo requerido |
+| `quantity` | `INTEGER` NOT NULL | Quantidade de pessoas do cargo (`ck_popr_quantity_positive`: `> 0`) |
+| `contract_type` | `contract_type` (enum) NOT NULL | Vínculo: `clt`/`pj`/`temporario` (reusa a enum da Folha) |
 
-Restrições: UNIQUE (`production_order_id`, `employee_id`) → `uq_pow_order_employee`. Índices: `idx_pow_production_order`, `idx_pow_employee`.
+Índices: `ix_production_order_position_requirements_production_order_id`, `ix_production_order_position_requirements_position_id`.
+
+#### `production_order_resources`
+**Recursos de estoque** alocados a uma OP, com papel de sistema (`system_role`):
+- `maquina`/`veiculo` → **reservados** enquanto a OP está ativa (não baixam estoque). Acumulam horas de uso em `accumulated_hours` de forma incremental; custo da OP = `Σ(accumulated_hours × stock_item.hourly_cost)`.
+- `embalagem` → **consumo**: baixa do estoque proporcional à colheita (como insumo).
+
+A reserva exclusiva ("item em OP ativa") é validada na **service** — não há constraint no banco; o índice em `stock_item_id` apenas acelera essa checagem. Append-only — sem soft delete.
+
+| Coluna | Tipo | Descrição |
+|--------|------|-----------|
+| `production_order_id` | FK `production_orders.id` CASCADE (`fk_por_order`) | Ordem pai |
+| `stock_item_id` | FK `stock_items.id` RESTRICT (`fk_por_stock_item`) | Item de estoque do recurso |
+| `resource_role` | `system_role` (enum) NOT NULL | Papel: `maquina`/`veiculo`/`embalagem` |
+| `quantity` | `NUMERIC(12,3)` NULL | Quantidade (usada para embalagem) |
+| `accumulated_hours` | `NUMERIC(10,2)` NOT NULL default 0 | Horas de uso acumuladas (máquina/veículo); somadas de forma incremental durante a produção |
+
+Índices: `ix_production_order_resources_production_order_id`, `ix_production_order_resources_stock_item_id`.
 
 #### `production_order_services`
 Serviços externos contratados para a ordem (equipes terceirizadas), com valor fixo e conta a pagar opcional. Append-only — sem soft delete.
@@ -781,8 +812,8 @@ ele recria tipo+coluna para o backfill e a 0016 os remove logo após.
 
 ### Aprovação da folha — solicitações + novo status (Demanda 4)
 
-A migration **`0017_payroll_approval`** (`down_revision` `0016_drop_stock_category`,
-**head atual**) introduz o fluxo de aprovação financeira da folha:
+A migration **`0017_payroll_approval`** (`down_revision` `0016_drop_stock_category`)
+introduz o fluxo de aprovação financeira da folha:
 
 1. Adiciona o valor `aguardando_aprovacao` ao enum `payroll_entry_status` via
    `ALTER TYPE … ADD VALUE IF NOT EXISTS`, dentro de um `autocommit_block`
@@ -799,6 +830,43 @@ então o `ADD VALUE IF NOT EXISTS` da 0017 é **no-op** — sem o `IF NOT EXISTS
 no enum**: o Postgres não remove valores de enum de forma simples/segura (mesma
 estratégia documentada na `0002`); é inócuo, pois nenhuma linha o referencia após
 o drop.
+
+### PCP refac — hectares, cargos, recursos, colheita por destino (Demanda 5)
+
+A migration **`0018_pcp_refac`** (`down_revision` `0017_payroll_approval`,
+**head atual**) é a maior mudança de schema do PCP. Numa única migration,
+coerente, idempotente e reversível:
+
+1. **`plots.total_hectares`** e **`production_orders.hectares_used` /
+   `early_closed_reason`** (colunas `NOT NULL DEFAULT 0` via o padrão
+   add-default-backfill-set-not-null; `early_closed_reason TEXT NULL`).
+2. **Qualidade → destino:** adiciona `industria/embalagem/descarte` em
+   `production_orders` e `sacks_industria/embalagem/descarte` (+ `hectares_harvested`)
+   em `production_harvests`, **copia os dados históricos best-effort**
+   (`especial→industria`, `superior→embalagem`, `tradicional→descarte`) e **remove**
+   as colunas antigas. A cópia roda dentro de um `DO`-block que só dispara se a
+   coluna legada ainda existe (`information_schema.columns`) — assim é no-op em
+   banco novo (`create_all`, que já nasce sem as colunas antigas).
+3. **Remove `production_order_workers`** (`DROP TABLE IF EXISTS`) e cria
+   **`production_order_position_requirements`** (requisitos por cargo, reusa a enum
+   `contract_type`) e **`production_order_resources`** (recursos de estoque, reusa a
+   enum `system_role`).
+
+**Idempotência × `create_all`:** o `model.py` do PCP já reflete o estado novo, então
+em banco novo o `0001` cria tudo no formato final. Constraints/índices das tabelas
+novas usam **os mesmos nomes que o `create_all` geraria** (FKs `fk_popr_*`/`fk_por_*`,
+PKs `*_pkey`, `ck_popr_quantity_positive`, índices `ix_*`), de modo que os
+`CREATE … IF NOT EXISTS` viram no-op e `alembic check` fecha limpo nos dois caminhos
+(upgrade sobre banco antigo **e** `reset_db` sobre banco novo).
+
+`0018.downgrade()` reverte integralmente: recria `production_order_workers`
+(com `uq_pow_order_employee` e índices `idx_pow_*`), restaura as colunas de qualidade
+legadas copiando de volta dos destinos, e remove as novas tabelas/colunas. Testado
+localmente: `upgrade head → downgrade -1 → upgrade head`, com os valores históricos
+preservados no ida-e-volta.
+
+> As enums `contract_type` e `system_role` **não** são criadas aqui — já existem
+> (Demandas 2 e 3); a migration apenas as referencia nas colunas novas.
 
 ---
 

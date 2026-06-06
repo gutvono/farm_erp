@@ -165,9 +165,9 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 7. PLOTS (2)
 -- -----------------------------------------------------------------------------
-INSERT INTO plots (id, name, location, variety, capacity_sacas, notes) VALUES
-('66666666-6666-6666-6666-666666666001', 'Talhão A - Bourbon Amarelo',  'Setor Norte, 12 ha', 'Arábica Bourbon Amarelo', 100.000, 'Maior altitude, café especial'),
-('66666666-6666-6666-6666-666666666002', 'Talhão B - Catuaí Vermelho',  'Setor Sul, 18 ha',   'Arábica Catuaí Vermelho', 150.000, 'Produção tradicional alta')
+INSERT INTO plots (id, name, location, variety, capacity_sacas, total_hectares, notes) VALUES
+('66666666-6666-6666-6666-666666666001', 'Talhão A - Bourbon Amarelo',  'Setor Norte, 12 ha', 'Arábica Bourbon Amarelo', 100.000, 12.00, 'Maior altitude, café especial'),
+('66666666-6666-6666-6666-666666666002', 'Talhão B - Catuaí Vermelho',  'Setor Sul, 18 ha',   'Arábica Catuaí Vermelho', 150.000, 18.00, 'Produção tradicional alta')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -185,10 +185,13 @@ ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- 9. PRODUCTION ORDER (1 concluída) - Talhão A, safra 2026/1
--- Total 100 sacas: 19 especial + 52 superior + 29 tradicional, custo R$ 8.500
+-- Usa 10 ha dos 12 ha do talhão A. Total 100 sacas por destino:
+--   19 indústria + 52 embalagem + 29 descarte, custo R$ 8.500
+-- (mapeamento herdado da qualidade antiga: especial→indústria, superior→embalagem,
+--  tradicional→descarte). Os itens-destino são definidos em app_settings (D1).
 -- -----------------------------------------------------------------------------
-INSERT INTO production_orders (id, plot_id, order_number, start_date, expected_end_date, executed_at, total_sacas, especial_sacas, superior_sacas, tradicional_sacas, total_cost, status, notes) VALUES
-('77777777-7777-7777-7777-777777777001', '66666666-6666-6666-6666-666666666001', 'OP-0001', '2025-11-01', '2026-01-20', '2026-01-15 08:00:00-03', 100.000, 19.000, 52.000, 29.000, 8500.00, 'concluida', 'Safra 2026/1 - talhão A')
+INSERT INTO production_orders (id, plot_id, order_number, start_date, expected_end_date, executed_at, hectares_used, total_sacas, industria_sacas, embalagem_sacas, descarte_sacas, total_cost, status, notes) VALUES
+('77777777-7777-7777-7777-777777777001', '66666666-6666-6666-6666-666666666001', 'OP-0001', '2025-11-01', '2026-01-20', '2026-01-15 08:00:00-03', 10.00, 100.000, 19.000, 52.000, 29.000, 8500.00, 'concluida', 'Safra 2026/1 - talhão A')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO production_inputs (id, production_order_id, stock_item_id, quantity, unit_cost, subtotal) VALUES
@@ -197,11 +200,18 @@ INSERT INTO production_inputs (id, production_order_id, stock_item_id, quantity,
 ('77777777-7777-7777-7777-777777777013', '77777777-7777-7777-7777-777777777001', '55555555-5555-5555-5555-555555555013', 100.000, 25.00, 2500.00)
 ON CONFLICT (id) DO NOTHING;
 
--- Trabalhadores alocados na ordem (Maria Santos responsável; Carlos Oliveira operador)
--- salary_snapshot = base_salary do funcionário no momento da alocação.
-INSERT INTO production_order_workers (id, production_order_id, employee_id, salary_snapshot, is_responsible) VALUES
-('77777777-7777-7777-7777-777777777021', '77777777-7777-7777-7777-777777777001', '44444444-4444-4444-4444-444444444002', 3500.00, TRUE),
-('77777777-7777-7777-7777-777777777022', '77777777-7777-7777-7777-777777777001', '44444444-4444-4444-4444-444444444003', 2200.00, FALSE)
+-- Requisitos de mão de obra por CARGO (substitui a alocação nominal de funcionários):
+-- 1 Supervisora de Produção (CLT) + 2 Operadores de Máquinas (CLT) + 5 Colhedores (temporário).
+INSERT INTO production_order_position_requirements (id, production_order_id, position_id, quantity, contract_type) VALUES
+('77777777-7777-7777-7777-777777777021', '77777777-7777-7777-7777-777777777001', '99999999-9999-9999-9999-999999990002', 1, 'clt'),
+('77777777-7777-7777-7777-777777777022', '77777777-7777-7777-7777-777777777001', '99999999-9999-9999-9999-999999990003', 2, 'clt'),
+('77777777-7777-7777-7777-777777777023', '77777777-7777-7777-7777-777777777001', '99999999-9999-9999-9999-999999990007', 5, 'temporario')
+ON CONFLICT (id) DO NOTHING;
+
+-- Recursos de estoque da OP: 1 colheitadeira (papel `maquina`, reservada) com 8h
+-- de uso acumuladas → custo = horas × stock_item.hourly_cost (regra no Backend).
+INSERT INTO production_order_resources (id, production_order_id, stock_item_id, resource_role, quantity, accumulated_hours) VALUES
+('77777777-7777-7777-7777-777777777041', '77777777-7777-7777-7777-777777777001', '55555555-5555-5555-5555-555555555022', 'maquina', NULL, 8.00)
 ON CONFLICT (id) DO NOTHING;
 
 -- Serviço externo contratado (colheita mecanizada terceirizada).

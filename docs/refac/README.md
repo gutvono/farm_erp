@@ -189,6 +189,10 @@ nasça em tabela paginada e o front-geral (7) só precise *retrofitar* o legado.
 - Busca textual: `fetchPaginated` já aceita `search`; o input (com debounce) é por página quando o módulo precisar.
 - Doc de referência: `docs/backend/_shared-paginacao.md` e `docs/frontend/_shared-datatable.md`.
 
+## Infra E2E (montada no início da Demanda 5)
+
+Harness **Playwright** calibrado e determinístico montado no começo da D5 (antes de reescrever o PCP): login único via `storageState`, seed determinístico via `make reset-db`, web-first, sem prints; smoke-base read-only contra Financeiro/Folha. Rodar com `make e2e`. Specs de PCP/feature entram por camada conforme a D5 avança. Doc: `docs/frontend/_e2e-playwright.md`.
+
 ## Estado de execução (atualizar conforme avança)
 
 | Demanda | DBA | BACKEND | FRONTEND | PR | Prod |

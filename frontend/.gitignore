@@ -34,3 +34,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# e2e (Playwright) — artefatos efêmeros (NÃO commitar; cookie de sessão)
+/e2e/.auth/
+/test-results/
+/playwright-report/
+/playwright/.cache/
