@@ -2,7 +2,27 @@
 
 ## Overview
 
-Módulo responsável pela gestão de talhões, atividades de campo e ordens de produção de safra. Toda safra consome insumos do Estoque, produz café (distribuído entre três qualidades) e registra movimentações no Financeiro, garantindo rastreabilidade completa do ciclo produtivo.
+Módulo responsável pela gestão de **talhões** (em hectares), atividades de campo e
+**ordens de produção (OP)** de safra. A partir da Demanda 5 o modelo é realista:
+
+- O talhão tem uma **área total em hectares**; cada OP aloca uma **fração de hectares**
+  e a soma das OPs ativas não pode exceder a área do talhão.
+- A mão de obra é declarada por **requisitos de cargo** (`cargo × quantidade × vínculo`),
+  não por funcionários nominais.
+- A OP usa **recursos de estoque** por papel de sistema: **máquinas/veículos** (recurso
+  **reutilizável**, custo por hora) e **embalagens** (consumo proporcional à colheita).
+- **Planejar é livre; a capacidade é checada no INICIAR** (Demanda 5.1): criar/editar uma OP
+  não tem teto — só valida existência/papel/quantidade. O bloqueio por capacidade real
+  (recursos reutilizáveis e pessoas por cargo) acontece ao **iniciar** a produção. A ocupação é
+  **derivada** do somatório das OPs já iniciadas (sem boolean de "ocupado", sem migration).
+- Os **insumos** da OP ficam restritos a itens com o papel `insumo`.
+- A colheita é **determinística por destino** — o usuário informa **sacas por destino**
+  (Indústria/Embalagem/Descarte), que entram em 3 itens-destino configuráveis. Não há mais
+  aleatoriedade nem distribuição por qualidade (Especial/Superior/Tradicional).
+- **Pragas:** é possível **encerrar a OP antes de 100%** com motivo; a área restante volta a
+  ficar livre para uma nova OP.
+- Os **custos** são **discriminados por tipo**: insumos / pessoal / máquinas-veículos /
+  embalagens / serviços.
 
 ## Arquitetura
 
@@ -10,16 +30,21 @@ Módulo responsável pela gestão de talhões, atividades de campo e ordens de p
 router.py → service.py → repository.py → PostgreSQL
 ```
 
+Integra com: **Estoque** (baixa de insumos/embalagens, entrada do café por destino),
+**Financeiro** (movimentos de produção e contas a pagar de serviços externos),
+**Folha** (`job_positions.base_salary` para o custo de pessoal) e **Configurações**
+(papéis `insumo`/`maquina`/`veiculo`/`embalagem` e os 3 itens-destino da colheita).
+
 ## Endpoints
 
-Todos os endpoints exigem autenticação via cookie `session_token` (dependency `get_current_user`).
+Todos exigem autenticação via cookie `session_token` (dependency `get_current_user`).
 
 ### Talhões
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/pcp/talhoes` | Lista talhões (paginação) |
-| `POST` | `/api/pcp/talhoes` | Cria talhão |
+| `GET` | `/api/pcp/talhoes` | Lista talhões |
+| `POST` | `/api/pcp/talhoes` | Cria talhão (**`total_hectares` obrigatório, > 0**) |
 | `GET` | `/api/pcp/talhoes/{id}` | Detalhe do talhão |
 | `PUT` | `/api/pcp/talhoes/{id}` | Atualiza talhão |
 | `DELETE` | `/api/pcp/talhoes/{id}` | Soft delete |
@@ -31,428 +56,225 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `GET` | `/api/pcp/atividades` | Lista atividades (filtro: `plot_id`) |
 | `POST` | `/api/pcp/atividades` | Registra atividade |
 
+### Recursos e insumos disponíveis (selects do front)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/pcp/insumos-disponiveis` | Itens com papel `insumo` (elegíveis como insumo da OP) |
+| `GET` | `/api/pcp/recursos-disponiveis?role=maquina\|veiculo\|embalagem` | Itens do papel, **cada um com `available_quantity`** (= saldo − Σ em OPs iniciadas, p/ reutilizáveis; saldo em estoque p/ embalagem). Nada é ocultado |
+| `GET` | `/api/pcp/cargos-disponiveis` | Cargos com `total_headcount`, `used` e `available_quantity` (headcount ativo − Σ em OPs iniciadas) |
+
+> O front também pode reusar `GET /api/estoque/itens?role=insumo`. A escolha do PCP foi
+> expor endpoints dedicados (`/insumos-disponiveis`, `/recursos-disponiveis`,
+> `/cargos-disponiveis`) para já entregar a **disponibilidade derivada** (`available_quantity`)
+> que o front mostra ao planejar/iniciar. Itens/cargos **lotados aparecem com disponível 0** (não
+> são ocultados) — planejar é livre; o bloqueio é no iniciar.
+
 ### Ordens de Produção
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/api/pcp/ordens` | Lista ordens (filtro: `status`) |
-| `POST` | `/api/pcp/ordens` | Cria ordem planejada com insumos, funcionários e serviços externos; gera `order_number` e calcula `estimated_cost` |
-| `GET` | `/api/pcp/ordens/funcionarios-em-producao` | Lista UUIDs de funcionários vinculados a ordens ativas (para bloqueio no frontend). **Deve preceder `/ordens/{id}` no router** |
-| `GET` | `/api/pcp/ordens/{id}` | Detalhe com inputs, colheitas, funcionários e serviços |
+| `POST` | `/api/pcp/ordens` | Cria OP planejada com hectares, insumos, requisitos de cargo, recursos e serviços; gera `order_number` e calcula `estimated_cost` |
+| `GET` | `/api/pcp/ordens/{id}` | Detalhe (inputs, harvests, requisitos, recursos, serviços) — itens com **SKU** |
+| `PUT` | `/api/pcp/ordens/{id}` | Atualiza campos editáveis e **soma horas** aos recursos (incremental, null-safe); recalcula custos |
 | `POST` | `/api/pcp/ordens/{id}/iniciar` | Inicia a produção (`planejada → em_execucao`); cria `accounts_payable` para cada serviço externo |
-| `POST` | `/api/pcp/ordens/{id}/colher` | Registra colheita parcial (`percentage_harvested` no body) |
-| `POST` | `/api/pcp/ordens/{id}/produzir` | Alias: colhe o percentual restante (mantido para compatibilidade) |
+| `POST` | `/api/pcp/ordens/{id}/colher` | Registra colheita por destino (ver schema) |
+| `POST` | `/api/pcp/ordens/{id}/encerrar` | **Encerra por praga** antes de 100% (body `{ reason }`) |
 | `DELETE` | `/api/pcp/ordens/{id}` | Soft delete (apenas `planejada`) |
 
 ### Relatórios
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/pcp/relatorios` | Relatório consolidado (produção por talhão, consumo de insumos, resumo de status, custo previsto vs realizado) |
+| `GET` | `/api/pcp/relatorios` | Consolidado: produção por talhão (por destino), consumo de insumos, resumo de status, custo previsto vs realizado (**com custo realizado discriminado**) e **custo da safra discriminado** |
+
+> **Removidos na Demanda 5:** `GET /api/pcp/ordens/funcionarios-em-producao` e
+> `POST /api/pcp/ordens/{id}/produzir` (dependia da colheita aleatória).
 
 ## Schemas
 
-### PlotCreate
-```json
-{
-  "name": "Talhão C - Catuaí Amarelo",
-  "location": "Setor Leste, 8 ha",
-  "variety": "Arábica Catuaí Amarelo",
-  "capacity_sacas": 80.000,
-  "notes": "opcional"
-}
-```
+### PlotCreate / PlotUpdate / PlotOut
+`total_hectares` é obrigatório (> 0) no create; opcional (> 0) no update; sempre presente no out.
 
-### PlotActivityCreate
 ```json
-{
-  "plot_id": "uuid",
-  "activity_type": "plantio | adubacao | poda | colheita | irrigacao | outra",
-  "activity_date": "2026-04-15",
-  "labor_type": "interna | externa",
-  "cost": 0.00,
-  "details": "opcional",
-  "hours_spent": 4.5,
-  "employee_id": "uuid (opcional)",
-  "quantity_applied": 25.5,
-  "quantity_unit": "kg",
-  "result": "concluida | parcial | reagendada"
-}
+{ "name": "Talhão C", "variety": "Catuaí", "capacity_sacas": "100", "total_hectares": "20" }
 ```
 
 ### ProductionOrderCreate
 ```json
 {
   "plot_id": "uuid",
-  "planned_date": "2026-05-20",
-  "start_date": "2026-05-12",
-  "expected_end_date": "2026-05-25",
-  "notes": "opcional",
-  "inputs": [
-    { "stock_item_id": "uuid", "quantity": 300.000 },
-    { "stock_item_id": "uuid", "quantity": 100.000 }
+  "hectares_used": "120",
+  "start_date": "2026-06-01",
+  "expected_end_date": "2026-06-23",
+  "inputs": [{ "stock_item_id": "uuid-insumo", "quantity": "100" }],
+  "position_requirements": [
+    { "position_id": "uuid-cargo", "quantity": 2, "contract_type": "clt" }
   ],
-  "workers": [
-    { "employee_id": "uuid", "is_responsible": true },
-    { "employee_id": "uuid", "is_responsible": false }
+  "resources": [
+    { "stock_item_id": "uuid-maquina", "resource_role": "maquina", "hours": "4" },
+    { "stock_item_id": "uuid-embalagem", "resource_role": "embalagem", "quantity": "40" }
   ],
   "services": [
-    { "supplier_id": "uuid", "description": "Colheita manual", "amount": 3500.00, "due_date": "2026-06-25" }
+    { "supplier_id": "uuid", "description": "Colheita terceirizada", "amount": "3500", "due_date": "2026-06-20" }
   ]
 }
 ```
 
-- Status inicial: `planejada`
-- `order_number` gerado automaticamente no padrão `OP-{ANO}-{SEQ:03d}` (ex: `OP-2026-001`)
-- `unit_cost` e `subtotal` dos inputs são resolvidos a partir do `StockItem.unit_cost` no momento da criação
-- `total_cost` = soma dos subtotais dos inputs
+- `hectares_used` > 0; `contract_type` ∈ `clt|pj|temporario`; `resource_role` ∈ `maquina|veiculo|embalagem`.
+- Para **máquina/veículo** use `hours` (horas iniciais, incremental); `quantity` é ignorada.
+- Para **embalagem** use `quantity` (> 0, obrigatória); `hours` é ignorada.
 
-**Funcionários internos (`workers`)** — opcional:
-- Cada worker referencia um `employee_id` da Folha; `salary_snapshot` é capturado a
-  partir de `employee.base_salary` no momento da criação (imutável depois)
-- No máximo **um** worker pode ter `is_responsible=true` (HTTP 400 se mais de um)
-- Cada `employee_id` deve existir (HTTP 404 caso contrário)
-- Um funcionário já vinculado a uma ordem **ativa** (status `planejada`,
-  `em_producao`, `em_execucao` ou `pausada`) não pode ser adicionado a outra
-  ordem ativa (HTTP 409 com o nome do funcionário)
-
-**Serviços externos (`services`)** — opcional:
-- Contratação de equipes/serviços terceirizados; cada serviço tem `supplier_id`,
-  `description`, `amount` (`> 0`) e `due_date`
-- O `supplier_id` deve existir e não estar deletado (HTTP 404 caso contrário)
-- A `accounts_payable` **não** é criada na criação da ordem — apenas quando a
-  produção é iniciada (`POST /ordens/{id}/iniciar`). Enquanto `planejada`, o
-  serviço existe só no PCP, sem reflexo financeiro
-
-**`estimated_cost`** = insumos + funcionários + serviços:
-- insumos = soma dos subtotais dos inputs
-- funcionários = `SUM(salary_snapshot / 22 × max(1, dias))` para todos os workers,
-  onde `dias = (expected_end_date - start_date)` (0 se faltar alguma data ou se negativo)
-- serviços = soma dos `amount` dos serviços externos
-
-### HarvestCreate
+### ProductionOrderUpdate (`PUT /ordens/{id}`)
 ```json
 {
-  "percentage_harvested": 50.0
+  "notes": "obs",
+  "resource_hours": [{ "resource_id": "uuid-recurso", "hours": "3" }]
 }
 ```
-- `0 < percentage_harvested <= (100 - harvest_progress atual)`
+`hours` informado é **somado** ao `accumulated_hours` do recurso; `hours` nulo/omisso **não altera**.
 
-### HarvestOut
+### HarvestCreate (`POST /ordens/{id}/colher`)
 ```json
 {
-  "id": "uuid",
-  "production_order_id": "uuid",
-  "harvest_number": 1,
-  "percentage_harvested": 50.00,
-  "sacks_total": 49.37,
-  "sacks_especial": 9.42,
-  "sacks_superior": 27.05,
-  "sacks_tradicional": 12.90,
-  "inputs_consumed": [
-    { "stock_item_id": "uuid", "name": "Adubo Orgânico", "quantity": 5.0, "unit": "kg" }
-  ],
-  "is_final": false,
-  "harvested_at": "2026-05-13T02:46:41Z"
+  "percentage_harvested": "50",
+  "sacks_industria": "60",
+  "sacks_embalagem": "30",
+  "sacks_descarte": "10",
+  "resource_hours": [{ "resource_id": "uuid", "hours": "2" }]
 }
 ```
+- `percentage_harvested` ∈ (0, 100]; a soma das sacas dos 3 destinos deve ser **> 0**.
+- `resource_hours` (opcional) soma horas às máquinas/veículos nesta colheita (mesma regra null-safe).
 
-### ProductionOrderOut
-```json
-{
-  "id": "uuid",
-  "plot_id": "uuid",
-  "plot_name": "Talhão A - Bourbon Amarelo",
-  "order_number": "OP-2026-001",
-  "planned_date": "2026-05-20",
-  "start_date": "2026-05-12",
-  "expected_end_date": "2026-05-25",
-  "executed_at": null,
-  "total_sacas": 0.000,
-  "especial_sacas": 0.000,
-  "superior_sacas": 0.000,
-  "tradicional_sacas": 0.000,
-  "total_cost": 8500.00,
-  "estimated_cost": 9500.00,
-  "realized_cost": 0.00,
-  "harvest_progress": 0.00,
-  "status": "planejada",
-  "is_overdue": false,
-  "notes": null,
-  "inputs": [ ... ],
-  "harvests": [ ... ],
-  "workers": [
-    {
-      "id": "uuid",
-      "employee_id": "uuid",
-      "employee_name": "João Silva",
-      "salary_snapshot": 6000.00,
-      "is_responsible": true
-    }
-  ],
-  "services": [
-    {
-      "id": "uuid",
-      "supplier_id": "uuid",
-      "supplier_name": "AgroInsumos do Brasil S.A.",
-      "description": "Colheita manual",
-      "amount": 3500.00,
-      "due_date": "2026-06-25",
-      "accounts_payable_id": null
-    }
-  ],
-  "created_at": "...",
-  "updated_at": "..."
-}
-```
+### ProductionOrderOut (campos relevantes)
+`hectares_used`, `industria_sacas`/`embalagem_sacas`/`descarte_sacas`, `harvest_progress`,
+`estimated_cost`, `realized_cost`, `early_closed_reason`, e as listas `inputs` (com `sku`),
+`position_requirements` (com `position_name`/`base_salary`), `resources`
+(com `sku`, `accumulated_hours`, `hourly_cost`, `cost`), `harvests` (com `hectares_harvested`),
+`services`.
 
-- `is_overdue` = `expected_end_date < hoje` e status não em `concluida | cancelada`
-- `workers` / `services`: listas dos funcionários internos e serviços externos da ordem
-- `services[].accounts_payable_id`: `null` enquanto `planejada`; preenchido após `/iniciar`
+## Fluxos de negócio (passo a passo)
 
-### ProductionResult
-Retorno do endpoint `/colher` (e `/produzir`):
-```json
-{
-  "order_id": "uuid",
-  "harvest": { ...HarvestOut },
-  "order": { ...ProductionOrderOut atualizada },
-  "items_below_minimum": ["Fungicida de contato"]
-}
-```
+### Criar OP (`POST /ordens`)
+1. Valida o talhão (404 se inexistente).
+2. **Hectares (P2):** `Σ(hectares_used das OPs ativas do talhão) + novo ≤ plot.total_hectares`,
+   senão **400** informando o disponível.
+3. **Insumos:** cada `stock_item_id` deve existir e pertencer ao papel `insumo` (senão **400**).
+4. **Requisitos de cargo (P3):** valida cada `position_id` (404).
+5. **Recursos (P4):** cada item deve pertencer à categoria do papel informado (senão **400**);
+   `quantity > 0` (máquina/veículo default 1; embalagem obrigatória). **Planejar é livre — sem
+   reserva exclusiva e sem teto de capacidade aqui** (Demanda 5.1).
+6. **Serviços:** valida cada `supplier_id` (404).
+7. Persiste a OP em `planejada`, gera `order_number` e calcula `estimated_cost` (ver custos).
 
-## Colheitas Parciais (`registrar_colheita`)
+### Iniciar (`POST /ordens/{id}/iniciar`) — bloqueio por capacidade (Demanda 5.1)
+1. Exige status `planejada` (400 caso contrário). **Não há trava de "uma produção por talhão"**:
+   o mesmo talhão pode ter várias OPs em andamento dentro do limite de hectares (validado no criar).
+2. **Capacidade real (409):** para cada **recurso reutilizável** (máquina/veículo) e cada
+   **cargo** requisitado, valida `requerido ≤ disponível`, onde
+   `disponível = TOTAL − Σ(quantity do mesmo item/cargo em OPs JÁ INICIADAS)`. `TOTAL`: item =
+   `quantity_on_hand`; cargo = nº de funcionários ativos com aquele `position_id`. A própria OP
+   está planejada, então **não conta contra si mesma**. Se faltar capacidade, retorna **409**
+   listando cada item/cargo com o requerido e o disponível.
+3. `planejada → em_execucao`; define `start_date` se vazio; cria **conta a pagar** para cada
+   serviço externo (grava `accounts_payable_id`).
 
-O método central do módulo. Cada chamada registra uma colheita parcial; a ordem
-é fechada automaticamente quando o `harvest_progress` acumulado atinge 100%.
+> **Consumíveis (insumo/embalagem) NÃO bloqueiam no iniciar** — planejar e iniciar são livres
+> para eles; o controle é a baixa de estoque no `/colher` (passo abaixo). A liberação de recursos/
+> pessoas é automática: ao concluir/encerrar, a OP sai do conjunto "iniciada" e some do somatório.
 
-### 1. Validações
-- Ordem existe e não está em `concluida`/`cancelada` (HTTP 400 se estiver).
-- `percentage_harvested > 0` (HTTP 400).
-- `harvest_progress + percentage_harvested <= 100` (HTTP 400 com o restante disponível).
+### Colher (`POST /ordens/{id}/colher`)
+1. Bloqueia OP `concluida`/`cancelada` (400) e valida `harvest_progress + pct ≤ 100`.
+2. Calcula consumo proporcional (`× pct/100`) de **insumos** e **embalagens** e **valida saldo —
+   barra com 400 se o estoque atual não cobrir a quantidade a consumir** (nunca deixa estoque
+   negativo).
+3. Valida que há item-destino configurado para cada destino com sacas > 0 (senão **400**).
+4. **Baixa** insumos e embalagens do Estoque; registra **entrada** das sacas nos 3 itens-destino.
+5. Aplica `resource_hours` (incremental, null-safe).
+6. Cria `ProductionHarvest` com `hectares_harvested = hectares_used × pct/100`; acumula sacas e
+   progresso na OP.
+7. Ao atingir **100%**: OP → `concluida`, `executed_at` preenchido, calcula `realized_cost` e
+   registra o movimento financeiro do custo realizado.
 
-### 2. Consumo proporcional dos insumos
-Para cada `ProductionInput`, calcula `qty_proporcional = input.quantity × (percentage / 100)`
-(3 casas decimais) e verifica disponibilidade. Se algum insumo falhar:
-`HTTPException 400 "Estoque insuficiente para: {name}. Disponível: ..."`.
+### Encerrar por praga (`POST /ordens/{id}/encerrar`)
+Marca a OP `concluida` mesmo com `harvest_progress < 100`, grava `early_closed_reason`,
+preenche `executed_at` e calcula `realized_cost` (proporcional ao colhido + custos fixos).
+A OP deixa de ser "iniciada", **liberando** os recursos reutilizáveis e as pessoas (somem do
+somatório de ocupação) e a **área restante** para uma nova OP no mesmo talhão (validada pela regra
+de hectares). Não consome o restante dos insumos.
 
-Em seguida, registra a saída via `estoque_service.registrar_saida` com
-`source_module="pcp"`, gerando movimento agregado de consumo no Financeiro
-(`amount=0`).
+## Máquina de estados / status (`production_order_status`)
 
-### 3. Simulação parcial
-- `base = plot.capacity_sacas × (percentage_harvested / 100)`
-- `total = base × random.uniform(0.90, 1.10)` (±10%)
-- Distribuição entre qualidades: especial 15–25%, superior 45–55%, tradicional restante.
+| Status | Significado | Transições |
+|--------|-------------|------------|
+| `planejada` | Criada, ainda não iniciada | → `em_execucao` (iniciar) ; pode ser excluída (soft delete) ; → `concluida` (encerrar) |
+| `em_execucao` | Em produção | → `concluida` (colheita atinge 100% ou encerrar) |
+| `em_producao` / `pausada` | Estados intermediários legados (contam como **ativos**) | → `concluida` |
+| `concluida` | **Final/irreversível** — safra colhida ou encerrada por praga | — |
+| `cancelada` | **Final/irreversível** | — |
 
-### 4. Entrada no estoque (por qualidade)
-Identifica os itens de café cujo nome contenha a palavra-chave (`especial`,
-`superior`, `tradicional`) e registra entrada com `unit_cost=0`. Em seguida,
-registra movimento agregado de entrada no Financeiro.
+> **Ativos** (contam para o controle de hectares do talhão): `planejada`, `em_producao`,
+> `em_execucao`, `pausada`.
+>
+> **Iniciados** (ocupam capacidade de recursos reutilizáveis e pessoas — Demanda 5.1):
+> `em_producao`, `em_execucao`, `pausada`. **`planejada` NÃO ocupa** (planejar é livre);
+> `concluida`/`cancelada` liberam.
 
-> **Demanda 3 — categoria por papel:** a categoria deixou de ser enum fixo
-> (`StockItem.category == StockCategory.CAFE`). Os "itens de café" passam a ser
-> resolvidos pelo **papel `produto_final`** da categoria, via
-> `configuracoes.service.get_item_ids_by_role(db, SystemRole.PRODUTO_FINAL)`
-> (`_find_quality_item`). Adotou-se `produto_final` porque o café é o **produto
-> final** da produção de safra — preserva exatamente a semântica anterior (a
-> categoria "Café" recebe os papéis `produto_final` + `produto_vendavel` no
-> seed/migration). Para o PCP enxergar a produção, a categoria dos itens de café
-> precisa ter o papel `produto_final` atribuído em Configurações. A refatoração
-> profunda do PCP é a Demanda 5; aqui o objetivo foi apenas não quebrar.
+## Custos (discriminados por tipo)
 
-### 5. Snapshot e persistência
-Persiste um `ProductionHarvest` com:
-- `harvest_number` sequencial (contador atual + 1).
-- `inputs_consumed` (snapshot serializado: stock_item_id, name, quantity, unit).
-- `is_final = True` se a colheita atual fecha 100%.
+| Tipo | Fórmula |
+|------|---------|
+| **Insumos** | `Σ(input.subtotal)` (realizado: `× progresso/100`) |
+| **Pessoal** | `Σ(quantity × job_position.base_salary / 22 × max(1, dias))`, `dias = fim − início` |
+| **Máquinas/Veículos** | `Σ(accumulated_hours × stock_item.hourly_cost)` (`hourly_cost` nulo = 0) |
+| **Embalagens** | `Σ(quantity × unit_cost)` (realizado: `× progresso/100`) |
+| **Serviços** | `Σ(service.amount)` |
 
-### 6. Atualiza ordem
-- `harvest_progress += percentage_harvested`.
-- `total_sacas`, `especial_sacas`, `superior_sacas`, `tradicional_sacas` acumulam
-  os totais desta colheita.
-- Transição automática de status:
-  - `planejada → em_execucao` na primeira colheita parcial.
-  - `→ concluida` quando `harvest_progress >= 100`.
-- `executed_at` é preenchido no fechamento.
+- **`estimated_cost`** (na criação/atualização): usa fração 100%, datas `start_date → expected_end_date`.
+- **`realized_cost`** (no fechamento/encerramento): usa `progresso/100` para insumos/embalagens,
+  `start_date → executed_at` para pessoal, e as horas acumuladas reais para máquinas.
+- O relatório expõe `custo_realizado_discriminado` por OP e `custo_safra_discriminado` agregado.
 
-### 7. Cálculo de `realized_cost` (apenas no fechamento)
-Quando `is_final=True`:
-- Custo de insumos: `SUM(input.quantity × stock_item.unit_cost)` — usa o `unit_cost`
-  corrente, que pode ter sido recalculado por média ponderada após compras intermediárias.
-- Custo de funcionários: `SUM(salary_snapshot / 22 × max(1, dias))` sobre os `workers`
-  da ordem, onde `dias = (executed_at.date() - start_date)` (0 se negativo ou sem datas).
-- Custo de serviços: soma dos `amount` dos serviços externos da ordem.
-- `realized_cost = insumos + funcionários + serviços` (R$ 0,01 de precisão).
-- Lança movimento financeiro `SAIDA / PRODUCAO` com `amount=realized_cost`.
+## Integrações entre módulos
 
-### 8. Notificação de estoque baixo
-Após o consumo, percorre os insumos da ordem e devolve em `items_below_minimum`
-os nomes daqueles que ficaram abaixo de `minimum_stock`.
+- **Estoque:** `registrar_saida` (insumos/embalagens) e `registrar_entrada` (sacas por destino);
+  `verificar_disponibilidade` antes de baixar.
+- **Financeiro:** `registrar_movimento` (consumo, café produzido e custo realizado — inclusive R$ 0,00)
+  e `criar_conta_pagar` (serviços externos, no iniciar).
+- **Folha:** `job_positions.base_salary` (via `folha_repo.get_position`) para o custo de pessoal.
+- **Configurações:** `get_item_ids_by_role` (insumo/maquina/veiculo/embalagem) e
+  `get_harvest_destination_item_ids` (Indústria/Embalagem/Descarte).
 
-### 9. Retorno
-`ProductionResult` contendo:
-- `order_id`
-- `harvest`: registro recém-criado
-- `order`: ordem atualizada
-- `items_below_minimum`
+## Regras de negócio (travadas)
 
-## Alias `produzir_safra`
+- **Hectares (único constraint de terra):** soma das OPs ativas ≤ `total_hectares` do talhão
+  (validado no criar). **Várias OPs por talhão são válidas** dentro desse limite — inclusive
+  várias em andamento ao mesmo tempo (não há trava de "uma produção por talhão").
+- **Planejar livre × bloquear no iniciar (5.1):** criar/editar não tem teto de capacidade nem
+  reserva; o **iniciar** bloqueia (409) por **capacidade derivada** dos recursos **reutilizáveis**
+  (máquina/veículo — `disponível = on_hand − Σ em OPs iniciadas`, não baixam estoque) e das
+  **pessoas por cargo** (`disponível = headcount ativo − Σ em OPs iniciadas`). Ocupação derivada,
+  sem boolean, sem migration; pessoas seguem **anônimas por cargo**.
+- **Reutilizável × consumível:** máquina/veículo **ocupam** capacidade enquanto a OP está iniciada
+  (e liberam ao concluir/encerrar); insumo/embalagem são **consumidos** — não bloqueiam no iniciar,
+  mas a baixa no `/colher` **barra (400)** se o estoque atual não cobrir o consumo (nunca negativo).
+- **Embalagem = consumo:** baixa do estoque proporcional à colheita.
+- **Insumos restritos ao papel `insumo`.**
+- **Horas incrementais (null-safe):** todo dado "alimentado durante a produção" (horas) é somado;
+  campo nulo no update **preserva** o acumulado (espelha o `percentage_harvested`, que acumula).
+- **Colheita determinística por destino** (sem aleatoriedade): as sacas informadas entram nos 3
+  itens-destino configurados.
+- **Status finais** `concluida`/`cancelada` são irreversíveis.
 
-Mantido para compatibilidade com clientes existentes. Equivale a
-`registrar_colheita(db, order_id, 100 - harvest_progress)` — colhe todo o
-percentual restante numa única chamada. Retorna o mesmo `ProductionResult`.
+## Limitações conhecidas / Débito técnico
 
-## Registro de Atividades (`add_activity`)
-
-1. Valida que o talhão existe
-2. Valida `employee_id` (se informado, deve existir)
-3. Cria registro em `plot_activities` com todos os novos campos:
-   `hours_spent`, `employee_id`, `quantity_applied`, `quantity_unit`, `result`
-4. Registra movimentação financeira:
-   - `movement_type=SAIDA`
-   - `category=PRODUCAO`
-   - `amount=activity.cost` (R$0,00 se mão de obra interna)
-   - `description=f"Atividade no talhão {plot.name}: {activity_type}"`
-   - `source_module="pcp"`, `reference_id=plot.id`
-
-## Relatórios (`gerar_relatorios`)
-
-Endpoint `GET /api/pcp/relatorios` consolida quatro visões a partir das ordens
-não-deletadas:
-
-### `producao_por_talhao`
-Agrupa ordens com status `concluida` por talhão, somando sacas por qualidade e
-contando ordens.
-
-### `consumo_insumos`
-Agrupa `production_inputs` de todas as ordens não-canceladas por `stock_item_id`,
-somando `quantity` e `subtotal`.
-
-### `ordens_resumo`
-Contagem por status (`planejada`, `em_producao`, `em_execucao`, `pausada`,
-`concluida`, `cancelada`) + `atrasadas` (ordens com `expected_end_date < hoje` e
-status não-final).
-
-### `custo_previsto_vs_realizado`
-Para cada ordem: `order_id`, `order_number`, `plot_name`, `status`,
-`estimated_cost`, `realized_cost`, `diferenca = realized - estimated`.
-
-## Regras de Negócio
-
-### Ordens de Produção
-- Status finais: `concluida` e `cancelada` — tentativas de nova execução/alteração retornam 400
-- Soft delete apenas em ordens `planejada`
-- Inputs imutáveis após criação (não há endpoint de update de inputs)
-- `unit_cost` de cada input é resolvido no momento da criação a partir do `StockItem.unit_cost` corrente
-- `total_cost` da ordem = soma dos subtotais dos inputs planejados
-
-### Talhões
-- `capacity_sacas` ≥ 0 (obrigatório)
-- Soft delete disponível via `DELETE /talhoes/{id}`
-
-### Atividades
-- Sempre geram movimento financeiro (mesmo que R$0,00)
-- Soft delete disponível (via coluna `deleted_at`); não há workflow de status
-
-## Integrações
-
-| Destino | Chamada | Efeito |
-|---------|---------|--------|
-| Estoque | `verificar_disponibilidade` | Validação pré-produção |
-| Estoque | `registrar_saida` | Consumo de insumos |
-| Estoque | `registrar_entrada` | Entrada de café produzido |
-| Financeiro | `registrar_movimento` | Rastreabilidade: atividade, consumo agregado, produção agregada |
-| Financeiro | `criar_conta_pagar` | Ao **iniciar** a produção (`/iniciar`), cria uma `accounts_payable` por serviço externo (`supplier_id`, `amount`, `due_date`), com `source_module="pcp"` e `reference_id` = id da ordem; o `accounts_payable_id` gerado é gravado de volta no serviço (guard contra duplicidade) |
-| Folha | `get_employee` | Validação de funcionários e captura de `salary_snapshot` na criação da ordem |
-| Compras | `Supplier` (query direta) | Validação de fornecedor dos serviços externos e resolução de `supplier_name` |
-
-## Database Schema
-
-### `plots`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `name` | VARCHAR(255) |
-| `location` | VARCHAR(255) nullable |
-| `variety` | VARCHAR(100) |
-| `capacity_sacas` | NUMERIC(12,3) |
-| `notes` | TEXT nullable |
-| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
-
-### `production_orders`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `plot_id` | UUID FK → plots |
-| `planned_date` | DATE nullable |
-| `executed_at` | TIMESTAMPTZ nullable |
-| `total_sacas`, `especial_sacas`, `superior_sacas`, `tradicional_sacas` | NUMERIC(12,3) |
-| `total_cost` | NUMERIC(12,2) |
-| `status` | enum (`planejada` / `em_producao` / `concluida` / `cancelada`) |
-| `notes` | TEXT nullable |
-| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
-
-### `production_inputs`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `production_order_id` | UUID FK → production_orders (cascade delete) |
-| `stock_item_id` | UUID FK → stock_items |
-| `quantity` | NUMERIC(12,3) |
-| `unit_cost` | NUMERIC(12,2) |
-| `subtotal` | NUMERIC(12,2) |
-| `created_at`, `updated_at` | TIMESTAMPTZ |
-
-### `production_order_workers`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `production_order_id` | UUID FK → production_orders (cascade delete) |
-| `employee_id` | UUID FK → employees (RESTRICT) |
-| `salary_snapshot` | NUMERIC(12,2) — `base_salary` capturado na criação |
-| `is_responsible` | BOOLEAN default false |
-| `created_at`, `updated_at` | TIMESTAMPTZ |
-
-Constraint `uq_pow_order_employee` (`production_order_id`, `employee_id`) — um
-funcionário não se repete na mesma ordem.
-
-### `production_order_services`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `production_order_id` | UUID FK → production_orders (cascade delete) |
-| `supplier_id` | UUID FK → suppliers (RESTRICT) |
-| `description` | VARCHAR(500) |
-| `amount` | NUMERIC(12,2) |
-| `due_date` | DATE |
-| `accounts_payable_id` | UUID FK → accounts_payable (SET NULL) nullable — preenchido ao iniciar |
-| `created_at`, `updated_at` | TIMESTAMPTZ |
-
-### `plot_activities`
-| Coluna | Tipo |
-|--------|------|
-| `id` | UUID PK |
-| `plot_id` | UUID FK → plots |
-| `activity_type` | enum (`plantio` / `adubacao` / `poda` / `colheita` / `irrigacao` / `outra`) |
-| `activity_date` | DATE |
-| `labor_type` | enum (`interna` / `externa`) |
-| `cost` | NUMERIC(12,2) |
-| `details` | TEXT nullable |
-| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
-
-## Migrations
-
-Migração `0002_pcp_planejada_status` (arquivo `alembic/versions/20260416_0002_pcp_planejada_status.py`):
-
-1. Adiciona os valores `planejada` e `em_producao` ao enum `production_order_status` (via `ALTER TYPE ADD VALUE` em autocommit block)
-2. Torna `production_orders.executed_at` nullable
-3. Adiciona coluna `planned_date` (DATE nullable) em `production_orders`
-
-## Observações
-
-- Mensagens de erro e resposta em português
-- Todas as respostas usam `SuccessResponse` do `app.shared.responses`
-- Validação de entrada via Pydantic (`schemas.py`)
-- Ordens retornam sempre com `inputs` populados (via `repository` que força o carregamento)
-- A detecção de qualidade (especial/superior/tradicional) usa match por substring case-insensitive no `StockItem.name` entre os itens com o papel `produto_final` (Demanda 3 — antes era a categoria enum `cafe`; ver fluxo "Entrada no estoque por qualidade")
+- **Encerramento de OP planejada:** se uma OP for encerrada antes de ser iniciada, os serviços
+  externos ainda não geraram conta a pagar (as APs são criadas no `iniciar`); o `realized_cost`
+  ainda soma os serviços contratados. Avaliar gerar/cancelar as APs no encerramento.
+- **`realized_cost` do seed:** OPs do seed têm `realized_cost = 0` (não populado), enquanto o
+  relatório calcula o `custo_realizado_discriminado` ao vivo a partir do estado atual — os dois
+  podem divergir para dados de seed.
+- O custo de pessoal usa `job_position.base_salary` (sugestão do cargo), não o salário efetivo do
+  funcionário (a OP não nomeia funcionários — é por requisito de cargo).

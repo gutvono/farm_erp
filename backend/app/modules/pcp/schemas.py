@@ -3,9 +3,15 @@ from decimal import Decimal
 from typing import Any, Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-from app.shared.enums import LaborType, PlotActivityType, ProductionOrderStatus
+from app.shared.enums import (
+    ContractType,
+    LaborType,
+    PlotActivityType,
+    ProductionOrderStatus,
+    SystemRole,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -18,6 +24,9 @@ class PlotCreate(BaseModel):
     location: Optional[str] = Field(default=None, max_length=255)
     variety: str = Field(min_length=1, max_length=100)
     capacity_sacas: Decimal = Field(ge=0)
+    # Área total do talhão em hectares (obrigatória, > 0). Base do controle de
+    # área: a soma de hectares_used das OPs ativas não pode exceder este valor.
+    total_hectares: Decimal = Field(gt=0)
     notes: Optional[str] = None
 
 
@@ -26,6 +35,7 @@ class PlotUpdate(BaseModel):
     location: Optional[str] = Field(default=None, max_length=255)
     variety: Optional[str] = Field(default=None, min_length=1, max_length=100)
     capacity_sacas: Optional[Decimal] = Field(default=None, ge=0)
+    total_hectares: Optional[Decimal] = Field(default=None, gt=0)
     notes: Optional[str] = None
 
 
@@ -35,6 +45,7 @@ class PlotOut(BaseModel):
     location: Optional[str] = None
     variety: str
     capacity_sacas: Decimal
+    total_hectares: Decimal
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
@@ -109,7 +120,7 @@ class PlotActivityOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Production Inputs
+# Production Inputs (insumos — papel `insumo`)
 # ---------------------------------------------------------------------------
 
 
@@ -122,6 +133,7 @@ class ProductionInputOut(BaseModel):
     id: UUID
     stock_item_id: UUID
     stock_item_name: str
+    sku: str
     unit: str
     quantity: Decimal
     unit_cost: Decimal
@@ -130,11 +142,14 @@ class ProductionInputOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
     @classmethod
-    def from_model(cls, pi, stock_item_name: str, unit: str) -> "ProductionInputOut":
+    def from_model(
+        cls, pi, stock_item_name: str, sku: str, unit: str
+    ) -> "ProductionInputOut":
         return cls(
             id=pi.id,
             stock_item_id=pi.stock_item_id,
             stock_item_name=stock_item_name,
+            sku=sku,
             unit=unit,
             quantity=pi.quantity,
             unit_cost=pi.unit_cost,
@@ -143,64 +158,71 @@ class ProductionInputOut(BaseModel):
 
 
 # ---------------------------------------------------------------------------
-# Production Harvests
+# Production Order Position Requirements (requisitos por cargo)
 # ---------------------------------------------------------------------------
 
 
-class HarvestCreate(BaseModel):
-    percentage_harvested: Decimal = Field(gt=0, le=100)
+class PositionRequirementCreate(BaseModel):
+    position_id: UUID
+    quantity: int = Field(gt=0)
+    contract_type: ContractType
 
 
-class HarvestOut(BaseModel):
+class PositionRequirementOut(BaseModel):
     id: UUID
-    production_order_id: UUID
-    harvest_number: int
-    percentage_harvested: Decimal
-    sacks_total: Decimal
-    sacks_especial: Decimal
-    sacks_superior: Decimal
-    sacks_tradicional: Decimal
-    inputs_consumed: list[dict[str, Any]] = Field(default_factory=list)
-    is_final: bool
-    harvested_at: datetime
+    position_id: UUID
+    position_name: str
+    quantity: int
+    contract_type: ContractType
+    base_salary: Decimal
 
-    model_config = ConfigDict(from_attributes=True)
-
-    @classmethod
-    def from_model(cls, harvest) -> "HarvestOut":
-        return cls(
-            id=harvest.id,
-            production_order_id=harvest.production_order_id,
-            harvest_number=harvest.harvest_number,
-            percentage_harvested=harvest.percentage_harvested,
-            sacks_total=harvest.sacks_total,
-            sacks_especial=harvest.sacks_especial,
-            sacks_superior=harvest.sacks_superior,
-            sacks_tradicional=harvest.sacks_tradicional,
-            inputs_consumed=harvest.inputs_consumed or [],
-            is_final=harvest.is_final,
-            harvested_at=harvest.harvested_at,
-        )
+    model_config = ConfigDict(use_enum_values=True)
 
 
 # ---------------------------------------------------------------------------
-# Production Orders
+# Production Order Resources (máquinas/veículos/embalagens)
 # ---------------------------------------------------------------------------
 
 
-class ProductionOrderWorkerCreate(BaseModel):
-    employee_id: UUID
-    is_responsible: bool = False
+class ProductionResourceCreate(BaseModel):
+    stock_item_id: UUID
+    resource_role: SystemRole
+    # Quantidade — usada para embalagens (consumo). Ignorada para máquina/veículo.
+    quantity: Optional[Decimal] = Field(default=None, gt=0)
+    # Horas a adicionar ao criar o recurso (incremental). Campo nulo = 0 inicial.
+    hours: Optional[Decimal] = Field(default=None, ge=0)
 
 
-class ProductionOrderWorkerOut(BaseModel):
+class ProductionResourceOut(BaseModel):
     id: UUID
-    employee_id: UUID
-    employee_name: str
-    salary_snapshot: Decimal
-    is_responsible: bool
+    stock_item_id: UUID
+    stock_item_name: str
+    sku: str
+    unit: str
+    resource_role: SystemRole
+    quantity: Optional[Decimal] = None
+    accumulated_hours: Decimal
+    hourly_cost: Optional[Decimal] = None
+    # Custo do recurso = accumulated_hours × hourly_cost (0 para embalagem/sem custo/hora).
+    cost: Decimal
 
-    model_config = ConfigDict(from_attributes=True)
+    model_config = ConfigDict(use_enum_values=True)
+
+
+class ResourceHoursIncrement(BaseModel):
+    """Incremento de horas para um recurso de máquina/veículo (null-safe).
+
+    `hours` informado é SOMADO ao `accumulated_hours` do recurso; `hours` nulo/
+    omitido NÃO altera o acumulado (espelha o padrão incremental geral).
+    """
+
+    resource_id: UUID
+    hours: Optional[Decimal] = Field(default=None, ge=0)
+
+
+# ---------------------------------------------------------------------------
+# Production Order Services (serviços externos)
+# ---------------------------------------------------------------------------
 
 
 class ProductionOrderServiceCreate(BaseModel):
@@ -222,15 +244,97 @@ class ProductionOrderServiceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True)
 
 
+# ---------------------------------------------------------------------------
+# Production Harvests (colheita determinística por destino)
+# ---------------------------------------------------------------------------
+
+
+class HarvestCreate(BaseModel):
+    percentage_harvested: Decimal = Field(gt=0, le=100)
+    sacks_industria: Decimal = Field(default=Decimal("0"), ge=0)
+    sacks_embalagem: Decimal = Field(default=Decimal("0"), ge=0)
+    sacks_descarte: Decimal = Field(default=Decimal("0"), ge=0)
+    # Horas a adicionar a recursos de máquina/veículo nesta colheita (incremental).
+    resource_hours: list[ResourceHoursIncrement] = Field(default_factory=list)
+
+    @model_validator(mode="after")
+    def _validate_total_sacks(self) -> "HarvestCreate":
+        total = self.sacks_industria + self.sacks_embalagem + self.sacks_descarte
+        if total <= 0:
+            raise ValueError(
+                "Informe ao menos uma saca em algum destino "
+                "(indústria, embalagem ou descarte)"
+            )
+        return self
+
+
+class HarvestOut(BaseModel):
+    id: UUID
+    production_order_id: UUID
+    harvest_number: int
+    percentage_harvested: Decimal
+    hectares_harvested: Optional[Decimal] = None
+    sacks_total: Decimal
+    sacks_industria: Decimal
+    sacks_embalagem: Decimal
+    sacks_descarte: Decimal
+    inputs_consumed: list[dict[str, Any]] = Field(default_factory=list)
+    is_final: bool
+    harvested_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, harvest) -> "HarvestOut":
+        return cls(
+            id=harvest.id,
+            production_order_id=harvest.production_order_id,
+            harvest_number=harvest.harvest_number,
+            percentage_harvested=harvest.percentage_harvested,
+            hectares_harvested=harvest.hectares_harvested,
+            sacks_total=harvest.sacks_total,
+            sacks_industria=harvest.sacks_industria,
+            sacks_embalagem=harvest.sacks_embalagem,
+            sacks_descarte=harvest.sacks_descarte,
+            inputs_consumed=harvest.inputs_consumed or [],
+            is_final=harvest.is_final,
+            harvested_at=harvest.harvested_at,
+        )
+
+
+# ---------------------------------------------------------------------------
+# Production Orders
+# ---------------------------------------------------------------------------
+
+
 class ProductionOrderCreate(BaseModel):
     plot_id: UUID
+    hectares_used: Decimal = Field(gt=0)
     planned_date: Optional[date] = None
     start_date: Optional[date] = None
     expected_end_date: Optional[date] = None
     notes: Optional[str] = None
     inputs: list[ProductionInputCreate] = Field(default_factory=list)
-    workers: list[ProductionOrderWorkerCreate] = Field(default_factory=list)
+    position_requirements: list[PositionRequirementCreate] = Field(default_factory=list)
+    resources: list[ProductionResourceCreate] = Field(default_factory=list)
     services: list[ProductionOrderServiceCreate] = Field(default_factory=list)
+
+
+class ProductionOrderUpdate(BaseModel):
+    """Atualização da OP durante a produção.
+
+    Aceita campos editáveis e incrementos de horas por recurso (null-safe).
+    """
+
+    planned_date: Optional[date] = None
+    start_date: Optional[date] = None
+    expected_end_date: Optional[date] = None
+    notes: Optional[str] = None
+    resource_hours: list[ResourceHoursIncrement] = Field(default_factory=list)
+
+
+class EncerrarOrdemRequest(BaseModel):
+    reason: str = Field(min_length=1, max_length=500)
 
 
 class ProductionOrderOut(BaseModel):
@@ -238,24 +342,27 @@ class ProductionOrderOut(BaseModel):
     plot_id: UUID
     plot_name: str
     order_number: Optional[str] = None
+    hectares_used: Decimal
     planned_date: Optional[date] = None
     start_date: Optional[date] = None
     expected_end_date: Optional[date] = None
     executed_at: Optional[datetime] = None
     total_sacas: Decimal
-    especial_sacas: Decimal
-    superior_sacas: Decimal
-    tradicional_sacas: Decimal
+    industria_sacas: Decimal
+    embalagem_sacas: Decimal
+    descarte_sacas: Decimal
     total_cost: Decimal
     estimated_cost: Decimal
     realized_cost: Decimal
     harvest_progress: Decimal
     status: ProductionOrderStatus
     is_overdue: bool
+    early_closed_reason: Optional[str] = None
     notes: Optional[str] = None
     inputs: list[ProductionInputOut]
     harvests: list[HarvestOut] = Field(default_factory=list)
-    workers: list[ProductionOrderWorkerOut] = Field(default_factory=list)
+    position_requirements: list[PositionRequirementOut] = Field(default_factory=list)
+    resources: list[ProductionResourceOut] = Field(default_factory=list)
     services: list[ProductionOrderServiceOut] = Field(default_factory=list)
     created_at: datetime
     updated_at: datetime
@@ -269,8 +376,9 @@ class ProductionOrderOut(BaseModel):
         plot_name: str,
         inputs: list[ProductionInputOut],
         harvests: list[HarvestOut],
-        workers: list["ProductionOrderWorkerOut"] = None,
-        services: list["ProductionOrderServiceOut"] = None,
+        position_requirements: Optional[list[PositionRequirementOut]] = None,
+        resources: Optional[list[ProductionResourceOut]] = None,
+        services: Optional[list[ProductionOrderServiceOut]] = None,
     ) -> "ProductionOrderOut":
         final_statuses = {
             ProductionOrderStatus.CONCLUIDA,
@@ -286,24 +394,27 @@ class ProductionOrderOut(BaseModel):
             plot_id=order.plot_id,
             plot_name=plot_name,
             order_number=order.order_number,
+            hectares_used=order.hectares_used,
             planned_date=order.planned_date,
             start_date=order.start_date,
             expected_end_date=order.expected_end_date,
             executed_at=order.executed_at,
             total_sacas=order.total_sacas,
-            especial_sacas=order.especial_sacas,
-            superior_sacas=order.superior_sacas,
-            tradicional_sacas=order.tradicional_sacas,
+            industria_sacas=order.industria_sacas,
+            embalagem_sacas=order.embalagem_sacas,
+            descarte_sacas=order.descarte_sacas,
             total_cost=order.total_cost,
             estimated_cost=order.estimated_cost,
             realized_cost=order.realized_cost,
             harvest_progress=order.harvest_progress,
             status=order.status,
             is_overdue=is_overdue,
+            early_closed_reason=order.early_closed_reason,
             notes=order.notes,
             inputs=inputs,
             harvests=harvests,
-            workers=workers or [],
+            position_requirements=position_requirements or [],
+            resources=resources or [],
             services=services or [],
             created_at=order.created_at,
             updated_at=order.updated_at,
@@ -322,13 +433,24 @@ class ProductionResult(BaseModel):
 # ---------------------------------------------------------------------------
 
 
+class CustoDiscriminado(BaseModel):
+    """Custo da OP/safra quebrado por tipo (decisão TRAVADA da Demanda 5)."""
+
+    insumos: Decimal = Decimal("0")
+    pessoal: Decimal = Decimal("0")
+    maquinas: Decimal = Decimal("0")
+    embalagens: Decimal = Decimal("0")
+    servicos: Decimal = Decimal("0")
+    total: Decimal = Decimal("0")
+
+
 class ProducaoPorTalhaoItem(BaseModel):
     plot_id: UUID
     plot_name: str
     total_sacas: Decimal
-    especial_sacas: Decimal
-    superior_sacas: Decimal
-    tradicional_sacas: Decimal
+    industria_sacas: Decimal
+    embalagem_sacas: Decimal
+    descarte_sacas: Decimal
     orders_count: int
 
 
@@ -358,6 +480,7 @@ class CustoPrevistoVsRealizadoItem(BaseModel):
     estimated_cost: Decimal
     realized_cost: Decimal
     diferenca: Decimal
+    custo_realizado_discriminado: CustoDiscriminado
 
     model_config = ConfigDict(use_enum_values=True)
 
@@ -367,4 +490,5 @@ class PCPReportOut(BaseModel):
     consumo_insumos: list[ConsumoInsumoItem]
     ordens_resumo: OrdensResumo
     custo_previsto_vs_realizado: list[CustoPrevistoVsRealizadoItem]
+    custo_safra_discriminado: CustoDiscriminado
     generated_at: datetime

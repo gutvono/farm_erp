@@ -117,7 +117,8 @@ INSERT INTO stock_categories (id, name, description, is_active) VALUES
 ('66666666-6666-6666-6666-666666660002', 'Insumo',      'Fertilizantes, defensivos e correções',  TRUE),
 ('66666666-6666-6666-6666-666666660003', 'Veículo',     'Veículos e tratores',                    TRUE),
 ('66666666-6666-6666-6666-666666660004', 'Equipamento', 'Máquinas e equipamentos',                TRUE),
-('66666666-6666-6666-6666-666666660005', 'Outro',       'Itens diversos / refugo',                TRUE)
+('66666666-6666-6666-6666-666666660005', 'Outro',       'Itens diversos / refugo',                TRUE),
+('66666666-6666-6666-6666-666666660006', 'Embalagem',   'Sacarias e embalagens de café',          TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- Papéis de sistema por categoria (M:N). Café tem DOIS papéis. "Outro" recebe
@@ -128,11 +129,12 @@ INSERT INTO category_role_assignments (id, category_id, role) VALUES
 ('77777777-7777-7777-7777-777777770003', '66666666-6666-6666-6666-666666660002', 'insumo'),
 ('77777777-7777-7777-7777-777777770004', '66666666-6666-6666-6666-666666660003', 'veiculo'),
 ('77777777-7777-7777-7777-777777770005', '66666666-6666-6666-6666-666666660004', 'maquina'),
-('77777777-7777-7777-7777-777777770006', '66666666-6666-6666-6666-666666660005', 'produto_descartado')
+('77777777-7777-7777-7777-777777770006', '66666666-6666-6666-6666-666666660005', 'produto_descartado'),
+('77777777-7777-7777-7777-777777770007', '66666666-6666-6666-6666-666666660006', 'embalagem')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos + 1 descarte = 10)
+-- 6. STOCK ITEMS (3 cafés + 4 insumos + 2 equipamentos + 1 descarte + 1 embalagem = 11)
 -- quantity_on_hand reflete o estado pós produção/compra já representado no seed.
 -- Categoria via category_id (enum `category` legado fica NULL).
 -- -----------------------------------------------------------------------------
@@ -150,7 +152,9 @@ INSERT INTO stock_items (id, sku, name, category_id, unit, minimum_stock, unit_c
 ('55555555-5555-5555-5555-555555555021', 'EQP-TRA01', 'Trator New Holland T6',              '66666666-6666-6666-6666-666666660003', 'unidade',  1.000, 185000.00, 1.000,  'Trator 140cv com implementos'),
 ('55555555-5555-5555-5555-555555555022', 'EQP-COL01', 'Colheitadeira Jacto Máster',         '66666666-6666-6666-6666-666666660004', 'unidade',  1.000, 250000.00, 1.000,  'Colheitadeira automotriz para café'),
 -- Item-destino de Descarte da colheita (categoria Outro → produto_descartado)
-('55555555-5555-5555-5555-555555555031', 'CAFE-DESC', 'Café Descarte (refugo)',             '66666666-6666-6666-6666-666666660005', 'saca',     0.000,   0.00,   0.000,   'Café descartado (refugo da colheita)')
+('55555555-5555-5555-5555-555555555031', 'CAFE-DESC', 'Café Descarte (refugo)',             '66666666-6666-6666-6666-666666660005', 'saca',     0.000,   0.00,   0.000,   'Café descartado (refugo da colheita)'),
+-- Embalagem (sacaria) → categoria Embalagem (papel `embalagem`), consumo por OP
+('55555555-5555-5555-5555-555555555041', 'EMB-SC60', 'Saca de Polipropileno 60kg',          '66666666-6666-6666-6666-666666660006', 'unidade', 50.000,    5.00, 1000.000,  'Sacaria para ensaque do café (embalagem)')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

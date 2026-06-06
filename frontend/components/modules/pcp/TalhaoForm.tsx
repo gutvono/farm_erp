@@ -22,6 +22,7 @@ const schema = z.object({
   location: z.string().optional(),
   variety: z.string().min(1, "Variedade é obrigatória"),
   capacity_sacas: z.number().min(0, "Capacidade deve ser >= 0"),
+  total_hectares: z.number().positive("Área deve ser maior que zero"),
   notes: z.string().optional(),
 })
 
@@ -51,6 +52,7 @@ export function TalhaoForm({ open, onOpenChange, plot, onSuccess }: TalhaoFormPr
         location: plot?.location ?? "",
         variety: plot?.variety ?? "",
         capacity_sacas: plot?.capacity_sacas ?? 0,
+        total_hectares: plot?.total_hectares ?? undefined,
         notes: plot?.notes ?? "",
       })
     }
@@ -64,6 +66,7 @@ export function TalhaoForm({ open, onOpenChange, plot, onSuccess }: TalhaoFormPr
         location: data.location || undefined,
         variety: data.variety,
         capacity_sacas: data.capacity_sacas,
+        total_hectares: data.total_hectares,
         notes: data.notes || undefined,
       }
       if (plot) {
@@ -118,9 +121,24 @@ export function TalhaoForm({ open, onOpenChange, plot, onSuccess }: TalhaoFormPr
             </div>
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="location">Localização</Label>
-            <Input id="location" {...register("location")} placeholder="Setor Norte, 5 ha" />
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="total_hectares">Área (hectares) *</Label>
+              <Input
+                id="total_hectares"
+                type="number"
+                step="0.01"
+                min="0.01"
+                {...register("total_hectares", { valueAsNumber: true })}
+              />
+              {errors.total_hectares && (
+                <p className="text-xs text-red-500">{errors.total_hectares.message}</p>
+              )}
+            </div>
+            <div className="space-y-1">
+              <Label htmlFor="location">Localização</Label>
+              <Input id="location" {...register("location")} placeholder="Setor Norte" />
+            </div>
           </div>
 
           <div className="space-y-1">

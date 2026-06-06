@@ -15,10 +15,14 @@ import { defineConfig, devices } from "@playwright/test"
 export default defineConfig({
   testDir: "./e2e",
   globalSetup: "./e2e/global-setup.ts",
-  fullyParallel: true,
+  // Specs de PCP mutam o estado compartilhado do banco; rodar SERIAL (workers: 1)
+  // garante determinismo. `make e2e` reseta o banco antes (estado reproduzível).
+  // Os arquivos rodam em ordem alfabética: as telas estáveis (financeiro,
+  // navigation) vêm antes do pcp (mutação), que roda por último.
+  fullyParallel: false,
   forbidOnly: !!process.env.CI,
   retries: 0,
-  workers: process.env.CI ? 1 : undefined,
+  workers: 1,
   reporter: [["list"]],
   use: {
     baseURL: process.env.E2E_BASE_URL ?? "http://localhost:3000",

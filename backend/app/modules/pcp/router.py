@@ -7,16 +7,19 @@ from sqlalchemy.orm import Session
 from app.core.database import get_db
 from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
+from app.modules.estoque.schemas import StockItemOut
 from app.modules.pcp import service as pcp_service
 from app.modules.pcp.schemas import (
+    EncerrarOrdemRequest,
     HarvestCreate,
     PlotActivityCreate,
     PlotCreate,
     PlotOut,
     PlotUpdate,
     ProductionOrderCreate,
+    ProductionOrderUpdate,
 )
-from app.shared.enums import ProductionOrderStatus
+from app.shared.enums import ProductionOrderStatus, SystemRole
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -121,6 +124,45 @@ def create_activity(
 
 
 # ---------------------------------------------------------------------------
+# Recursos e insumos disponíveis (selects do front)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/insumos-disponiveis", response_model=SuccessResponse)
+def insumos_disponiveis(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    items = pcp_service.insumos_disponiveis(db)
+    data = [StockItemOut.from_model(i).model_dump(mode="json") for i in items]
+    return success("Insumos disponíveis listados com sucesso", data)
+
+
+@router.get("/recursos-disponiveis", response_model=SuccessResponse)
+def recursos_disponiveis(
+    role: SystemRole,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    items = pcp_service.recursos_disponiveis(db, role)
+    data = []
+    for item, available in items:
+        payload = StockItemOut.from_model(item).model_dump(mode="json")
+        payload["available_quantity"] = str(available)
+        data.append(payload)
+    return success("Recursos disponíveis listados com sucesso", data)
+
+
+@router.get("/cargos-disponiveis", response_model=SuccessResponse)
+def cargos_disponiveis(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    data = pcp_service.cargos_disponiveis(db)
+    return success("Cargos disponíveis listados com sucesso", data)
+
+
+# ---------------------------------------------------------------------------
 # Ordens de produção
 # ---------------------------------------------------------------------------
 
@@ -151,17 +193,6 @@ def create_order(
     )
 
 
-# IMPORTANTE: rota estática registrada ANTES de /ordens/{order_id} — caso
-# contrário o FastAPI trataria "funcionarios-em-producao" como um order_id.
-@router.get("/ordens/funcionarios-em-producao", response_model=SuccessResponse)
-def funcionarios_em_producao(
-    db: Session = Depends(get_db),
-    _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    ids = pcp_service.listar_funcionarios_em_producao(db)
-    return success("Funcionários em produção ativa", [str(i) for i in ids])
-
-
 @router.get("/ordens/{order_id}", response_model=SuccessResponse)
 def get_order(
     order_id: UUID,
@@ -171,6 +202,20 @@ def get_order(
     order = pcp_service.get_order(db, order_id)
     return success(
         "Ordem obtida com sucesso",
+        pcp_service.serialize_order(db, order),
+    )
+
+
+@router.put("/ordens/{order_id}", response_model=SuccessResponse)
+def update_order(
+    order_id: UUID,
+    body: ProductionOrderUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    order = pcp_service.update_order(db, order_id, body)
+    return success(
+        "Ordem atualizada com sucesso",
         pcp_service.serialize_order(db, order),
     )
 
@@ -192,19 +237,22 @@ def colher_safra(
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    result = pcp_service.registrar_colheita(db, order_id, body.percentage_harvested)
+    result = pcp_service.registrar_colheita(db, order_id, body)
     return success("Colheita registrada com sucesso", result.model_dump(mode="json"))
 
 
-@router.post("/ordens/{order_id}/produzir", response_model=SuccessResponse)
-def produzir_safra(
+@router.post("/ordens/{order_id}/encerrar", response_model=SuccessResponse)
+def encerrar_ordem(
     order_id: UUID,
+    body: EncerrarOrdemRequest,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
-    """Alias de compatibilidade: colhe o percentual restante da ordem (100% se nada colhido)."""
-    result = pcp_service.produzir_safra(db, order_id)
-    return success("Safra produzida com sucesso", result.model_dump(mode="json"))
+    order = pcp_service.encerrar_ordem(db, order_id, body.reason)
+    return success(
+        "Ordem encerrada com sucesso",
+        pcp_service.serialize_order(db, order),
+    )
 
 
 @router.delete("/ordens/{order_id}", response_model=SuccessResponse)

@@ -1,9 +1,10 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp, Trash2, Wheat } from "lucide-react"
+import { ChevronDown, ChevronUp, Trash2, Wheat, Ban } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
+import { Badge } from "@/components/ui/badge"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
 import {
   AlertDialog,
@@ -15,10 +16,19 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { deleteOrdem, iniciarProducao } from "@/services/pcp"
-import { ProductionOrder, ProductionResult } from "@/types/index"
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { deleteOrdem, encerrarOrdem, iniciarProducao } from "@/services/pcp"
+import { ProductionOrder, ProductionResult, SystemRole } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 import { ColheitaModal } from "./ColheitaModal"
+import { ResultadoSafraDialog } from "./ResultadoSafraDialog"
 
 const STATUS_LABEL: Record<string, string> = {
   planejada: "Planejada",
@@ -38,6 +48,25 @@ const STATUS_CLASS: Record<string, string> = {
   cancelada: "bg-slate-100 text-slate-600 border-slate-300",
 }
 
+const CONTRACT_LABEL: Record<string, string> = {
+  clt: "CLT",
+  pj: "PJ",
+  temporario: "Temporário",
+}
+
+const RESOURCE_ROLE_LABEL: Record<SystemRole, string> = {
+  maquina: "Máquina",
+  veiculo: "Veículo",
+  embalagem: "Embalagem",
+  insumo: "Insumo",
+  produto_final: "Produto final",
+  produto_inacabado: "Produto inacabado",
+  produto_descartado: "Produto descartado",
+  produto_vendavel: "Produto vendável",
+}
+
+const RESERVABLE: SystemRole[] = ["maquina", "veiculo"]
+
 interface OrdemProducaoCardProps {
   order: ProductionOrder
   onDeleted: () => void
@@ -49,20 +78,24 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
   const [deleteOpen, setDeleteOpen] = useState(false)
   const [iniciarOpen, setIniciarOpen] = useState(false)
   const [colheitaOpen, setColheitaOpen] = useState(false)
+  const [encerrarOpen, setEncerrarOpen] = useState(false)
+  const [encerrarReason, setEncerrarReason] = useState("")
   const [deleting, setDeleting] = useState(false)
   const [iniciando, setIniciando] = useState(false)
+  const [encerrando, setEncerrando] = useState(false)
+  const [resultOpen, setResultOpen] = useState(false)
+  const [resultData, setResultData] = useState<ProductionResult | null>(null)
   const [currentOrder, setCurrentOrder] = useState<ProductionOrder>(order)
 
   const isPlanejada = currentOrder.status === "planejada"
   const canHarvest =
     currentOrder.status === "em_execucao" || currentOrder.status === "pausada"
+  const canEncerrar =
+    currentOrder.status === "em_execucao" ||
+    currentOrder.status === "pausada" ||
+    currentOrder.status === "em_producao"
 
-  const especial = currentOrder.especial_sacas
-  const superior = currentOrder.superior_sacas
-  const tradicional = currentOrder.tradicional_sacas
   const total = currentOrder.total_sacas
-  const especialPct = total > 0 ? (especial / total) * 100 : 0
-  const superiorPct = total > 0 ? (superior / total) * 100 : 0
 
   async function handleDelete() {
     setDeleting(true)
@@ -93,9 +126,35 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
     }
   }
 
+  async function handleEncerrar() {
+    if (!encerrarReason.trim()) return
+    setEncerrando(true)
+    try {
+      const updated = await encerrarOrdem(currentOrder.id, encerrarReason.trim())
+      setCurrentOrder(updated)
+      toast.success("Ordem encerrada (praga). Status: concluída.")
+      setEncerrarOpen(false)
+      setEncerrarReason("")
+      onProduced()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao encerrar ordem")
+    } finally {
+      setEncerrando(false)
+    }
+  }
+
   function handleColheitaSuccess(result: ProductionResult) {
+    // Atualiza o card localmente e abre o diálogo de resultado. NÃO recarrega a
+    // lista aqui: o reload mostraria o spinner e desmontaria este card (e o
+    // diálogo junto). O refresh acontece quando o diálogo de resultado fecha.
     setCurrentOrder(result.order)
-    onProduced()
+    setResultData(result)
+    setResultOpen(true)
+  }
+
+  function handleResultOpenChange(o: boolean) {
+    setResultOpen(o)
+    if (!o) onProduced()
   }
 
   return (
@@ -109,6 +168,9 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                   {currentOrder.order_number}
                 </span>
                 <span className="font-semibold text-slate-800">{currentOrder.plot_name}</span>
+                <Badge variant="outline" className="text-xs">
+                  {currentOrder.hectares_used} ha
+                </Badge>
                 <span
                   className={`inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_CLASS[currentOrder.status] ?? ""}`}
                 >
@@ -131,15 +193,14 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                 {currentOrder.expected_end_date && (
                   <span>Término previsto: {formatDate(currentOrder.expected_end_date)}</span>
                 )}
-                {(() => {
-                  const responsavel = currentOrder.workers.find((w) => w.is_responsible)
-                  return responsavel ? (
-                    <span>Resp.: {responsavel.employee_name}</span>
-                  ) : null
-                })()}
               </div>
 
-              {/* Progress bar */}
+              {currentOrder.early_closed_reason && (
+                <p className="mt-1 text-xs text-red-600">
+                  Encerrada por praga: {currentOrder.early_closed_reason}
+                </p>
+              )}
+
               {currentOrder.harvest_progress > 0 && (
                 <div className="mt-2 space-y-1">
                   <div className="flex items-center justify-between text-xs text-slate-500">
@@ -177,6 +238,20 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                 >
                   <Wheat className="h-4 w-4 mr-1" />
                   Registrar Colheita
+                </Button>
+              )}
+              {canEncerrar && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setEncerrarReason("")
+                    setEncerrarOpen(true)
+                  }}
+                  className="text-red-700 border-red-300 hover:bg-red-50"
+                >
+                  <Ban className="h-4 w-4 mr-1" />
+                  Encerrar (praga)
                 </Button>
               )}
               {isPlanejada && (
@@ -225,16 +300,19 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
             {/* Insumos */}
             {currentOrder.inputs.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-slate-500 mb-1">Insumos Planejados</p>
+                <p className="text-xs font-medium text-slate-500 mb-1">Insumos</p>
                 <div className="space-y-1">
                   {currentOrder.inputs.map((inp) => (
                     <div
                       key={inp.id}
                       className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
                     >
-                      <span>{inp.stock_item_name}</span>
+                      <span>
+                        <span className="font-mono text-xs text-slate-400">{inp.sku}</span>{" "}
+                        {inp.stock_item_name}
+                      </span>
                       <span className="font-medium">
-                        {inp.quantity} {inp.unit}
+                        {inp.quantity} {inp.unit} · {formatCurrency(inp.subtotal)}
                       </span>
                     </div>
                   ))}
@@ -242,29 +320,65 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
               </div>
             )}
 
-            {/* Equipe */}
-            {currentOrder.workers.length > 0 && (
+            {/* Requisitos por cargo */}
+            {currentOrder.position_requirements.length > 0 && (
               <div>
-                <p className="text-xs font-medium text-slate-500 mb-1">Equipe</p>
+                <p className="text-xs font-medium text-slate-500 mb-1">Equipe (requisitos por cargo)</p>
                 <div className="space-y-1">
-                  {currentOrder.workers.map((w) => (
+                  {currentOrder.position_requirements.map((r) => (
                     <div
-                      key={w.id}
+                      key={r.id}
                       className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
                     >
                       <div className="flex items-center gap-2">
-                        <span>{w.employee_name}</span>
-                        {w.is_responsible && (
-                          <span className="text-xs bg-blue-100 text-blue-700 rounded px-1.5 py-0.5">
-                            Responsável
-                          </span>
-                        )}
+                        <span>{r.position_name}</span>
+                        <Badge variant="outline" className="text-xs">
+                          {CONTRACT_LABEL[r.contract_type] ?? r.contract_type}
+                        </Badge>
                       </div>
-                      <span className="text-xs text-slate-400">
-                        Salário snapshot: {formatCurrency(w.salary_snapshot)}
+                      <span className="text-xs text-slate-500">
+                        {r.quantity}× · base {formatCurrency(r.base_salary)}
                       </span>
                     </div>
                   ))}
+                </div>
+              </div>
+            )}
+
+            {/* Recursos */}
+            {currentOrder.resources.length > 0 && (
+              <div>
+                <p className="text-xs font-medium text-slate-500 mb-1">Recursos</p>
+                <div className="space-y-1">
+                  {currentOrder.resources.map((res) => {
+                    const reservable = RESERVABLE.includes(res.resource_role)
+                    return (
+                      <div
+                        key={res.id}
+                        className="flex items-center justify-between text-sm text-slate-600 py-1 border-b last:border-0"
+                      >
+                        <div className="flex items-center gap-2 min-w-0">
+                          <span className="truncate">
+                            <span className="font-mono text-xs text-slate-400">{res.sku}</span>{" "}
+                            {res.stock_item_name}
+                          </span>
+                          <Badge variant="outline" className="text-xs">
+                            {RESOURCE_ROLE_LABEL[res.resource_role]}
+                          </Badge>
+                          {reservable && (
+                            <Badge className="bg-indigo-100 text-indigo-700 text-xs">
+                              reservado
+                            </Badge>
+                          )}
+                        </div>
+                        <span className="text-xs text-slate-500 flex-shrink-0">
+                          {reservable
+                            ? `${res.accumulated_hours}h · ${formatCurrency(res.cost)}`
+                            : `${res.quantity ?? 0} ${res.unit}`}
+                        </span>
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
             )}
@@ -299,7 +413,7 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
               </div>
             )}
 
-            {/* Histórico de colheitas */}
+            {/* Histórico de colheitas (por destino) */}
             {currentOrder.harvests.length > 0 && (
               <div>
                 <p className="text-xs font-medium text-slate-500 mb-2">
@@ -314,6 +428,9 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                       <div className="flex items-center justify-between">
                         <span className="text-xs font-semibold text-green-800">
                           Colheita #{h.harvest_number} — {h.percentage_harvested.toFixed(1)}%
+                          {h.hectares_harvested != null && (
+                            <span className="text-green-600"> · {h.hectares_harvested.toFixed(2)} ha</span>
+                          )}
                         </span>
                         <span className="text-xs text-slate-500">
                           {formatDate(h.harvested_at)}
@@ -328,16 +445,16 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
                           <p className="font-semibold text-slate-800">{h.sacks_total.toFixed(3)}</p>
                         </div>
                         <div>
-                          <p className="text-amber-600">Especial</p>
-                          <p className="font-semibold text-amber-800">{h.sacks_especial.toFixed(3)}</p>
+                          <p className="text-amber-600">Indústria</p>
+                          <p className="font-semibold text-amber-800">{h.sacks_industria.toFixed(3)}</p>
                         </div>
                         <div>
-                          <p className="text-green-600">Superior</p>
-                          <p className="font-semibold text-green-800">{h.sacks_superior.toFixed(3)}</p>
+                          <p className="text-green-600">Embalagem</p>
+                          <p className="font-semibold text-green-800">{h.sacks_embalagem.toFixed(3)}</p>
                         </div>
                         <div>
-                          <p className="text-slate-500">Tradicional</p>
-                          <p className="font-semibold text-slate-700">{h.sacks_tradicional.toFixed(3)}</p>
+                          <p className="text-slate-500">Descarte</p>
+                          <p className="font-semibold text-slate-700">{h.sacks_descarte.toFixed(3)}</p>
                         </div>
                       </div>
                     </div>
@@ -346,33 +463,23 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
               </div>
             )}
 
-            {/* Resultado final (quando concluída) */}
+            {/* Resultado total (concluída) por destino */}
             {currentOrder.status === "concluida" && total > 0 && (
               <div className="space-y-2">
                 <p className="text-xs font-medium text-slate-500">Resultado Total da Produção</p>
                 <div className="grid grid-cols-3 gap-2">
                   <div className="rounded-lg border border-amber-200 bg-amber-50 p-2 text-center">
-                    <p className="text-xs text-amber-700">Especial</p>
-                    <p className="text-lg font-bold text-amber-900">{especial.toFixed(3)}</p>
-                    <p className="text-xs text-amber-600">{especialPct.toFixed(1)}%</p>
+                    <p className="text-xs text-amber-700">Indústria</p>
+                    <p className="text-lg font-bold text-amber-900">{currentOrder.industria_sacas.toFixed(3)}</p>
                   </div>
                   <div className="rounded-lg border border-green-200 bg-green-50 p-2 text-center">
-                    <p className="text-xs text-green-700">Superior</p>
-                    <p className="text-lg font-bold text-green-900">{superior.toFixed(3)}</p>
-                    <p className="text-xs text-green-600">{superiorPct.toFixed(1)}%</p>
+                    <p className="text-xs text-green-700">Embalagem</p>
+                    <p className="text-lg font-bold text-green-900">{currentOrder.embalagem_sacas.toFixed(3)}</p>
                   </div>
                   <div className="rounded-lg border border-slate-200 bg-slate-50 p-2 text-center">
-                    <p className="text-xs text-slate-600">Tradicional</p>
-                    <p className="text-lg font-bold text-slate-800">{tradicional.toFixed(3)}</p>
-                    <p className="text-xs text-slate-500">
-                      {total > 0 ? (100 - especialPct - superiorPct).toFixed(1) : "0.0"}%
-                    </p>
+                    <p className="text-xs text-slate-600">Descarte</p>
+                    <p className="text-lg font-bold text-slate-800">{currentOrder.descarte_sacas.toFixed(3)}</p>
                   </div>
-                </div>
-                <div className="h-3 rounded-full overflow-hidden flex">
-                  <div className="bg-amber-400" style={{ width: `${especialPct}%` }} />
-                  <div className="bg-green-400" style={{ width: `${superiorPct}%` }} />
-                  <div className="bg-slate-300 flex-1" />
                 </div>
                 <p className="text-sm font-semibold text-slate-700 text-center">
                   Total: {total.toFixed(3)} sacas
@@ -392,6 +499,12 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
         onOpenChange={setColheitaOpen}
         order={currentOrder}
         onSuccess={handleColheitaSuccess}
+      />
+
+      <ResultadoSafraDialog
+        open={resultOpen}
+        onOpenChange={handleResultOpenChange}
+        result={resultData}
       />
 
       <AlertDialog open={iniciarOpen} onOpenChange={setIniciarOpen}>
@@ -415,6 +528,49 @@ export function OrdemProducaoCard({ order, onDeleted, onProduced }: OrdemProduca
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      <Dialog
+        open={encerrarOpen}
+        onOpenChange={(o) => {
+          if (encerrando) return
+          setEncerrarOpen(o)
+          if (!o) setEncerrarReason("")
+        }}
+      >
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Encerrar ordem por praga</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-4 pt-2">
+            <p className="text-sm text-slate-600">
+              A ordem <strong>{currentOrder.order_number}</strong> será{" "}
+              <strong>concluída</strong> antes de 100%, liberando os recursos e a área
+              restante. Informe o motivo (ex.: praga, geada).
+            </p>
+            <div className="space-y-1.5">
+              <Label htmlFor={`encerrar-reason-${currentOrder.id}`}>Motivo *</Label>
+              <Input
+                id={`encerrar-reason-${currentOrder.id}`}
+                value={encerrarReason}
+                onChange={(e) => setEncerrarReason(e.target.value)}
+                placeholder="Descreva o motivo do encerramento..."
+              />
+            </div>
+            <div className="flex justify-end gap-2">
+              <Button variant="outline" onClick={() => setEncerrarOpen(false)} disabled={encerrando}>
+                Cancelar
+              </Button>
+              <Button
+                className="bg-red-600 hover:bg-red-700"
+                disabled={!encerrarReason.trim() || encerrando}
+                onClick={handleEncerrar}
+              >
+                {encerrando ? "Encerrando..." : "Confirmar encerramento"}
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
 
       <AlertDialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <AlertDialogContent>

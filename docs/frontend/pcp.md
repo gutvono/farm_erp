@@ -1,157 +1,152 @@
-# Frontend Module: PCP (Planejamento e Controle de Produção)
+# Módulo: PCP — Planejamento e Controle de Produção (uso)
 
-## Overview
+## Visão geral da tela
 
-Módulo de gestão de talhões, atividades agrícolas e ordens de produção de safra. Ao produzir uma safra, baixa insumos do estoque, simula qualidades (Especial/Superior/Tradicional) e insere o café produzido no estoque.
+O PCP controla **talhões** (áreas da fazenda, em **hectares**), **atividades** agrícolas e as
+**ordens de produção** (OP) de cada safra. A partir da **Demanda 5**, a OP deixou de ser aleatória:
+você informa quantos **hectares** vai usar, quais **insumos**, a **equipe por cargo**, as **máquinas/
+veículos** (recursos) e **embalagens**, e a colheita é **determinística por destino** — você lança
+as sacas em **Indústria**, **Embalagem** e **Descarte**. O custo aparece **discriminado** (insumos,
+pessoal, máquinas, embalagens, serviços).
 
-## Page
+A página `/pcp` tem 4 abas: **Ordens de Produção**, **Talhões**, **Atividades** e **Relatórios**.
 
-- `/pcp` — 3 abas: Ordens de Produção, Talhões, Atividades.
+## Fluxos passo a passo (ótica do usuário)
 
-## Components
+### Cadastrar um talhão (com área em hectares)
+1. Aba **Talhões** → **"Novo Talhão"**.
+2. Preencha **Nome**, **Variedade**, **Capacidade (sacas)** e **Área (hectares)** (obrigatória, > 0).
+   Opcional: Localização e Observações.
+3. **"Criar talhão"**. O card do talhão passa a mostrar **Variedade**, **Área** (ex.: "10 ha") e
+   **Capacidade**.
 
-### `TalhaoForm`
-Dialog de criação/edição de talhão. Campos: nome, variedade, capacidade (sacas), localização, observações. Detecta modo edição por prop `plot`.
+[SCREENSHOT: aba Talhões com um card mostrando a Área em hectares]
 
-**Props:** `open`, `onOpenChange`, `plot?: Plot | null`, `onSuccess`
+### Criar uma ordem de produção
+1. Aba **Ordens de Produção** → **"Nova Ordem"**.
+2. **Talhão**: escolha no menu (mostra a área do talhão). Ao escolher, aparece **"Disponível no
+   talhão: X ha de Y ha"** — o que ainda não está reservado por outras OPs ativas.
+3. **Hectares usados**: informe a área desta OP (> 0; o sistema valida contra o disponível).
+4. **Insumos** (opcional): **"Adicionar insumo"**, escolha no menu (mostra o **SKU**, nome e estoque)
+   e a quantidade.
+5. **Equipe — requisitos por cargo**: **"Adicionar cargo"**, escolha o **cargo** (o menu mostra o
+   **disponível**, ex.: "Colhedor — 8 disponíveis"), a **quantidade** de pessoas e o **vínculo**
+   (CLT / PJ / Temporário). Não se escolhe mais funcionário por nome.
+6. **Máquinas** e **Veículos**: **"Adicionar máquina/veículo"**, escolha no menu — que mostra o
+   **SKU**, o nome e quantos estão **disponíveis** (ex.: "Colheitadeira Jacto — 0 disponíveis").
+   Opcional: **horas a adicionar** (incremental; em branco não altera).
+7. **Embalagens**: **"Adicionar embalagem"**, escolha a embalagem (SKU) e a quantidade.
+8. **Serviços Externos** (opcional): fornecedor, descrição, valor e vencimento (a conta a pagar é
+   gerada ao iniciar a produção).
+9. **"Criar ordem"**. A OP nasce **Planejada**.
 
-### `TalhaoCard`
-Card com nome, variedade, capacidade, localização. Botões editar (callback) e excluir (AlertDialog). Botão "Ver Atividades" abre Sheet lateral e carrega `getAtividades(plot.id)`.
+[SCREENSHOT: formulário Nova Ordem com cargo/máquina mostrando "N disponíveis"]
 
-**Props:** `plot: Plot`, `onEdit: () => void`, `onDeleted: () => void`
+### Planejar é livre; a capacidade é validada ao iniciar (Demanda 5.1)
+- **Planejar não bloqueia por capacidade.** Os menus de máquina/veículo **mostram** o disponível mas
+  **não escondem** itens em uso; e os campos de quantidade aceitam **qualquer valor > 0** — você pode
+  planejar acima do que há hoje.
+- Quando você planeja **acima do disponível**, aparece um **aviso informativo** (sem travar o salvar),
+  ex.: *"Planejado 9; há 8 disponíveis hoje — será validado ao iniciar"* (cargo) ou *"0 disponíveis
+  hoje — será validado ao iniciar"* (máquina/veículo).
+- O **disponível diminui** conforme outras OPs são **iniciadas** (não ao planejar). Ex.: com uma única
+  Colheitadeira, depois de iniciar uma OP que a usa, a próxima OP mostra "Colheitadeira — 0 disponíveis".
+- A **validação real** acontece em **Iniciar Produção**: se a capacidade (máquinas/veículos ou pessoas
+  por cargo) não cobrir o necessário, o início é **bloqueado** com um toast de erro listando o que
+  faltou (ver *Mensagens*). Concluir/encerrar uma OP **libera** a capacidade para as demais.
 
-### `AtividadeForm`
-Dialog de registro de atividade. Campos: talhão (Select), tipo de atividade (plantio/adubacao/poda/colheita/irrigacao/outra), data, mão de obra (interna/externa), custo, detalhes. Zod v4: `z.enum([...], { error: "..." })`.
+[SCREENSHOT: menu de Máquinas mostrando "Colheitadeira — 0 disponíveis" e o aviso inline]
 
-**Props:** `open`, `onOpenChange`, `plots: Plot[]`, `defaultPlotId?: string`, `onSuccess`
+### Iniciar a produção
+1. No card da OP **Planejada**, clique **"▶ Iniciar Produção"** e confirme.
+2. **Se houver capacidade**, o status vira **Em Execução** e a colheita pode ser registrada. Um
+   talhão **pode** ter várias OPs ao mesmo tempo, dentro do limite de **hectares**.
+3. **Se a capacidade não cobrir** o necessário, o início é **bloqueado** e aparece um toast com a
+   mensagem do sistema (ex.: *"Capacidade insuficiente para iniciar — Colheitadeira: requer 1,
+   disponível 0"*). Conclua/encerre outra OP para liberar e tente de novo.
 
-### `OrdemProducaoForm`
-Dialog de criação de ordem. Campos: talhão (Select), datas (planejada, início, término previsto), observações. Três listas dinâmicas via `useFieldArray`:
+### Registrar a colheita (por destino)
+1. No card da OP em execução, clique **"Registrar Colheita"**.
+2. Informe o **Percentual a colher** — ao digitar, aparece **"= X hectares"** (percentual × hectares
+   da OP).
+3. Lance as **sacas por destino**: **Indústria**, **Embalagem** e **Descarte** (ao menos uma > 0).
+4. **"Confirmar colheita"**. Abre o **Resultado da Colheita** com a produção **por destino** e o
+   **custo discriminado** (Insumos, Pessoal, Máquinas, Embalagens, Serviços e Total).
+5. Repita até 100% (cada colheita soma ao progresso; a que fecha 100% é a **Final**).
 
-- **Insumos** (`inputs`): stock_item_id + quantity, com estoque disponível por insumo.
-- **Equipe** (`workers`, opcional): funcionários internos com checkbox "Responsável". Funcionários já vinculados a ordens ativas (de `getFuncionariosEmProducao()`) aparecem desabilitados com sufixo `(em produção)`, assim como os já escolhidos em outras linhas (evita duplicata). Marcar um responsável desmarca automaticamente os demais; o schema valida no máximo 1 responsável.
-- **Serviços Externos** (`services`, opcional): fornecedor (Select de `getFornecedores()`), descrição, valor e vencimento. A conta a pagar só é gerada quando a produção é iniciada.
+[SCREENSHOT: modal de colheita com "= X hectares" e as 3 caixas de destino]
+[SCREENSHOT: diálogo Resultado da Colheita com destinos + custo discriminado]
 
-Carrega no abrir: `getFuncionarios({ is_active: true })`, `getFornecedores()`, `getFuncionariosEmProducao()`.
+### Encerrar por praga (antes de 100%)
+1. No card da OP em execução, clique **"Encerrar (praga)"**.
+2. Informe o **Motivo** (obrigatório) e confirme.
+3. A OP vira **Concluída**, registra o motivo ("Encerrada por praga: …"), libera os recursos e a
+   **área restante** — que você pode usar em uma **nova OP** do mesmo talhão.
 
-**Props:** `open`, `onOpenChange`, `plots: Plot[]`, `insumos: StockItem[]`, `onSuccess`
+[SCREENSHOT: diálogo Encerrar por praga com o campo de motivo]
 
-> Nota: `insumos` é filtrado na página pai com `getItens({ category: "insumo" })`. Funcionários e fornecedores são buscados dentro do próprio form.
+### Relatórios
+Aba **Relatórios**: **Resumo de Ordens** por status, **Custo da Safra (discriminado)**
+(insumos/pessoal/máquinas/embalagens/serviços/total), **Produção por Talhão** (Indústria/Embalagem/
+Descarte) e **Custo Previsto vs. Realizado** por ordem.
 
-### `OrdemProducaoCard`
-Card expansível por ordem. Header: nome do talhão, badge de status colorido, datas e responsável (derivado de `workers.find((w) => w.is_responsible)`). Expandido: custos, insumos planejados, **Equipe** (com badge "Responsável" e salário snapshot), **Serviços Externos** (com valor e status `AP gerada` / `Aguardando início` conforme `accounts_payable_id`), histórico de colheitas e resultado final. Botão "▶ Iniciar Produção" e excluir visíveis apenas se `planejada`.
+[SCREENSHOT: aba Relatórios com o card de custo discriminado e produção por destino]
 
-**Toast de sucesso:** `"Safra produzida! X sacas totais (Especial: A, Superior: B, Tradicional: C)"`
+## Glossário de status / badges
 
-**Props:** `order: ProductionOrder`, `onDeleted: () => void`, `onProduced: () => void`
+| Status da OP | Significado |
+|--------------|-------------|
+| **Planejada** | Criada (planejar é livre); pode iniciar (valida capacidade) ou excluir |
+| **Em Execução** | Produção iniciada (capacidade ocupada); pode registrar colheita ou encerrar por praga |
+| **Pausada** | Em andamento, pausada; ainda pode colher/encerrar |
+| **Concluída** | 100% colhido **ou** encerrada por praga; capacidade liberada (final) |
+| **Cancelada** | Cancelada (final) |
+| **Atrasada** | Marcador quando passou do término previsto e não está finalizada |
 
-### `ResultadoSafraDialog`
-Dialog com resultado visual: total em destaque, 3 cards de qualidade (amber/green/slate), barra proporcional colorida, lista de insumos consumidos, alerta vermelho se algum item ficou abaixo do mínimo.
+Outros badges no card: **hectares** (ex.: "4 ha"), papel do recurso (**Máquina/Veículo/Embalagem**),
+**reservado** (máquina/veículo, no card da OP que o ocupa) e o **vínculo** do cargo (CLT/PJ/Temporário).
 
-**Props:** `open`, `onOpenChange`, `result: ProductionResult | null`
+## Ações e botões
 
-## Service (`services/pcp.ts`)
+- **Talhões:** Novo Talhão, Editar, Excluir, Ver Atividades.
+- **Ordens:** filtro por status; Nova Ordem; por card: ▶ Iniciar Produção (planejada), Registrar
+  Colheita (em execução/pausada), Encerrar (praga), Excluir (planejada), expandir/recolher.
+- **Colheita:** percentual + sacas por destino → Confirmar colheita.
 
-```typescript
-getTalhoes(): Promise<Plot[]>
-createTalhao(data: { name; location?; variety; capacity_sacas; notes? }): Promise<Plot>
-updateTalhao(id, data): Promise<Plot>
-deleteTalhao(id): Promise<void>
+## Mensagens e confirmações
 
-getAtividades(plot_id?: string): Promise<PlotActivity[]>
-createAtividade(data: { plot_id; activity_type; activity_date; labor_type; cost; details? }): Promise<PlotActivity>
+- "Ordem de produção criada com sucesso" · "Produção iniciada!"
+- **Iniciar bloqueado (capacidade):** toast de erro com a mensagem do sistema —
+  *"Capacidade insuficiente para iniciar — &lt;item/cargo&gt;: requer X, disponível Y; …"*.
+- Colheita: "Colheita #N registrada — X sacas" (e "· Estoque baixo: …" se algum insumo ficou abaixo
+  do mínimo). **Estoque insuficiente:** toast de erro *"Estoque insuficiente para: &lt;item&gt;. …"*.
+- "Ordem encerrada (praga). Status: concluída."
+- Aviso inline (não é toast) ao planejar acima do disponível: *"… será validado ao iniciar"*.
+- Demais erros do backend (ex.: hectares acima do disponível) também aparecem em toast.
 
-getOrdens(status?: string): Promise<ProductionOrder[]>
-createOrdem(data: {
-  plot_id; planned_date?; start_date?; expected_end_date?; notes?;
-  inputs: [{ stock_item_id; quantity }];
-  workers?: [{ employee_id; is_responsible }];
-  services?: [{ supplier_id; description; amount; due_date }];
-}): Promise<ProductionOrder>
-getFuncionariosEmProducao(): Promise<string[]>   // UUIDs de funcionários em ordens ativas
-iniciarProducao(id: string): Promise<ProductionOrder>
-produzirSafra(id: string): Promise<ProductionResult>
-deleteOrdem(id: string): Promise<void>
-```
+---
 
-Campos Decimal convertidos via `toNumber()` em Raw interfaces.
+## Notas técnicas (resumo)
 
-## Types (`types/index.ts`)
-
-```typescript
-type ActivityType = "plantio" | "adubacao" | "poda" | "colheita" | "irrigacao" | "outra"
-type LaborType = "interna" | "externa"
-type ProductionOrderStatus = "planejada" | "em_producao" | "concluida" | "cancelada"
-
-interface Plot {
-  id: string; name: string; location: string | null
-  variety: string; capacity_sacas: number; notes: string | null
-  created_at: string; updated_at: string
-}
-
-interface PlotActivity {
-  id: string; plot_id: string; plot_name?: string
-  activity_type: ActivityType; activity_date: string
-  labor_type: LaborType; cost: number; details: string | null
-  created_at: string; updated_at: string
-}
-
-interface ProductionInput {
-  id: string; stock_item_id: string; stock_item_name: string
-  unit: string; quantity: number; unit_cost: number; subtotal: number
-}
-
-interface ProductionOrderWorker {
-  id: string; employee_id: string; employee_name: string
-  salary_snapshot: number; is_responsible: boolean
-}
-
-interface ProductionOrderService {
-  id: string; supplier_id: string; supplier_name: string
-  description: string; amount: number; due_date: string
-  accounts_payable_id: string | null   // null enquanto planejada; preenchido após /iniciar
-}
-
-interface ProductionOrder {
-  id: string; plot_id: string; plot_name: string; order_number: string
-  status: ProductionOrderStatus
-  planned_date: string | null; start_date: string | null
-  expected_end_date: string | null; executed_at: string | null
-  total_sacas: number; especial_sacas: number
-  superior_sacas: number; tradicional_sacas: number
-  total_cost: number; estimated_cost: number; realized_cost: number
-  harvest_progress: number; is_overdue: boolean; notes: string | null
-  inputs: ProductionInput[]; harvests: ProductionHarvest[]
-  workers: ProductionOrderWorker[]; services: ProductionOrderService[]
-  created_at: string; updated_at: string
-}
-
-interface ProductionResult {
-  order_id: string
-  total_sacas: number; especial_sacas: number
-  superior_sacas: number; tradicional_sacas: number
-  inputs_consumed: ProductionInput[]
-  items_below_minimum: string[]
-  executed_at: string
-}
-```
-
-## Status Flow (Ordens)
-
-```
-planejada → concluida (via "Produzir Safra")
-planejada → cancelada (via backend)
-```
-
-Excluir: apenas se `planejada`.
-
-## Features
-
-- CRUD completo de talhões com Sheet de histórico de atividades
-- Registro de atividades com tipo, mão de obra, custo e detalhes
-- Filtro de atividades por talhão
-- Ordens de produção com insumos dinâmicos
-- Produção de safra com distribuição aleatória de qualidades
-- Dialog visual de resultado com barra de proporção
-- Alerta se insumo ficar abaixo do mínimo após produção
-- Insumos carregados com `category: "insumo"` do módulo Estoque
+- **Página → Service → API.** Decimais chegam como string e são convertidos (`toNumber`) no service.
+- **`services/pcp.ts`:** `getInsumosDisponiveis()`, `getRecursosDisponiveis(role)` →
+  `ResourceAvailable[]` (cada item com **`available_quantity`**; nada é ocultado),
+  `getCargosDisponiveis()` → `CargoDisponivel[]` (`total_headcount`/`used`/`available_quantity`),
+  `createOrdem(payload)` (`hectares_used`, `inputs`, `position_requirements`, `resources`, `services`),
+  `iniciarProducao(id)` (pode dar **409** "Capacidade insuficiente…"),
+  `registrarColheita(id, {…})` (pode dar **400** "Estoque insuficiente…"),
+  `encerrarOrdem(id, reason)`, `getRelatorios()`.
+  Os erros 409/400 chegam como `Error(detail)` via `apiFetch` e são exibidos pelos componentes em toast.
+- **Tipos (`types/index.ts`):** `Plot.total_hectares`; `ProductionOrder` com `hectares_used`,
+  `industria_sacas`/`embalagem_sacas`/`descarte_sacas`, `position_requirements`, `resources`,
+  `early_closed_reason`; `ProductionHarvest` com destinos + `hectares_harvested`; `CustoDiscriminado`;
+  **`ResourceAvailable`** (StockItem + `available_quantity`) e **`CargoDisponivel`** (D5.1).
+  Não há mais workers nominais nem qualidades especial/superior/tradicional.
+- **Componentes:** `TalhaoForm`/`TalhaoCard`, `OrdemProducaoForm`, `OrdemProducaoCard`,
+  `ColheitaModal`, `ResultadoSafraDialog`, `RelatoriosPCP`.
+- **Detalhe de UX:** o diálogo de resultado da colheita só recarrega a lista ao **fechar** (evita
+  desmontar o card durante o spinner de carregamento).
+- **E2E:** `frontend/e2e/pcp.spec.ts` cobre o fluxo D5.1 (talhão → OP com SKU e máquina mostrando
+  disponível → **planejar livre** acima do disponível com aviso → iniciar consome capacidade
+  (disponível reflete 0) → iniciar excedente **bloqueia (409)** → encerrar libera → iniciar passa →
+  colheita por destino + custo discriminado). Roda em `make e2e` (ver `docs/frontend/_e2e-playwright.md`).

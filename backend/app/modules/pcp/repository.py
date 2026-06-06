@@ -6,14 +6,17 @@ from uuid import UUID
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 
+from app.modules.estoque.model import StockItem
+from app.modules.folha.model import Employee, JobPosition
 from app.modules.pcp.model import (
     Plot,
     PlotActivity,
     ProductionHarvest,
     ProductionInput,
     ProductionOrder,
+    ProductionOrderPositionRequirement,
+    ProductionOrderResource,
     ProductionOrderService,
-    ProductionOrderWorker,
 )
 from app.modules.pcp.schemas import (
     PlotActivityCreate,
@@ -21,7 +24,31 @@ from app.modules.pcp.schemas import (
     PlotUpdate,
     ProductionOrderCreate,
 )
-from app.shared.enums import ProductionOrderStatus
+from app.shared.enums import ProductionOrderStatus, SystemRole
+
+
+# Status "ativos" de uma OP — usados no controle de hectares do talhão (soma de
+# hectares_used das OPs ativas não pode exceder total_hectares). Inclui planejada.
+ACTIVE_STATUSES = [
+    ProductionOrderStatus.PLANEJADA,
+    ProductionOrderStatus.EM_PRODUCAO,
+    ProductionOrderStatus.EM_EXECUCAO,
+    ProductionOrderStatus.PAUSADA,
+]
+
+# Status que contam como OP "INICIADA/ocupando" capacidade (Demanda 5.1). Planejar
+# é livre → `planejada` NÃO ocupa; `concluida`/`cancelada` liberam. A ocupação de
+# recursos reutilizáveis (máquina/veículo) e de pessoas (cargo) é DERIVADA do
+# somatório de quantity sobre estas OPs — não há boolean nem campo de "ocupado".
+STARTED_STATUSES = [
+    ProductionOrderStatus.EM_PRODUCAO,
+    ProductionOrderStatus.EM_EXECUCAO,
+    ProductionOrderStatus.PAUSADA,
+]
+
+# Papéis de recurso REUTILIZÁVEL (ocupam capacidade enquanto a OP está iniciada;
+# não são consumidos). Embalagem/insumo são consumíveis e não entram aqui.
+REUSABLE_ROLES = [SystemRole.MAQUINA, SystemRole.VEICULO]
 
 
 # ---------------------------------------------------------------------------
@@ -35,6 +62,7 @@ def create_plot(db: Session, data: PlotCreate) -> Plot:
         location=data.location,
         variety=data.variety,
         capacity_sacas=data.capacity_sacas,
+        total_hectares=data.total_hectares,
         notes=data.notes,
     )
     db.add(plot)
@@ -84,6 +112,20 @@ def soft_delete_plot(db: Session, plot_id: UUID) -> Optional[Plot]:
     db.commit()
     db.refresh(plot)
     return plot
+
+
+def get_active_hectares_for_plot(
+    db: Session, plot_id: UUID, exclude_order_id: Optional[UUID] = None
+) -> Decimal:
+    """Soma de `hectares_used` das OPs ativas (não concluídas/canceladas) de um talhão."""
+    query = db.query(func.coalesce(func.sum(ProductionOrder.hectares_used), 0)).filter(
+        ProductionOrder.plot_id == plot_id,
+        ProductionOrder.status.in_(ACTIVE_STATUSES),
+        ProductionOrder.deleted_at.is_(None),
+    )
+    if exclude_order_id:
+        query = query.filter(ProductionOrder.id != exclude_order_id)
+    return Decimal(str(query.scalar() or 0))
 
 
 # ---------------------------------------------------------------------------
@@ -157,27 +199,30 @@ def create_order(
     db: Session,
     data: ProductionOrderCreate,
     input_cost_map: dict[UUID, Decimal],
-    workers_data: list[dict],
+    requirements_data: list[dict],
+    resources_data: list[dict],
     services_data: list[dict],
 ) -> ProductionOrder:
     """
     Create a ProductionOrder with PLANEJADA status.
     `input_cost_map` maps stock_item_id → unit_cost (resolved by service layer).
-    `workers_data`: [{employee_id, salary_snapshot, is_responsible}]
+    `requirements_data`: [{position_id, quantity, contract_type}]
+    `resources_data`: [{stock_item_id, resource_role, quantity, accumulated_hours}]
     `services_data`: [{supplier_id, description, amount, due_date}]
     """
     order_number = gerar_numero_ordem(db)
     order = ProductionOrder(
         plot_id=data.plot_id,
         order_number=order_number,
+        hectares_used=data.hectares_used,
         planned_date=data.planned_date,
         start_date=data.start_date,
         expected_end_date=data.expected_end_date,
         executed_at=None,
         total_sacas=Decimal("0"),
-        especial_sacas=Decimal("0"),
-        superior_sacas=Decimal("0"),
-        tradicional_sacas=Decimal("0"),
+        industria_sacas=Decimal("0"),
+        embalagem_sacas=Decimal("0"),
+        descarte_sacas=Decimal("0"),
         total_cost=Decimal("0"),
         estimated_cost=Decimal("0"),
         realized_cost=Decimal("0"),
@@ -203,13 +248,24 @@ def create_order(
         )
         total_cost += subtotal
 
-    for w in workers_data:
+    for req in requirements_data:
         db.add(
-            ProductionOrderWorker(
+            ProductionOrderPositionRequirement(
                 production_order_id=order.id,
-                employee_id=w["employee_id"],
-                salary_snapshot=w["salary_snapshot"],
-                is_responsible=w["is_responsible"],
+                position_id=req["position_id"],
+                quantity=req["quantity"],
+                contract_type=req["contract_type"],
+            )
+        )
+
+    for res in resources_data:
+        db.add(
+            ProductionOrderResource(
+                production_order_id=order.id,
+                stock_item_id=res["stock_item_id"],
+                resource_role=res["resource_role"],
+                quantity=res.get("quantity"),
+                accumulated_hours=res.get("accumulated_hours", Decimal("0")),
             )
         )
 
@@ -229,10 +285,16 @@ def create_order(
     order.total_cost = total_cost
     db.commit()
     db.refresh(order)
-    _ = order.inputs
-    _ = order.workers
-    _ = order.services
+    _eager_load(order)
     return order
+
+
+def _eager_load(order: ProductionOrder) -> None:
+    _ = order.inputs
+    _ = order.harvests
+    _ = order.position_requirements
+    _ = order.resources
+    _ = order.services
 
 
 def list_orders(
@@ -252,15 +314,12 @@ def list_orders(
         .all()
     )
     for o in orders:
-        _ = o.inputs
-        _ = o.harvests
-        _ = o.workers
-        _ = o.services
+        _eager_load(o)
     return orders
 
 
 def list_orders_for_report(db: Session) -> list[ProductionOrder]:
-    """All non-deleted orders, ordered by created_at desc, with inputs and harvests eagerly loaded."""
+    """All non-deleted orders, ordered by created_at desc, eagerly loaded."""
     orders = (
         db.query(ProductionOrder)
         .filter(ProductionOrder.deleted_at.is_(None))
@@ -268,8 +327,7 @@ def list_orders_for_report(db: Session) -> list[ProductionOrder]:
         .all()
     )
     for o in orders:
-        _ = o.inputs
-        _ = o.harvests
+        _eager_load(o)
     return orders
 
 
@@ -283,44 +341,114 @@ def get_order(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
         .first()
     )
     if order:
-        _ = order.inputs
-        _ = order.workers
-        _ = order.services
+        _eager_load(order)
     return order
 
 
 def get_order_with_harvests(db: Session, order_id: UUID) -> Optional[ProductionOrder]:
-    order = (
-        db.query(ProductionOrder)
+    return get_order(db, order_id)
+
+
+def get_started_resource_usage(
+    db: Session, *, exclude_order_id: Optional[UUID] = None
+) -> dict[UUID, Decimal]:
+    """Ocupação DERIVADA de recursos reutilizáveis (máquina/veículo): por
+    stock_item_id, a soma de `quantity` em OPs JÁ INICIADAS.
+
+    `quantity` nulo conta como 1 (um recurso = uma unidade). Planejar não ocupa.
+    """
+    query = (
+        db.query(
+            ProductionOrderResource.stock_item_id,
+            func.coalesce(func.sum(func.coalesce(ProductionOrderResource.quantity, 1)), 0),
+        )
+        .join(
+            ProductionOrder,
+            ProductionOrder.id == ProductionOrderResource.production_order_id,
+        )
         .filter(
-            ProductionOrder.id == order_id,
+            ProductionOrderResource.resource_role.in_(REUSABLE_ROLES),
+            ProductionOrder.status.in_(STARTED_STATUSES),
             ProductionOrder.deleted_at.is_(None),
         )
-        .first()
-    )
-    if order:
-        _ = order.inputs
-        _ = order.harvests
-        _ = order.workers
-        _ = order.services
-    return order
-
-
-def has_active_order_for_plot(
-    db: Session, plot_id: UUID, exclude_order_id: Optional[UUID] = None
-) -> bool:
-    """Returns True if the plot already has an order with status em_execucao or pausada."""
-    query = db.query(ProductionOrder).filter(
-        ProductionOrder.plot_id == plot_id,
-        ProductionOrder.status.in_([
-            ProductionOrderStatus.EM_EXECUCAO,
-            ProductionOrderStatus.PAUSADA,
-        ]),
-        ProductionOrder.deleted_at.is_(None),
     )
     if exclude_order_id:
         query = query.filter(ProductionOrder.id != exclude_order_id)
-    return query.first() is not None
+    query = query.group_by(ProductionOrderResource.stock_item_id)
+    return {row[0]: Decimal(str(row[1])) for row in query.all()}
+
+
+def get_started_position_usage(
+    db: Session, *, exclude_order_id: Optional[UUID] = None
+) -> dict[UUID, Decimal]:
+    """Ocupação DERIVADA de pessoas por cargo: por position_id, a soma de
+    `quantity` dos requisitos em OPs JÁ INICIADAS. Planejar não ocupa."""
+    query = (
+        db.query(
+            ProductionOrderPositionRequirement.position_id,
+            func.coalesce(func.sum(ProductionOrderPositionRequirement.quantity), 0),
+        )
+        .join(
+            ProductionOrder,
+            ProductionOrder.id
+            == ProductionOrderPositionRequirement.production_order_id,
+        )
+        .filter(
+            ProductionOrder.status.in_(STARTED_STATUSES),
+            ProductionOrder.deleted_at.is_(None),
+        )
+    )
+    if exclude_order_id:
+        query = query.filter(ProductionOrder.id != exclude_order_id)
+    query = query.group_by(ProductionOrderPositionRequirement.position_id)
+    return {row[0]: Decimal(str(row[1])) for row in query.all()}
+
+
+def count_active_headcount_by_position(db: Session, position_id: UUID) -> int:
+    """TOTAL de pessoas de um cargo: funcionários ATIVOS (is_active, não deletados)
+    com aquele `position_id`."""
+    return (
+        db.query(Employee)
+        .filter(
+            Employee.position_id == position_id,
+            Employee.is_active.is_(True),
+            Employee.deleted_at.is_(None),
+        )
+        .count()
+    )
+
+
+def list_active_positions(db: Session) -> list[JobPosition]:
+    return (
+        db.query(JobPosition)
+        .filter(JobPosition.deleted_at.is_(None))
+        .order_by(JobPosition.name.asc())
+        .all()
+    )
+
+
+def get_resource(
+    db: Session, order_id: UUID, resource_id: UUID
+) -> Optional[ProductionOrderResource]:
+    return (
+        db.query(ProductionOrderResource)
+        .filter(
+            ProductionOrderResource.id == resource_id,
+            ProductionOrderResource.production_order_id == order_id,
+        )
+        .first()
+    )
+
+
+def increment_resource_hours(
+    db: Session, resource: ProductionOrderResource, hours: Decimal
+) -> ProductionOrderResource:
+    """Soma `hours` ao `accumulated_hours` do recurso (incremental, null-safe)."""
+    resource.accumulated_hours = Decimal(str(resource.accumulated_hours)) + hours
+    db.add(resource)
+    db.commit()
+    db.refresh(resource)
+    return resource
 
 
 def update_order(db: Session, order_id: UUID, **kwargs) -> Optional[ProductionOrder]:
@@ -332,34 +460,8 @@ def update_order(db: Session, order_id: UUID, **kwargs) -> Optional[ProductionOr
     db.add(order)
     db.commit()
     db.refresh(order)
-    _ = order.inputs
+    _eager_load(order)
     return order
-
-
-def get_employee_ids_in_active_productions(db: Session) -> list[UUID]:
-    """
-    Retorna IDs de funcionários em ordens ativas (não concluídas/canceladas).
-    Usado para bloquear seleção no frontend.
-    """
-    active_statuses = [
-        ProductionOrderStatus.PLANEJADA,
-        ProductionOrderStatus.EM_PRODUCAO,
-        ProductionOrderStatus.EM_EXECUCAO,
-        ProductionOrderStatus.PAUSADA,
-    ]
-    rows = (
-        db.query(ProductionOrderWorker.employee_id)
-        .join(
-            ProductionOrder,
-            ProductionOrder.id == ProductionOrderWorker.production_order_id,
-        )
-        .filter(
-            ProductionOrder.status.in_(active_statuses),
-            ProductionOrder.deleted_at.is_(None),
-        )
-        .all()
-    )
-    return [r.employee_id for r in rows]
 
 
 def set_service_accounts_payable(
@@ -396,10 +498,11 @@ def create_harvest(
     *,
     order_id: UUID,
     percentage_harvested: Decimal,
+    hectares_harvested: Decimal,
     sacks_total: Decimal,
-    sacks_especial: Decimal,
-    sacks_superior: Decimal,
-    sacks_tradicional: Decimal,
+    sacks_industria: Decimal,
+    sacks_embalagem: Decimal,
+    sacks_descarte: Decimal,
     inputs_consumed: list[dict[str, Any]],
     is_final: bool,
 ) -> ProductionHarvest:
@@ -414,10 +517,11 @@ def create_harvest(
         production_order_id=order_id,
         harvest_number=current_count + 1,
         percentage_harvested=percentage_harvested,
+        hectares_harvested=hectares_harvested,
         sacks_total=sacks_total,
-        sacks_especial=sacks_especial,
-        sacks_superior=sacks_superior,
-        sacks_tradicional=sacks_tradicional,
+        sacks_industria=sacks_industria,
+        sacks_embalagem=sacks_embalagem,
+        sacks_descarte=sacks_descarte,
         inputs_consumed=inputs_consumed,
         is_final=is_final,
     )
@@ -433,9 +537,9 @@ def update_order_harvest_progress(
     *,
     additional_percentage: Decimal,
     additional_sacks_total: Decimal,
-    additional_sacks_especial: Decimal,
-    additional_sacks_superior: Decimal,
-    additional_sacks_tradicional: Decimal,
+    additional_sacks_industria: Decimal,
+    additional_sacks_embalagem: Decimal,
+    additional_sacks_descarte: Decimal,
 ) -> Optional[ProductionOrder]:
     """
     Acumula totais e progresso na ordem. Se atingir 100%, marca como concluida
@@ -446,11 +550,9 @@ def update_order_harvest_progress(
         return None
     order.harvest_progress = Decimal(order.harvest_progress) + additional_percentage
     order.total_sacas = Decimal(order.total_sacas) + additional_sacks_total
-    order.especial_sacas = Decimal(order.especial_sacas) + additional_sacks_especial
-    order.superior_sacas = Decimal(order.superior_sacas) + additional_sacks_superior
-    order.tradicional_sacas = (
-        Decimal(order.tradicional_sacas) + additional_sacks_tradicional
-    )
+    order.industria_sacas = Decimal(order.industria_sacas) + additional_sacks_industria
+    order.embalagem_sacas = Decimal(order.embalagem_sacas) + additional_sacks_embalagem
+    order.descarte_sacas = Decimal(order.descarte_sacas) + additional_sacks_descarte
     if Decimal(order.harvest_progress) >= Decimal("100"):
         order.status = ProductionOrderStatus.CONCLUIDA
         order.executed_at = datetime.now(timezone.utc)
