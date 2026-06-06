@@ -461,6 +461,8 @@ export interface Plot {
   location: string | null
   variety: string
   capacity_sacas: number
+  /** Área total do talhão em hectares (> 0). Base do controle de área das OPs. */
+  total_hectares: number
   notes: string | null
   created_at: string
   updated_at: string
@@ -493,6 +495,7 @@ export interface ProductionInput {
   id: string
   stock_item_id: string
   stock_item_name: string
+  sku: string
   unit: string
   quantity: number
   unit_cost: number
@@ -507,6 +510,52 @@ export type ProductionOrderStatus =
   | "concluida"
   | "cancelada"
 
+/** Requisito de mão de obra por cargo (sem seleção nominal de funcionário). */
+export interface PositionRequirement {
+  id: string
+  position_id: string
+  position_name: string
+  quantity: number
+  contract_type: ContractType
+  base_salary: number
+}
+
+/**
+ * Item de recurso disponível para a OP (Demanda 5.1). Estende `StockItem` com o
+ * disponível derivado (`available_quantity = saldo − Σ usado em OPs INICIADAS`).
+ * Planejar é livre: o item nunca some; o disponível é só informativo.
+ */
+export interface ResourceAvailable extends StockItem {
+  available_quantity: number
+}
+
+/** Cargo com headcount total e disponível (Demanda 5.1) para o select da OP. */
+export interface CargoDisponivel {
+  position_id: string
+  position_name: string
+  base_salary: number
+  total_headcount: number
+  used: number
+  available_quantity: number
+}
+
+/** Recurso alocado à OP: máquina/veículo (reserva exclusiva) ou embalagem (consumo). */
+export interface ProductionResource {
+  id: string
+  stock_item_id: string
+  stock_item_name: string
+  sku: string
+  unit: string
+  resource_role: SystemRole
+  /** Quantidade — usada para embalagens (consumo); nula para máquina/veículo. */
+  quantity: number | null
+  /** Horas acumuladas (incremental) para máquina/veículo. */
+  accumulated_hours: number
+  hourly_cost: number | null
+  /** Custo do recurso = accumulated_hours × hourly_cost (0 para embalagem). */
+  cost: number
+}
+
 export interface HarvestInputConsumed {
   stock_item_id: string
   name: string
@@ -519,21 +568,15 @@ export interface ProductionHarvest {
   production_order_id: string
   harvest_number: number
   percentage_harvested: number
+  /** Hectares colhidos = (percentual/100) × hectares da OP. */
+  hectares_harvested: number | null
   sacks_total: number
-  sacks_especial: number
-  sacks_superior: number
-  sacks_tradicional: number
+  sacks_industria: number
+  sacks_embalagem: number
+  sacks_descarte: number
   inputs_consumed: HarvestInputConsumed[]
   is_final: boolean
   harvested_at: string
-}
-
-export interface ProductionOrderWorker {
-  id: string
-  employee_id: string
-  employee_name: string
-  salary_snapshot: number
-  is_responsible: boolean
 }
 
 export interface ProductionOrderService {
@@ -552,23 +595,26 @@ export interface ProductionOrder {
   plot_name: string
   order_number: string
   status: ProductionOrderStatus
+  hectares_used: number
   planned_date: string | null
   start_date: string | null
   expected_end_date: string | null
   executed_at: string | null
   total_sacas: number
-  especial_sacas: number
-  superior_sacas: number
-  tradicional_sacas: number
+  industria_sacas: number
+  embalagem_sacas: number
+  descarte_sacas: number
   total_cost: number
   estimated_cost: number
   realized_cost: number
   harvest_progress: number
   is_overdue: boolean
+  early_closed_reason: string | null
   notes: string | null
   inputs: ProductionInput[]
   harvests: ProductionHarvest[]
-  workers: ProductionOrderWorker[]
+  position_requirements: PositionRequirement[]
+  resources: ProductionResource[]
   services: ProductionOrderService[]
   created_at: string
   updated_at: string
@@ -583,21 +629,31 @@ export interface ProductionResult {
 
 // ── PCP Reports ───────────────────────────────────────────────────────────────
 
+/** Custo da OP/safra quebrado por tipo (decisão travada da Demanda 5). */
+export interface CustoDiscriminado {
+  insumos: number
+  pessoal: number
+  maquinas: number
+  embalagens: number
+  servicos: number
+  total: number
+}
+
 export interface ProducaoPorTalhaoItem {
   plot_id: string
   plot_name: string
   total_sacas: number
-  especial_sacas: number
-  superior_sacas: number
-  tradicional_sacas: number
-  total_orders: number
+  industria_sacas: number
+  embalagem_sacas: number
+  descarte_sacas: number
+  orders_count: number
 }
 
 export interface ConsumoInsumoItem {
   stock_item_id: string
   stock_item_name: string
   total_quantity: number
-  total_subtotal: number
+  total_cost: number
   unit: string
 }
 
@@ -619,6 +675,7 @@ export interface CustoPrevistoVsRealizadoItem {
   estimated_cost: number
   realized_cost: number
   diferenca: number
+  custo_realizado_discriminado: CustoDiscriminado
 }
 
 export interface PCPReport {
@@ -626,6 +683,8 @@ export interface PCPReport {
   consumo_insumos: ConsumoInsumoItem[]
   ordens_resumo: OrdensResumo
   custo_previsto_vs_realizado: CustoPrevistoVsRealizadoItem[]
+  custo_safra_discriminado: CustoDiscriminado
+  generated_at: string
 }
 
 // ── FOLHA DE PAGAMENTO ────────────────────────────────────────────────────────

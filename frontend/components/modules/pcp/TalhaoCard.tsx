@@ -99,10 +99,14 @@ export function TalhaoCard({ plot, onEdit, onDeleted }: TalhaoCardProps) {
         </CardHeader>
 
         <CardContent className="space-y-2">
-          <div className="grid grid-cols-2 gap-2 text-sm">
+          <div className="grid grid-cols-3 gap-2 text-sm">
             <div>
               <span className="text-slate-500">Variedade</span>
               <p className="font-medium text-slate-700">{plot.variety}</p>
+            </div>
+            <div>
+              <span className="text-slate-500">Área</span>
+              <p className="font-medium text-slate-700">{plot.total_hectares} ha</p>
             </div>
             <div>
               <span className="text-slate-500">Capacidade</span>

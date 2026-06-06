@@ -1,4 +1,4 @@
-.PHONY: up down reset-db logs build shell-backend shell-db \
+.PHONY: up down reset-db logs build shell-backend shell-db e2e \
         up-prod down-prod build-prod reset-db-prod
 
 up:
@@ -14,7 +14,14 @@ logs:
 	docker-compose logs -f
 
 reset-db:
-	docker-compose exec backend poetry run python scripts/reset_db.py
+	docker-compose exec -T backend poetry run python scripts/reset_db.py
+
+# E2E (Playwright): semeia o banco de forma determinística e roda a suíte.
+# Pré-requisitos (uma vez): stack de pé (`make up`) e browsers do Playwright
+# instalados — `cd frontend && npx playwright install --with-deps chromium`.
+e2e:
+	$(MAKE) reset-db
+	cd frontend && npx playwright test
 
 shell-backend:
 	docker-compose exec backend bash

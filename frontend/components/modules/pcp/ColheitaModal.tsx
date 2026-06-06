@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import {
@@ -9,16 +9,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-} from "@/components/ui/alert-dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { registrarColheita } from "@/services/pcp"
@@ -32,29 +22,38 @@ interface ColheitaModalProps {
 }
 
 export function ColheitaModal({ open, onOpenChange, order, onSuccess }: ColheitaModalProps) {
-  const [percentage, setPercentage] = useState<number>(
-    Math.min(50, 100 - order.harvest_progress)
-  )
-  const [confirmOpen, setConfirmOpen] = useState(false)
+  const remaining = 100 - order.harvest_progress
+
+  const [percentage, setPercentage] = useState<number>(Math.min(50, remaining))
+  const [industria, setIndustria] = useState<number>(0)
+  const [embalagem, setEmbalagem] = useState<number>(0)
+  const [descarte, setDescarte] = useState<number>(0)
   const [loading, setLoading] = useState(false)
 
-  const remaining = 100 - order.harvest_progress
+  useEffect(() => {
+    if (open) {
+      setPercentage(Math.min(50, 100 - order.harvest_progress))
+      setIndustria(0)
+      setEmbalagem(0)
+      setDescarte(0)
+    }
+  }, [open, order.harvest_progress])
+
   const isFinal = percentage >= remaining
-
-  function handleSliderChange(e: React.ChangeEvent<HTMLInputElement>) {
-    setPercentage(Math.min(Number(e.target.value), remaining))
-  }
-
-  function handleInputChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const val = Number(e.target.value)
-    if (!isNaN(val)) setPercentage(Math.min(Math.max(0, val), remaining))
-  }
+  const totalSacks = industria + embalagem + descarte
+  // Hectares colhidos nesta etapa = (percentual / 100) × hectares da OP.
+  const hectares = (percentage / 100) * order.hectares_used
+  const canSubmit = percentage > 0 && percentage <= remaining && totalSacks > 0
 
   async function handleConfirm() {
     setLoading(true)
-    setConfirmOpen(false)
     try {
-      const result = await registrarColheita(order.id, percentage)
+      const result = await registrarColheita(order.id, {
+        percentage_harvested: percentage,
+        sacks_industria: industria,
+        sacks_embalagem: embalagem,
+        sacks_descarte: descarte,
+      })
       const h = result.harvest
       toast.success(
         `Colheita #${h.harvest_number} registrada — ${h.sacks_total.toFixed(3)} sacas` +
@@ -72,94 +71,125 @@ export function ColheitaModal({ open, onOpenChange, order, onSuccess }: Colheita
   }
 
   return (
-    <>
-      <Dialog open={open} onOpenChange={onOpenChange}>
-        <DialogContent className="max-w-sm">
-          <DialogHeader>
-            <DialogTitle>Registrar Colheita — {order.order_number}</DialogTitle>
-          </DialogHeader>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-md">
+        <DialogHeader>
+          <DialogTitle>Registrar Colheita — {order.order_number}</DialogTitle>
+        </DialogHeader>
 
-          <div className="space-y-4 py-2">
-            <div className="space-y-1 text-sm text-slate-600">
-              <p>
-                Progresso atual:{" "}
-                <span className="font-semibold text-slate-800">
-                  {order.harvest_progress.toFixed(1)}%
-                </span>
-              </p>
-              <p>
-                Restante disponível:{" "}
-                <span className="font-semibold text-slate-800">{remaining.toFixed(1)}%</span>
-              </p>
+        <div className="space-y-4 py-2">
+          <div className="space-y-1 text-sm text-slate-600">
+            <p>
+              Progresso atual:{" "}
+              <span className="font-semibold text-slate-800">
+                {order.harvest_progress.toFixed(1)}%
+              </span>{" "}
+              · Restante:{" "}
+              <span className="font-semibold text-slate-800">{remaining.toFixed(1)}%</span>
+            </p>
+            <p>
+              Área da ordem:{" "}
+              <span className="font-semibold text-slate-800">
+                {order.hectares_used} ha
+              </span>
+            </p>
+          </div>
+
+          <div className="space-y-1">
+            <Label htmlFor="colheita-pct">Percentual a colher *</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="colheita-pct"
+                type="number"
+                min={1}
+                max={remaining}
+                step={0.1}
+                value={percentage}
+                onChange={(e) =>
+                  setPercentage(
+                    Math.min(Math.max(0, Number(e.target.value)), remaining)
+                  )
+                }
+                className="w-28"
+              />
+              <span className="text-slate-500 text-sm">%</span>
+              <span className="text-sm text-slate-600">
+                = <strong>{hectares.toFixed(2)} hectares</strong>
+              </span>
             </div>
+          </div>
 
-            <div className="space-y-2">
-              <Label>Percentual a colher</Label>
-              <div className="flex items-center gap-3">
-                <input
-                  type="range"
-                  min={1}
-                  max={remaining}
-                  step={1}
-                  value={percentage}
-                  onChange={handleSliderChange}
-                  className="flex-1 accent-green-600"
-                />
+          {/* Sacas por destino (colheita determinística) */}
+          <div className="space-y-2">
+            <Label>Sacas por destino *</Label>
+            <div className="grid grid-cols-3 gap-2">
+              <div className="space-y-1">
+                <Label htmlFor="dest-industria" className="text-xs text-slate-500">
+                  Indústria
+                </Label>
                 <Input
+                  id="dest-industria"
                   type="number"
-                  min={1}
-                  max={remaining}
-                  step={0.1}
-                  value={percentage}
-                  onChange={handleInputChange}
-                  className="w-20 text-center"
+                  min={0}
+                  step={0.001}
+                  value={industria}
+                  onChange={(e) => setIndustria(Math.max(0, Number(e.target.value)))}
                 />
-                <span className="text-slate-500 text-sm">%</span>
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dest-embalagem" className="text-xs text-slate-500">
+                  Embalagem
+                </Label>
+                <Input
+                  id="dest-embalagem"
+                  type="number"
+                  min={0}
+                  step={0.001}
+                  value={embalagem}
+                  onChange={(e) => setEmbalagem(Math.max(0, Number(e.target.value)))}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dest-descarte" className="text-xs text-slate-500">
+                  Descarte
+                </Label>
+                <Input
+                  id="dest-descarte"
+                  type="number"
+                  min={0}
+                  step={0.001}
+                  value={descarte}
+                  onChange={(e) => setDescarte(Math.max(0, Number(e.target.value)))}
+                />
               </div>
             </div>
-
-            {isFinal && (
-              <div className="rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800">
-                Esta colheita <strong>finalizará</strong> a ordem (100%).
-              </div>
-            )}
-
-            {!isFinal && (
-              <div className="rounded-md bg-slate-50 border border-slate-200 p-3 text-sm text-slate-600">
-                Após esta colheita: {(order.harvest_progress + percentage).toFixed(1)}% concluído
-              </div>
-            )}
+            <p className="text-xs text-slate-500">
+              Total: <strong>{totalSacks.toFixed(3)} sacas</strong>
+            </p>
           </div>
 
-          <div className="flex justify-end gap-2 pt-2 border-t">
-            <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={() => setConfirmOpen(true)}
-              disabled={loading || percentage <= 0}
-            >
-              {loading ? "Registrando..." : "Confirmar colheita"}
-            </Button>
+          <div
+            className={
+              isFinal
+                ? "rounded-md bg-green-50 border border-green-200 p-3 text-sm text-green-800"
+                : "rounded-md bg-slate-50 border border-slate-200 p-3 text-sm text-slate-600"
+            }
+          >
+            {isFinal
+              ? "Esta colheita finalizará a ordem (100%)."
+              : `Após esta colheita: ${(order.harvest_progress + percentage).toFixed(1)}% concluído`}
           </div>
-        </DialogContent>
-      </Dialog>
+        </div>
 
-      <AlertDialog open={confirmOpen} onOpenChange={setConfirmOpen}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Confirmar colheita de {percentage.toFixed(1)}%?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Isso consumirá insumos proporcionais do estoque e registrará a entrada de café
-              produzido. {isFinal ? "A ordem será marcada como concluída." : ""}
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel>Voltar</AlertDialogCancel>
-            <AlertDialogAction onClick={handleConfirm}>Confirmar</AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
-    </>
+        <div className="flex justify-end gap-2 pt-2 border-t">
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={loading}>
+            Cancelar
+          </Button>
+          <Button onClick={handleConfirm} disabled={loading || !canSubmit}>
+            {loading ? "Registrando..." : "Confirmar colheita"}
+          </Button>
+        </div>
+      </DialogContent>
+    </Dialog>
   )
 }

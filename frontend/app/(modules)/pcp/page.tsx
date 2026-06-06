@@ -20,8 +20,7 @@ import { RelatoriosPCP } from "@/components/modules/pcp/RelatoriosPCP"
 import { TalhaoCard } from "@/components/modules/pcp/TalhaoCard"
 import { TalhaoForm } from "@/components/modules/pcp/TalhaoForm"
 import { getAtividades, getOrdens, getTalhoes } from "@/services/pcp"
-import { getItens } from "@/services/estoque"
-import { Plot, PlotActivity, ProductionOrder, StockItem } from "@/types/index"
+import { Plot, PlotActivity, ProductionOrder } from "@/types/index"
 import { formatDate, formatCurrency } from "@/lib/utils"
 
 const ACTIVITY_LABELS: Record<string, string> = {
@@ -60,9 +59,6 @@ export default function PCPPage() {
   const [atividadesLoading, setAtividadesLoading] = useState(false)
   const [atividadePlotFilter, setAtividadePlotFilter] = useState("all")
   const [atividadeFormOpen, setAtividadeFormOpen] = useState(false)
-
-  // Insumos (para OrdemProducaoForm)
-  const [insumos, setInsumos] = useState<StockItem[]>([])
 
   const loadOrdens = useCallback(async () => {
     setOrdensLoading(true)
@@ -105,10 +101,6 @@ export default function PCPPage() {
   useEffect(() => { loadOrdens() }, [loadOrdens])
   useEffect(() => { loadPlots() }, [loadPlots])
   useEffect(() => { loadAtividades() }, [loadAtividades])
-
-  useEffect(() => {
-    getItens({ role: "insumo" }).then(setInsumos).catch(() => {})
-  }, [])
 
   function handleEditPlot(plot: Plot) {
     setEditingPlot(plot)
@@ -277,7 +269,7 @@ export default function PCPPage() {
         open={ordemFormOpen}
         onOpenChange={setOrdemFormOpen}
         plots={plots}
-        insumos={insumos}
+        orders={ordens}
         onSuccess={loadOrdens}
       />
 

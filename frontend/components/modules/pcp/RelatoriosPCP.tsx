@@ -53,10 +53,23 @@ export function RelatoriosPCP() {
 
   if (!report) return null
 
-  const { producao_por_talhao, consumo_insumos, ordens_resumo, custo_previsto_vs_realizado } =
-    report
+  const {
+    producao_por_talhao,
+    consumo_insumos,
+    ordens_resumo,
+    custo_previsto_vs_realizado,
+    custo_safra_discriminado,
+  } = report
 
   const resumoEntries = Object.entries(ordens_resumo) as [string, number][]
+
+  const custoLinhas: { label: string; value: number }[] = [
+    { label: "Insumos", value: custo_safra_discriminado.insumos },
+    { label: "Pessoal", value: custo_safra_discriminado.pessoal },
+    { label: "Máquinas", value: custo_safra_discriminado.maquinas },
+    { label: "Embalagens", value: custo_safra_discriminado.embalagens },
+    { label: "Serviços", value: custo_safra_discriminado.servicos },
+  ]
 
   return (
     <div className="space-y-6">
@@ -88,7 +101,32 @@ export function RelatoriosPCP() {
         </CardContent>
       </Card>
 
-      {/* Produção por talhão */}
+      {/* Custo da safra (discriminado) */}
+      <Card>
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base">Custo da Safra (discriminado)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3">
+            {custoLinhas.map((l) => (
+              <div key={l.label} className="rounded-md border bg-slate-50 p-3 text-center">
+                <p className="text-xs text-slate-500">{l.label}</p>
+                <p className="text-sm font-semibold text-slate-800">
+                  {formatCurrency(l.value)}
+                </p>
+              </div>
+            ))}
+            <div className="rounded-md border border-slate-300 bg-slate-100 p-3 text-center">
+              <p className="text-xs text-slate-600">Total</p>
+              <p className="text-sm font-bold text-slate-900">
+                {formatCurrency(custo_safra_discriminado.total)}
+              </p>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Produção por talhão (por destino) */}
       <Card>
         <CardHeader className="pb-3">
           <CardTitle className="text-base">Produção por Talhão</CardTitle>
@@ -104,9 +142,9 @@ export function RelatoriosPCP() {
                 <TableRow>
                   <TableHead>Talhão</TableHead>
                   <TableHead className="text-right">Ordens</TableHead>
-                  <TableHead className="text-right">Especial (sacas)</TableHead>
-                  <TableHead className="text-right">Superior (sacas)</TableHead>
-                  <TableHead className="text-right">Tradicional (sacas)</TableHead>
+                  <TableHead className="text-right">Indústria (sacas)</TableHead>
+                  <TableHead className="text-right">Embalagem (sacas)</TableHead>
+                  <TableHead className="text-right">Descarte (sacas)</TableHead>
                   <TableHead className="text-right">Total (sacas)</TableHead>
                 </TableRow>
               </TableHeader>
@@ -114,15 +152,15 @@ export function RelatoriosPCP() {
                 {producao_por_talhao.map((row) => (
                   <TableRow key={row.plot_id}>
                     <TableCell className="font-medium">{row.plot_name}</TableCell>
-                    <TableCell className="text-right">{row.total_orders}</TableCell>
+                    <TableCell className="text-right">{row.orders_count}</TableCell>
                     <TableCell className="text-right text-amber-700">
-                      {row.especial_sacas.toFixed(3)}
+                      {row.industria_sacas.toFixed(3)}
                     </TableCell>
                     <TableCell className="text-right text-green-700">
-                      {row.superior_sacas.toFixed(3)}
+                      {row.embalagem_sacas.toFixed(3)}
                     </TableCell>
                     <TableCell className="text-right text-slate-600">
-                      {row.tradicional_sacas.toFixed(3)}
+                      {row.descarte_sacas.toFixed(3)}
                     </TableCell>
                     <TableCell className="text-right font-semibold">
                       {row.total_sacas.toFixed(3)}
@@ -160,7 +198,7 @@ export function RelatoriosPCP() {
                       {row.total_quantity.toFixed(3)} {row.unit}
                     </TableCell>
                     <TableCell className="text-right">
-                      {formatCurrency(row.total_subtotal)}
+                      {formatCurrency(row.total_cost)}
                     </TableCell>
                   </TableRow>
                 ))}
