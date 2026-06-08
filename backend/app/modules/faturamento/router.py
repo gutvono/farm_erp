@@ -31,13 +31,20 @@ def list_invoices(
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
     order_id: Optional[UUID] = None,
+    sale_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
     invoices = fat_service.list_invoices(
-        db, status=status, client_id=client_id, order_id=order_id, skip=skip, limit=limit
+        db,
+        status=status,
+        client_id=client_id,
+        order_id=order_id,
+        sale_id=sale_id,
+        skip=skip,
+        limit=limit,
     )
     data = [_serialize(inv, db) for inv in invoices]
     return success("Faturas listadas com sucesso", data)

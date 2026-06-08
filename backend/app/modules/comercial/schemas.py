@@ -18,7 +18,17 @@ class ClientCreate(BaseModel):
     document: Optional[str] = Field(default=None, max_length=32)
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
+    # Endereço legado (texto livre) — mantido por compatibilidade.
     address: Optional[str] = Field(default=None, max_length=500)
+    # Endereço estruturado (Demanda 7, espelha o fornecedor da D6). A busca por
+    # CEP (ViaCEP) é feita no front; o backend só persiste o que recebe.
+    cep: Optional[str] = Field(default=None, max_length=9)
+    street: Optional[str] = Field(default=None, max_length=255)
+    number: Optional[str] = Field(default=None, max_length=20)
+    complement: Optional[str] = Field(default=None, max_length=120)
+    neighborhood: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=2)
     notes: Optional[str] = None
 
 
@@ -28,6 +38,13 @@ class ClientUpdate(BaseModel):
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
     address: Optional[str] = Field(default=None, max_length=500)
+    cep: Optional[str] = Field(default=None, max_length=9)
+    street: Optional[str] = Field(default=None, max_length=255)
+    number: Optional[str] = Field(default=None, max_length=20)
+    complement: Optional[str] = Field(default=None, max_length=120)
+    neighborhood: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=2)
     notes: Optional[str] = None
 
 
@@ -38,6 +55,13 @@ class ClientOut(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    cep: Optional[str] = None
+    street: Optional[str] = None
+    number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
     is_delinquent: bool
     notes: Optional[str] = None
     created_at: datetime
@@ -162,3 +186,10 @@ class SaleOut(BaseModel):
 
 class SaleStatusUpdate(BaseModel):
     status: SaleStatus
+
+
+class SaleCancelRequest(BaseModel):
+    """Corpo (opcional) da ação 'Cancelar venda'. ``reason`` é o motivo do
+    cancelamento, registrado nas NFs estornadas."""
+
+    reason: Optional[str] = None

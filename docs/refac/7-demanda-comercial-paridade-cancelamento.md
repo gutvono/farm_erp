@@ -49,6 +49,14 @@ Releia: `docs/backend/comercial.md`, `docs/frontend/comercial.md`, e os reais
   normalmente** mesmo para cliente inadimplente — o backend **não** recusa. O **front** exibe um
   aviso/confirmação antes de finalizar a venda quando o cliente está `is_delinquent`. (Automatizar a
   flag a partir de AR vencida fica **fora de escopo** desta demanda.)
+- **"Ver notas fiscais da venda" (transparência, NÃO cancelamento por nota).** Espelhando o "Ver notas
+  relacionadas" da Compra (`OrdemCard` → `/faturamento?order_id=...`), a venda ganha navegação para o
+  Faturamento filtrado pela venda (`/faturamento?sale_id=...`). O modal de "Cancelar venda" oferece um
+  botão secundário **"Ver notas fiscais antes"** que leva a essa tela. **A ação de cancelar continua
+  sendo a venda INTEIRA** — não há cancelamento nota-a-nota na tela de vendas (no modelo atual de 1 NF
+  por parcela, cancelar qualquer NF já estorna a cadeia toda; expor "cancelar esta nota" seria
+  enganoso). A unificação "1 NF + N parcelas" é demanda futura — ver
+  `backlog-faturamento-fluxo-dinheiro-notas.md`.
 
 ## Critérios de aceite
 - [ ] Documento de cliente validado no backend (CPF/CNPJ, dígitos verificadores); 400 em documento inválido; opcional quando ausente.
@@ -56,6 +64,8 @@ Releia: `docs/backend/comercial.md`, `docs/frontend/comercial.md`, e os reais
 - [ ] `PATCH /vendas/{id}/status` recusa `CANCELADA` (400); o status só muda para estados válidos.
 - [ ] Ação "Cancelar venda" cancela ponta a ponta (estoque devolvido, **todas** as NFs da venda canceladas, **todas** as contas a receber baixadas, estornos gerados) — provado para venda à vista **e** parcelada.
 - [ ] Venda para cliente inadimplente é **concluída** pelo backend; o front **avisa** antes de finalizar.
+- [ ] `GET /faturas?sale_id=` filtra as notas de uma venda; o front navega do `VendaCard` para o
+      Faturamento filtrado (botão "Ver notas fiscais", inclusive no modal de cancelamento).
 - [ ] Smoke tests com SELECT no container provando estoque/AR/NF antes e depois do cancelamento.
 
 ---
@@ -136,6 +146,21 @@ Releia: `docs/backend/comercial.md`, `docs/frontend/comercial.md`, e os reais
 
 ---
 
+## ▶️ Adendo — Agente BACKEND (filtro `sale_id` em `GET /faturas`)
+
+> Pequeno incremento decidido depois (habilita o "Ver notas fiscais da venda" no front, espelhando o
+> `order_id` da Compra). O **repository** `list_invoices` JÁ aceita `sale_id` (`faturamento/
+> repository.py`); falta expor no **service** e no **router**.
+> 1. `faturamento/service.py::list_invoices`: adicione o parâmetro `sale_id: Optional[UUID] = None` e
+>    repasse ao repository (ao lado de `order_id`).
+> 2. `faturamento/router.py` `GET /faturas`: adicione o query param `sale_id: Optional[UUID] = None` e
+>    repasse ao service.
+> 3. **Done:** `GET /faturas?sale_id={id}` retorna só as notas daquela venda (à vista: 1; parcelado: N +
+>    transporte). Prove com a venda parcelada do seed/smoke. Sem migration. Atualize a linha de
+>    endpoints em `docs/backend/faturamento.md`.
+
+---
+
 ## ▶️ Prompt — Agente FRONTEND
 
 > Você é o **Frontend**. Leia `/.claude/agents/frontend.md`, a seção "Regras transversais" de
@@ -162,6 +187,12 @@ Releia: `docs/backend/comercial.md`, `docs/frontend/comercial.md`, e os reais
 >    confirmação (texto deixando claro que estorna estoque e financeiro e é irreversível; `reason`
 >    opcional) → chama `services/comercial.ts` → novo endpoint `POST /vendas/{id}/cancelar`. Toast de
 >    sucesso/erro; refletir o novo status `Cancelada` na lista.
+> 3. **"Ver notas fiscais da venda"** (transparência, espelha o "Ver notas relacionadas" da Compra em
+>    `OrdemCard` → `router.push('/faturamento?sale_id=...')`): um botão no `VendaCard` E **dentro do
+>    modal de cancelar** (ação secundária "Ver notas fiscais antes") que navega para o Faturamento
+>    filtrado pela venda. O Faturamento já aceitará `sale_id` (ver Adendo Backend). **Não** há
+>    cancelamento nota-a-nota — o usuário inspeciona as notas, mas a ação de cancelar é sempre a venda
+>    inteira.
 >
 > **Tarefa C — Aviso de inadimplência na venda:**
 > 1. No `VendaForm`, ao selecionar um cliente com `is_delinquent`, exibir **aviso visível** (badge/alerta)

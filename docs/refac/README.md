@@ -31,7 +31,13 @@ projeto: nunca criar sem ler o que já existe).
 | 6 | `6-demanda-compras-fornecedor-cotacao.md` | `feat/compras-fornecedor-cotacao` | 0, 3 |
 | 7 | `7-demanda-comercial-paridade-cancelamento.md` | `feat/comercial-paridade-cancelamento` | 0, 1, 6 |
 | 8 | `8-demanda-frontend-geral-tabelas.md` | `feat/frontend-geral-tabelas` | 0 e todas |
+| 9 | `9-demanda-faturamento-fluxo-dinheiro-notas.md` | `feat/faturamento-fluxo-dinheiro-notas` | 7 (escopo definido, prompts a escrever) |
+| 10 | `10-demanda-comercial-relatorio-vendas.md` | `feat/comercial-relatorio-vendas` | 9 (escopo travado, prompts a escrever) |
 | — | `backlog-pcp-colega-e-auth.md` | _(backlog)_ | — |
+
+> **Flag de ordenação D8×D9:** a D9 (dinheiro/notas) remexe as telas de Faturamento/Financeiro. Se a D8
+> (front geral) rodar antes, ela retrofita telas que a D9 muda de novo. Ao chegar lá: ou rodar a D9
+> antes da D8, ou a D8 deixar Faturamento/Financeiro de fora (a D9 padroniza essas).
 
 > **Reorganização (2026-06-07):** o **Comercial** (que nunca foi alvo de refac e ficou cru) virou a
 > **Demanda 7**, encaixada antes do front-geral. O antigo front-geral passou a **Demanda 8**. O antigo

@@ -16,7 +16,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/faturamento/faturas` | Lista faturas (filtros: `status`, `client_id`, `order_id`, paginação) |
+| `GET` | `/api/faturamento/faturas` | Lista faturas (filtros: `status`, `client_id`, `order_id`, `sale_id`, paginação) |
 | `POST` | `/api/faturamento/faturas` | Cria fatura manual |
 | `GET` | `/api/faturamento/faturas/{id}` | Detalhe com itens |
 | `PATCH` | `/api/faturamento/faturas/{id}/status` | Atualiza status (sem estorno — apenas movimento de rastreabilidade R$0) |
@@ -34,6 +34,15 @@ Combinável com `status` e `client_id`; ordenação e envelope inalterados.
 > **Débito técnico:** uma coluna FK `purchase_orders` em `invoices` fica para uma
 > demanda futura de limpeza — por ora o vínculo permanece textual para não alterar
 > o schema (head segue `0012`).
+
+### Filtro por venda (`?sale_id=<uuid>`, Demanda 7)
+
+Diferente das NFs de compra, as NFs de **venda** têm FK real `invoices.sale_id`. O
+filtro `sale_id` em `GET /faturas` aplica `Invoice.sale_id == <uuid>`, retornando
+**toda a cadeia** de NFs da venda — as N notas de venda (parcelas) **mais** a NF de
+transporte/frete. Serve ao front para "Ver notas fiscais da venda" (espelha o "Ver
+notas relacionadas" da Compra). Combinável com `status` e `client_id`; ordenação e
+envelope inalterados.
 
 ## Schemas
 
@@ -238,6 +247,16 @@ Emite uma NF de transporte representando o custo de frete (`shipping_cost`) de u
 
 > Prefixo: `_NF_TRANSPORTE_PREFIX = "[NF-TRANSPORTE]"` no `service.py`. A NF de transporte só é emitida quando `shipping_cost > 0`.
 
+## Função Pública — `get_invoices_by_sale` (integração Comercial, Demanda 7)
+
+### `get_invoices_by_sale(db, sale_id) → list[Invoice]`
+
+Lista **todas** as NFs (não deletadas) vinculadas a uma venda, por `sale_id`
+(qualquer `invoice_type`/status). É o ponto de integração para o Comercial
+localizar a NF de venda e acionar o cancelamento (`cancel_sale` → `cancelar_fatura`)
+**sem** acessar o repository do Faturamento diretamente — a integração entre módulos
+passa pelo Service.
+
 ## Cancelamento de NF com estorno (`POST /faturas/{id}/cancelar`) — Demanda 1 + 1.1
 
 Endpoint **dedicado** (não confundir com o `PATCH /status`, que só registra um
@@ -267,7 +286,7 @@ idempotência** — re-cancelar é bloqueado, então nenhum efeito é estornado 
 
 | Tipo | Efeito ao cancelar |
 |------|--------------------|
-| **`venda`** | Ponta a ponta (D4): (a) devolve cada item da venda ao estoque via `estoque_service.registrar_entrada` com **`unit_cost=0`** (entrada gera ajuste R$0, **sem** movimento de "compra" e **sem** alterar o CMP — o lado financeiro fica nas contas a receber); `reference_id` da movimentação = `sale.id`. (b) `sales.status = cancelada` (via `comercial_service.update_status`). (c) **Todas** as `accounts_receivable` da venda → `cancelada`; para `amount_received > 0`, gera estorno `SAIDA/AJUSTE` com a descrição `"Estorno cancelamento NF {number}"`. (d) **Toda a cadeia** de NFs com o mesmo `sale_id` (parcelas + NF de transporte da venda) é marcada `cancelada`; a NF de transporte da venda tem o frete estornado (`SAIDA/AJUSTE`). Cancelar **qualquer** parcela cancela a venda inteira. |
+| **`venda`** | Ponta a ponta (D4): (a) devolve cada item da venda ao estoque via `estoque_service.registrar_entrada` com **`unit_cost=0`** (entrada gera ajuste R$0, **sem** movimento de "compra" e **sem** alterar o CMP — o lado financeiro fica nas contas a receber); `reference_id` da movimentação = `sale.id`. (b) `sales.status = cancelada` (via `comercial_service.mark_sale_cancelled` — setter interno; ver nota abaixo). (c) **Todas** as `accounts_receivable` da venda → `cancelada`; para `amount_received > 0`, gera estorno `SAIDA/AJUSTE` com a descrição `"Estorno cancelamento NF {number}"`. (d) **Toda a cadeia** de NFs com o mesmo `sale_id` (parcelas + NF de transporte da venda) é marcada `cancelada`; a NF de transporte da venda tem o frete estornado (`SAIDA/AJUSTE`). Cancelar **qualquer** parcela cancela a venda inteira. |
 | **`recebimento`** | (a) Estoque: **sempre** remove as `quantity_accepted` (resolve `order_id` no `notes` → `purchase_order_receipts/items` → `registrar_saida` com `unit_cost=0`, `reference_id = invoice.id`). (b) Financeiro: `_reverter_financeiro_ordem_compra` — **antes de pagar** só cancela as contas a pagar em aberto (sem estorno); **depois de pago** estorna `ENTRADA/AJUSTE` do **valor pago** (uma única vez por ordem). |
 | **`transporte`** | NF de **compra** (`order_id` no `notes`): o frete está embutido na(s) conta(s) a pagar da ordem → usa `_reverter_financeiro_ordem_compra` (mesmo princípio do recebimento, idempotente — não duplica se a NF de recebimento da mesma ordem também for cancelada). NF de **venda** (`sale_id`): estorno do frete `SAIDA/AJUSTE` = `total_amount`. Descrição `"Estorno NF transporte {number}"`. Sem efeito de estoque. |
 | **`servico`** | Sem estoque. Financeiro via `_reverter_financeiro_ordem_compra`: **antes de pagar** cancela a conta a pagar em aberto; **depois de pago** estorna `ENTRADA/AJUSTE` do valor pago (uma única vez). |
@@ -283,11 +302,20 @@ Padrão `"{sku_original}-AVARIADO"`. A criação/reuso fica em
 
 Tudo orquestrado no `faturamento.service` (Router → Service → Repository, sem
 pular camadas), reusando os services dos demais módulos:
-`comercial_service.update_status`, `fin_service.cancelar_contas_receber`
-(novo), `fin_service.registrar_movimento`, `estoque_service.registrar_entrada/
-registrar_saida/obter_ou_criar_item_avariado`. Não foi criado um "cancelar
-venda" no Comercial — não existia; a orquestração ponta a ponta mora no
-Faturamento, apenas mudando o status da venda via service.
+`comercial_service.mark_sale_cancelled`, `fin_service.cancelar_contas_receber`,
+`fin_service.registrar_movimento`, `estoque_service.registrar_entrada/
+registrar_saida/obter_ou_criar_item_avariado`.
+
+> **Atualização (Demanda 7):** o Comercial passou a ter a ação **"Cancelar venda"**
+> (`POST /api/comercial/vendas/{id}/cancelar` → `comercial_service.cancel_sale`),
+> que é o ponto de entrada pelo lado da venda. Ela **não** duplica o estorno: localiza
+> uma NF `venda` do `sale_id` (via `faturamento_service.get_invoices_by_sale`) e chama
+> `cancelar_fatura` **uma vez** — o motor `_cancelar_nf_venda` continua sendo o único
+> que estorna estoque/financeiro e cancela a cadeia. Além disso, como
+> `comercial_service.update_status` passou a **recusar** a transição para `cancelada`
+> (o caminho "pelado" sem estorno foi fechado), o motor grava o status final da venda
+> pelo setter interno **`comercial_service.mark_sale_cancelled`** (e não mais por
+> `update_status`).
 
 > **Nota sobre transação:** seguindo o padrão do projeto (cada operação de
 > service/repo faz `commit` próprio — ver `comercial.create_sale`), o

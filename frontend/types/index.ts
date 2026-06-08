@@ -417,7 +417,16 @@ export interface Client {
   document: string | null
   email: string | null
   phone: string | null
+  /** Endereço legado (texto livre) — mantido por compatibilidade. */
   address: string | null
+  /** Endereço estruturado (Demanda 7, espelha o fornecedor da D6). */
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   notes: string | null
   is_delinquent: boolean
   created_at: string

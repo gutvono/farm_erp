@@ -19,6 +19,22 @@ import {
 import { deleteCliente } from "@/services/comercial"
 import { Client } from "@/types/index"
 
+/**
+ * Monta o endereço exibível a partir dos campos estruturados (Demanda 7),
+ * caindo para o endereço legado (texto livre) quando os campos novos estão
+ * vazios. Espelha o `composeAddress` do fornecedor (D6).
+ */
+function composeAddress(client: Client): string {
+  const line1 = [client.street, client.number].filter(Boolean).join(", ")
+  const withComplement = [line1, client.complement].filter(Boolean).join(" - ")
+  const cityState = [client.city, client.state].filter(Boolean).join("/")
+  const parts = [withComplement, client.neighborhood, cityState, client.cep].filter(
+    (p) => p && p.trim()
+  )
+  if (parts.length > 0) return parts.join(" · ")
+  return client.address ?? ""
+}
+
 interface ClienteRowProps {
   client: Client
   onEdit: () => void
@@ -41,18 +57,25 @@ export function ClienteRow({ client, onEdit, onDeleted }: ClienteRowProps) {
     }
   }
 
+  const address = composeAddress(client)
+
   return (
     <div className="flex items-center justify-between px-4 py-3 rounded-lg border bg-white border-slate-200 hover:bg-slate-50 transition-colors">
-      <div className="flex-1 min-w-0 grid grid-cols-1 md:grid-cols-4 gap-1 md:gap-4 items-center">
-        <div className="flex items-center gap-2 flex-wrap">
-          <p className="font-medium text-slate-800 truncate">{client.name}</p>
-          {client.is_delinquent && (
-            <Badge className="bg-red-100 text-red-700">Inadimplente</Badge>
-          )}
+      <div className="flex-1 min-w-0">
+        <div className="grid grid-cols-1 md:grid-cols-4 gap-1 md:gap-4 items-center">
+          <div className="flex items-center gap-2 flex-wrap">
+            <p className="font-medium text-slate-800 truncate">{client.name}</p>
+            {client.is_delinquent && (
+              <Badge className="bg-red-100 text-red-700">Inadimplente</Badge>
+            )}
+          </div>
+          <p className="text-sm text-slate-600">{client.document ?? "—"}</p>
+          <p className="text-sm text-slate-600 truncate">{client.email ?? "—"}</p>
+          <p className="text-sm text-slate-600">{client.phone ?? "—"}</p>
         </div>
-        <p className="text-sm text-slate-600">{client.document ?? "—"}</p>
-        <p className="text-sm text-slate-600 truncate">{client.email ?? "—"}</p>
-        <p className="text-sm text-slate-600">{client.phone ?? "—"}</p>
+        {address && (
+          <p className="text-xs text-slate-500 mt-1 truncate">{address}</p>
+        )}
       </div>
 
       <div className="flex items-center gap-1 ml-3 flex-shrink-0">

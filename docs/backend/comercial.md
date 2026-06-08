@@ -33,8 +33,9 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `GET` | `/api/comercial/vendas` | Lista vendas (filtros: `status`, `client_id`, paginação) |
 | `POST` | `/api/comercial/vendas` | Cria venda com itens (dispara integrações) |
 | `GET` | `/api/comercial/vendas/{id}` | Detalhe da venda com itens |
-| `PATCH` | `/api/comercial/vendas/{id}/status` | Atualiza status da venda |
-| `DELETE` | `/api/comercial/vendas/{id}` | Soft delete (somente se `realizada`) |
+| `PATCH` | `/api/comercial/vendas/{id}/status` | Atualiza status da venda (**não** aceita `cancelada` — ver abaixo) |
+| `POST` | `/api/comercial/vendas/{id}/cancelar` | **Cancelar venda**: estorna estoque e financeiro ponta a ponta |
+| `DELETE` | `/api/comercial/vendas/{id}` | Soft delete / "Excluir" (somente se `realizada`) |
 
 ## Schemas
 
@@ -46,13 +47,33 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
   "email": "contato@cafedovale.com",
   "phone": "(11) 99999-9999",
   "address": "Rua X, 100",
+  "cep": "01310-100",
+  "street": "Avenida Paulista",
+  "number": "1000",
+  "complement": "Conjunto 52",
+  "neighborhood": "Bela Vista",
+  "city": "São Paulo",
+  "state": "SP",
   "notes": "opcional"
 }
 ```
 
+- **`document` (CPF/CNPJ) — validado no backend (Demanda 7, paridade com Fornecedor):**
+  continua **opcional**; quando informado, precisa ser um CPF **ou** CNPJ válido (dígitos
+  verificadores oficiais). A validação fica no **Service** (`_validate_document_or_400`,
+  reusa `validate_document` de `app/shared/br_documents.py`), não no schema. Documento
+  inválido → **400 "CPF/CNPJ inválido"**. No `PUT`, só é revalidado se `document` vier no
+  corpo (PATCH-like).
+- **Endereço estruturado (`cep, street, number, complement, neighborhood, city, state`):**
+  todos opcionais, espelham o cadastro de fornecedor. O backend apenas persiste o que
+  recebe — a busca por CEP (ViaCEP) é feita no front. O campo legado `address` (texto livre)
+  é mantido por compatibilidade, sem parsing/backfill.
+
 ### ClientOut — campos principais
 - `id`, `name`, `document`, `email`, `phone`, `address`, `notes`
-- `is_delinquent` (bool) — campo real no model (`is_delinquent`, não `is_defaulter`)
+- Endereço estruturado: `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`
+- `is_delinquent` (bool) — campo real no model (`is_delinquent`, não `is_defaulter`). Exposto
+  na listagem `GET /clientes` para o front decidir **avisar** na venda (ver "Inadimplência")
 
 ### SaleCreate
 ```json
@@ -91,6 +112,15 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```json
 { "status": "entregue" }
 ```
+- **Não aceita `"cancelada"`**: o Service recusa essa transição com **400** (o cancelamento
+  é feito pela ação "Cancelar venda", que estorna estoque e financeiro).
+
+### SaleCancelRequest (corpo da ação "Cancelar venda")
+```json
+{ "reason": "motivo opcional do cancelamento" }
+```
+- Corpo **opcional** (pode-se chamar `POST .../cancelar` sem body). `reason` é registrado nas
+  NFs estornadas (`cancellation_reason`).
 
 ### SaleOut — campos principais
 - Inclui `client_name`, `items` (com `stock_item_name` e `subtotal`), `payment_method` e `shipping_cost` (default `0`)
@@ -101,14 +131,43 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 ```
 realizada → entregue
-realizada → cancelada (status final)
-entregue  → cancelada (status final)
+realizada → cancelada  (somente via ação "Cancelar venda")
+entregue  → cancelada  (somente via ação "Cancelar venda")
 ```
 
-- `cancelada` é status final — tentativa de alterar retorna `400`
-- `entregue` não pode retornar para `realizada`
-- Soft delete permitido apenas em vendas com status `realizada`
-- Ao entregar: `delivered_at` é preenchido automaticamente com `datetime.now()`
+- `cancelada` é status final/irreversível — tentativa de alterar retorna `400`.
+- **`PATCH /vendas/{id}/status` não realiza o cancelamento.** A transição para `cancelada`
+  por esse endpoint é recusada com **400 "Para cancelar uma venda use a ação 'Cancelar
+  venda', que estorna estoque e financeiro."** Isso fecha o buraco de integridade em que
+  virar o status "pelado" deixava estoque baixado, contas a receber em aberto e NF emitida.
+- `entregue` não pode retornar para `realizada`.
+- Soft delete ("Excluir") permitido apenas em vendas com status `realizada`.
+- Ao entregar: `delivered_at` é preenchido automaticamente com `datetime.now()`.
+
+### Cancelar uma Venda (`POST /vendas/{id}/cancelar`)
+
+Cancelamento é **evento fiscal, ancorado na NF**, e usa **um único motor de estorno** — o do
+Faturamento (`cancelar_fatura` → `_cancelar_nf_venda`). O Comercial **não** duplica o estorno;
+apenas localiza a NF da venda e delega. Passo a passo do `service.cancel_sale()`:
+
+1. **`_get_sale_or_404`.** Se a venda já estiver `cancelada` → **400 "Venda já está
+   cancelada"** (idempotência: no-op, sem segundo estorno).
+2. **Localiza a NF de venda** ativa do `sale_id`, perguntando ao Faturamento
+   (`faturamento_service.get_invoices_by_sale` — integração via Service, sem acessar o
+   repository do outro módulo). Pega uma NF `invoice_type == "venda"` ainda não cancelada.
+   Se não houver (estado anômalo — `create_sale` sempre emite NF de venda) → **409**.
+3. **Chama `cancelar_fatura(db, invoice.id, reason=reason)` uma única vez.** O motor do
+   Faturamento cancela a **cadeia inteira** pelo `sale_id`:
+   - devolve cada item ao estoque (movimento `entrada` de estorno, `unit_cost=0`, sem mexer no CMP);
+   - marca a `Sale` como `cancelada` (via `mark_sale_cancelled`, setter interno que contorna a
+     guarda de `update_status`);
+   - cancela **todas** as contas a receber da venda (e estorna o que já tiver sido recebido);
+   - cancela **todas** as NFs da cadeia (parcelas **e** a NF de transporte/frete, com estorno do frete).
+
+> **Por que `mark_sale_cancelled` e não `update_status`?** Como `update_status` passou a recusar
+> a transição para `cancelada`, o motor do Faturamento usa um setter interno dedicado
+> (`comercial_service.mark_sale_cancelled`) para gravar o status final — o estorno completo é
+> orquestrado pelo próprio motor, então não há caminho "pelado" aqui.
 
 ### Ao Criar uma Venda
 
@@ -156,11 +215,17 @@ Executado em sequência no `service.create_sale()`:
    - O valor real é registrado exclusivamente no recebimento da Conta a Receber
      (via `financeiro.receive_payment`).
 
-### Inadimplência de Clientes
-- Controlada pelo campo `is_delinquent` (Boolean) em `Client`
-- Pode ser marcada manualmente via `PUT /clientes/{id}/inadimplente`
-- Pode ser revertida manualmente via `PUT /clientes/{id}/reverter-inadimplencia`
-- O módulo Financeiro também atualiza `is_delinquent` ao marcar conta a receber como inadimplente (`mark_as_defaulter`)
+### Inadimplência de Clientes — AVISAR, não bloquear (decisão de PO, Demanda 7)
+- Controlada pelo campo `is_delinquent` (Boolean) em `Client`.
+- Pode ser marcada manualmente via `PUT /clientes/{id}/inadimplente` e revertida via
+  `PUT /clientes/{id}/reverter-inadimplencia`.
+- O módulo Financeiro também atualiza `is_delinquent` ao marcar conta a receber como
+  inadimplente (`mark_as_defaulter`).
+- **`create_sale` NÃO consulta `is_delinquent` e NÃO recusa a venda** — vender para cliente
+  inadimplente é concluído normalmente (201). O backend é a fonte da verdade do dado
+  (`is_delinquent` no `ClientOut`/listagem); **avisar** é responsabilidade do front (badge +
+  confirmação antes de finalizar). Automatizar a flag a partir de AR vencida está fora do
+  escopo desta demanda.
 
 ## Database Schema
 
@@ -172,7 +237,14 @@ Executado em sequência no `service.create_sale()`:
 | `document` | VARCHAR(32) (nullable) |
 | `email` | VARCHAR(255) (nullable) |
 | `phone` | VARCHAR(32) (nullable) |
-| `address` | VARCHAR(500) (nullable) |
+| `address` | VARCHAR(500) (nullable) — endereço legado (texto livre) |
+| `cep` | VARCHAR(9) (nullable) — endereço estruturado (D7) |
+| `street` | VARCHAR(255) (nullable) |
+| `number` | VARCHAR(20) (nullable) |
+| `complement` | VARCHAR(120) (nullable) |
+| `neighborhood` | VARCHAR(120) (nullable) |
+| `city` | VARCHAR(120) (nullable) |
+| `state` | VARCHAR(2) (nullable) — UF |
 | `is_delinquent` | BOOLEAN default false |
 | `notes` | TEXT (nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
@@ -213,6 +285,24 @@ Executado em sequência no `service.create_sale()`:
 - Adiciona `purchase_orders.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (a mesma migration cobre Comercial e Compras).
 
 Reversível via `downgrade()` (drop das duas colunas).
+
+`0021_client_address` (arquivo `alembic/versions/20260608_0021_client_address.py`, Demanda 7 / DBA):
+- Adiciona à tabela `clients` o endereço estruturado (`cep, street, number, complement,
+  neighborhood, city, state`), espelhando o que a D6 fez em `suppliers`. Mantém `address`
+  legado. O Backend (esta etapa) **não** criou migration — apenas expôs os campos nos
+  schemas/Service e os persiste no repository.
+
+## Limitações conhecidas / Débito técnico
+
+- **🔴 `soft_delete_sale` ("Excluir venda") deixa estoque/financeiro pendurados (a reportar,
+  fora do escopo da D7).** O `DELETE /vendas/{id}` exige status `realizada` e apenas marca
+  `deleted_at` na `Sale` — **não** devolve estoque, **não** cancela as NFs emitidas e **não**
+  baixa as contas a receber. Resultado: uma venda "excluída" some da listagem mas deixa a NF
+  de venda, a(s) conta(s) a receber em aberto e a saída de estoque órfãs (apontando para uma
+  venda soft-deleted). É um segundo buraco de integridade, irmão do que esta demanda fechou no
+  cancelamento. **Não corrigido aqui** (a D7 trata só o cancelamento); fica para o PO decidir
+  o escopo — provavelmente "Excluir" deveria ser proibido para vendas com efeitos fiscais já
+  emitidos, ou delegar ao mesmo motor de estorno antes do soft delete.
 
 ## Campos Importantes vs. Spec
 

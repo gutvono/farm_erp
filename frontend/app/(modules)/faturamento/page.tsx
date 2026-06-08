@@ -31,6 +31,7 @@ function FaturamentoContent() {
   const router = useRouter()
   const searchParams = useSearchParams()
   const orderId = searchParams.get("order_id")
+  const saleId = searchParams.get("sale_id")
 
   const [faturas, setFaturas] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(false)
@@ -44,6 +45,7 @@ function FaturamentoContent() {
       const data = await getFaturas({
         status: statusFilter !== "all" ? (statusFilter as InvoiceStatus) : undefined,
         order_id: orderId ?? undefined,
+        sale_id: saleId ?? undefined,
       })
       setFaturas(data)
     } catch (err) {
@@ -51,7 +53,7 @@ function FaturamentoContent() {
     } finally {
       setLoading(false)
     }
-  }, [statusFilter, orderId])
+  }, [statusFilter, orderId, saleId])
 
   useEffect(() => {
     loadFaturas()
@@ -67,21 +69,25 @@ function FaturamentoContent() {
     router.replace("/faturamento")
   }
 
+  // Filtro por origem da nota: compra (order_id) ou venda (sale_id).
+  const originFilterId = orderId ?? saleId
+  const originFilterLabel = orderId ? "Notas da compra" : "Notas da venda"
+
   return (
     <RootLayout title="Faturamento">
       <div className="space-y-4">
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Faturamento</h2>
           <p className="text-slate-500 text-sm">
-            {orderId ? "Notas fiscais" : "Faturas emitidas para clientes"}
+            {originFilterId ? "Notas fiscais" : "Faturas emitidas para clientes"}
           </p>
         </div>
 
-        {orderId && (
+        {originFilterId && (
           <div className="flex items-center justify-between gap-3 flex-wrap rounded-md border border-blue-200 bg-blue-50 px-4 py-2">
             <span className="text-sm text-blue-800">
-              Notas da compra{" "}
-              <span className="font-semibold">#{orderId.slice(0, 8)}</span>
+              {originFilterLabel}{" "}
+              <span className="font-semibold">#{originFilterId.slice(0, 8)}</span>
             </span>
             <Button
               size="sm"
