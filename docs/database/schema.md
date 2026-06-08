@@ -96,13 +96,36 @@ Notificações persistidas exibidas no sino do header.
 #### `clients`
 Clientes compradores de café.
 
-| Coluna | Tipo | Descrição |
-|--------|------|-----------|
-| `name` | `VARCHAR(255)` | Razão social / nome |
-| `document` | `VARCHAR(32)` | CPF ou CNPJ |
-| `email`, `phone`, `address` | `VARCHAR` | Contato |
-| `is_delinquent` | `BOOLEAN` | Inadimplência (definida no cancelamento de AR) |
-| `notes` | `TEXT` | Observações |
+Endereço estruturado adicionado na **Demanda 7** (migration `0021_client_address`),
+espelhando o que a Demanda 6 fez no fornecedor. Quando informado, o `document` passa
+a ser validado (CPF/CNPJ por dígito verificador) pelo backend da D7.
+
+| Coluna | Tipo | Nulo? | Descrição |
+|--------|------|-------|-----------|
+| `name` | `VARCHAR(255)` | não | Razão social / nome |
+| `document` | `VARCHAR(32)` | sim | CPF ou CNPJ — **opcional**; quando informado, validado por DV (D7) |
+| `email`, `phone` | `VARCHAR` | sim | Contato |
+| `address` | `VARCHAR(500)` | sim | **Endereço legado (texto livre).** Mantido por compatibilidade |
+| `cep` | `VARCHAR(9)` | sim | CEP no formato `00000-000` |
+| `street` | `VARCHAR(255)` | sim | Logradouro (rua/avenida/rodovia) |
+| `number` | `VARCHAR(20)` | sim | Número (texto: aceita `S/N`) |
+| `complement` | `VARCHAR(120)` | sim | Complemento (conjunto, sala, galpão) |
+| `neighborhood` | `VARCHAR(120)` | sim | Bairro / zona |
+| `city` | `VARCHAR(120)` | sim | Cidade |
+| `state` | `VARCHAR(2)` | sim | UF (sigla, ex.: `SP`) |
+| `is_delinquent` | `BOOLEAN` | não | Inadimplência (definida no cancelamento de AR) |
+| `notes` | `TEXT` | sim | Observações |
+
+> **Decisão do PO (Demanda 7 — travada, igual à D6 do fornecedor):** a coluna `address`
+> legada **não é dropada** e **não há backfill** parseando `address` → campos
+> estruturados (texto livre, parsing não confiável). Linhas pré-existentes ficam com os
+> 7 campos `NULL`; quem popula de verdade é o seed/cadastro. O ViaCEP fica no front
+> (sem dependência nova no backend).
+
+**Migration:** `0021_client_address` (`down_revision` `0020_supplier_items`). Upgrade:
+`ALTER TABLE clients ADD COLUMN IF NOT EXISTS` para os 7 campos (idempotente — a `0001`
+usa `create_all` e num banco novo o model já cria as colunas). Downgrade: `DROP COLUMN
+IF EXISTS` dos 7 campos (preserva `address`). Head resultante: `0021_client_address`.
 
 #### `sales`
 Vendas realizadas. Segue fluxo `realizada → entregue → cancelada`.
@@ -948,6 +971,25 @@ Ambas testadas localmente: `upgrade head → downgrade -1 (×2) → upgrade head
 forma que **toda ordem de compra de produto** semeada tem seus itens no catálogo ativo
 do fornecedor da ordem (regra do Backend), e os endereços dos fornecedores do seed são
 preenchidos.
+
+### Comercial — endereço do cliente (Demanda 7)
+
+**Head atual: `0021_client_address`.**
+
+**`0021_client_address`** (`down_revision` `0020_supplier_items`) — espelha a
+`0019_supplier_address`, adicionando em `clients` os mesmos sete campos de endereço
+estruturado (`cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`),
+todos `NULL`, via `ADD COLUMN IF NOT EXISTS` (idempotente — num banco novo o `create_all`
+da `0001` já cria as colunas, pois o model `Client` as reflete). **Decisão do PO
+(travada, igual à D6):** a coluna `address` legada é **mantida** (não dropada) e **não
+há backfill** parseando o texto livre. Downgrade dropa os sete campos e preserva
+`address`. A validação de CPF/CNPJ do cliente é do **Backend** (reuso de
+`app/shared/br_documents.py`); o ViaCEP é do **front** — nada disso entra no schema.
+
+Testada localmente: `upgrade head → downgrade -1 → upgrade head`, `alembic check` limpo
+(*No new upgrade operations detected*), `reset_db` OK. O seed dos 3 clientes ganhou os
+campos de endereço (BR realistas) e teve os documentos corrigidos para CPF/CNPJ com **DV
+válido** (a validação do Backend da D7 passaria a rejeitar os antigos).
 
 ---
 

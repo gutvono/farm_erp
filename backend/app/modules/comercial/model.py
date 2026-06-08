@@ -15,7 +15,19 @@ class Client(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     document = Column(String(32), nullable=True, index=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(32), nullable=True)
+    # Endereço legado (texto livre). Mantido por compatibilidade; os campos
+    # estruturados abaixo são a fonte da verdade do endereço a partir da Demanda 7.
     address = Column(String(500), nullable=True)
+    # Endereço estruturado (Demanda 7, espelha o fornecedor da D6). Todos NULL em
+    # linhas pré-existentes — não há backfill por parsing do `address` (texto
+    # livre, parsing não confiável); quem popula de verdade é o seed/cadastro.
+    cep = Column(String(9), nullable=True)
+    street = Column(String(255), nullable=True)
+    number = Column(String(20), nullable=True)
+    complement = Column(String(120), nullable=True)
+    neighborhood = Column(String(120), nullable=True)
+    city = Column(String(120), nullable=True)
+    state = Column(String(2), nullable=True)
     is_delinquent = Column(Boolean, nullable=False, default=False, index=True)
     notes = Column(Text, nullable=True)
 

@@ -39,10 +39,13 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 2. CLIENTS (3 — 1 inadimplente)
 -- -----------------------------------------------------------------------------
-INSERT INTO clients (id, name, document, email, phone, address, is_delinquent, notes) VALUES
-('22222222-2222-2222-2222-222222222001', 'Cafeteria Grão Fino Ltda',       '12.345.678/0001-90', 'contato@graofino.com.br',      '(11) 3000-1001', 'Av. Paulista, 1000 - São Paulo/SP',  FALSE, 'Cliente premium, compra café especial'),
-('22222222-2222-2222-2222-222222222002', 'Distribuidora Aroma do Cerrado', '98.765.432/0001-21', 'compras@aromacerrado.com.br',  '(62) 3500-2002', 'Rua das Palmeiras, 500 - Goiânia/GO', FALSE, 'Distribuidora regional'),
-('22222222-2222-2222-2222-222222222003', 'Mercearia Dona Rita',            '456.789.123-44',     'donarita@email.com',           '(35) 99800-3003', 'Rua do Centro, 77 - Alfenas/MG',      TRUE,  'Inadimplente desde conta 03/2026')
+-- address (legado, texto livre) mantido; os campos estruturados (cep..state)
+-- são a fonte da verdade do endereço a partir da Demanda 7. Documentos com DV
+-- válido (CPF/CNPJ) para não quebrar a validação do backend (D7).
+INSERT INTO clients (id, name, document, email, phone, address, cep, street, number, complement, neighborhood, city, state, is_delinquent, notes) VALUES
+('22222222-2222-2222-2222-222222222001', 'Cafeteria Grão Fino Ltda',       '12.345.678/0001-95', 'contato@graofino.com.br',      '(11) 3000-1001',  'Av. Paulista, 1000 - São Paulo/SP',  '01310-100', 'Avenida Paulista',  '1000', 'Conjunto 52', 'Bela Vista', 'São Paulo', 'SP', FALSE, 'Cliente premium, compra café especial'),
+('22222222-2222-2222-2222-222222222002', 'Distribuidora Aroma do Cerrado', '98.765.432/0001-98', 'compras@aromacerrado.com.br',  '(62) 3500-2002',  'Rua das Palmeiras, 500 - Goiânia/GO', '74110-010', 'Rua das Palmeiras', '500',  'Galpão B',    'Setor Marista', 'Goiânia', 'GO', FALSE, 'Distribuidora regional'),
+('22222222-2222-2222-2222-222222222003', 'Mercearia Dona Rita',            '456.789.123-64',     'donarita@email.com',           '(35) 99800-3003', 'Rua do Centro, 77 - Alfenas/MG',      '37130-000', 'Rua do Centro',     '77',   NULL,          'Centro',        'Alfenas', 'MG', TRUE,  'Inadimplente desde conta 03/2026')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
