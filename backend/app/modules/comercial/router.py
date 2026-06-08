@@ -18,6 +18,7 @@ from app.modules.comercial.schemas import (
     SaleStatusUpdate,
 )
 from app.shared.enums import SaleStatus
+from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -28,19 +29,16 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.get("/clientes", response_model=SuccessResponse)
+@router.get("/clientes", response_model=Page[ClientOut])
 def list_clients(
     is_delinquent: Optional[bool] = None,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    clients = comercial_service.list_clients(
-        db, is_delinquent=is_delinquent, skip=skip, limit=limit
+) -> Page[ClientOut]:
+    return comercial_service.list_clients(
+        db, params=params, is_delinquent=is_delinquent
     )
-    data = [ClientOut.model_validate(c).model_dump(mode="json") for c in clients]
-    return success("Clientes listados com sucesso", data)
 
 
 @router.post("/clientes", response_model=SuccessResponse, status_code=201)
@@ -121,20 +119,17 @@ def delete_client(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/vendas", response_model=SuccessResponse)
+@router.get("/vendas", response_model=Page[SaleOut])
 def list_sales(
     status: Optional[SaleStatus] = None,
     client_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    sales = comercial_service.list_sales(
-        db, status=status, client_id=client_id, skip=skip, limit=limit
+) -> Page[SaleOut]:
+    return comercial_service.list_sales(
+        db, params=params, status=status, client_id=client_id
     )
-    data = [SaleOut.from_model(s).model_dump(mode="json") for s in sales]
-    return success("Vendas listadas com sucesso", data)
 
 
 @router.post("/vendas", response_model=SuccessResponse, status_code=201)

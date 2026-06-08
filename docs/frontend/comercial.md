@@ -11,19 +11,49 @@ ser uma simples troca de status.
 
 [SCREENSHOT: aba Comercial com as duas abas (Vendas / Clientes)]
 
+> **Demanda 8 — listas viraram tabelas paginadas.** As duas abas, que antes eram cartões
+> empilhados, agora são **tabelas** (shadcn) com **paginação no servidor** (Anterior/Próxima),
+> ordenação ao clicar nos cabeçalhos e filtros/busca no topo. O conteúdo e as ações dos
+> cartões antigos foram preservados: o que não virou coluna foi para um **painel de detalhe**
+> que abre à direita (ver abaixo).
+
+## Listas em tabela (Demanda 8)
+
+### Clientes
+- **Colunas:** Nome (com badge **Inadimplente** e o documento abaixo), Email, Telefone,
+  Endereço (composto a partir dos campos), Cadastro e as ações.
+- **Ordenar:** clique em **Nome** ou **Cadastro**.
+- **Filtrar/buscar:** caixa **Buscar** (nome ou documento) e o botão **Apenas inadimplentes**.
+- **Ações na linha:** **Editar** (abre o formulário) e **Excluir** (com confirmação).
+
+[SCREENSHOT: aba Clientes em tabela com busca, "Apenas inadimplentes" e paginação]
+
+### Vendas
+- **Colunas:** Cliente, Status (badge), Data, Itens, Total e a ação **Detalhes**.
+- **Ordenar:** clique em **Status** ou **Data**.
+- **Filtrar:** seletor de **Status** (Realizada / Entregue / Cancelada).
+- **Detalhe da venda:** clique em **Detalhes** para abrir o painel lateral. É de lá que saem
+  **todas** as ações da venda — marcar **Entregue**, **Cancelar venda** (estorno ponta a ponta),
+  **Ver notas fiscais** da venda e ver os itens. Nada se perdeu em relação ao cartão antigo.
+
+[SCREENSHOT: aba Vendas em tabela + painel de detalhe com "Cancelar venda" e "Ver notas fiscais"]
+
 ## Arquivos
 
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
-| `app/(modules)/comercial/page.tsx` | Page | Página em abas; carrega vendas, clientes e itens de estoque (categoria café) |
-| `services/comercial.ts` | Service | Orquestra chamadas a `/api/comercial/*`; converte Decimal → number; expõe `cancelarVenda` |
+| `app/(modules)/comercial/page.tsx` | Page | Abas; orquestra hooks de tabela + formulários; mantém a lista completa de clientes para o seletor da venda |
+| `services/comercial.ts` | Service | `/api/comercial/*`; helpers ARRAY (seletores) + `getClientesPaginated`/`getVendasPaginated`; `cancelarVenda` |
 | `services/cep.ts` | Service | `lookupCep` (ViaCEP) — reusado do Compras (D6) |
 | `lib/br-documents.ts` | Util | `validateDocument`, `maskDocument`, `maskCep`, `onlyDigits` — reusado do Compras (D6) |
-| `types/index.ts` | Tipos | `Client` (com endereço estruturado), `SaleItem`, `Sale`, `SaleStatus` |
+| `lib/use-debounced-value.ts` | Hook | Debounce da busca textual das tabelas (Demanda 8) |
+| `components/modules/comercial/useClientes.ts` | Hook | Estado da tabela de clientes (página/ordenação/filtro/busca) |
+| `components/modules/comercial/ClientesTable.tsx` | Componente | DataTable de clientes + editar/excluir |
+| `components/modules/comercial/useVendas.ts` | Hook | Estado da tabela de vendas |
+| `components/modules/comercial/VendasTable.tsx` | Componente | DataTable de vendas + painel de detalhe (`VendaCard`) |
 | `components/modules/comercial/ClienteForm.tsx` | Componente | Dialog (criar/editar) com RHF + Zod, validação de documento e endereço + ViaCEP |
-| `components/modules/comercial/ClienteRow.tsx` | Componente | Linha com badge "Inadimplente"; exibe endereço composto; ações editar/excluir |
 | `components/modules/comercial/VendaForm.tsx` | Componente | Dialog com aviso + confirmação de inadimplência, itens dinâmicos, subtotais e total |
-| `components/modules/comercial/VendaCard.tsx` | Componente | Card expandível; "Cancelar venda", "Ver notas fiscais" e troca de status (Entregue) |
+| `components/modules/comercial/VendaCard.tsx` | Componente | Detalhe da venda (reusado no painel): "Cancelar venda", "Ver notas fiscais", troca de status |
 
 ## Cadastrar / editar cliente
 

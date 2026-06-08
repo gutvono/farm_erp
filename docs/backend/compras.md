@@ -18,7 +18,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/compras/fornecedores` | Lista fornecedores (paginação: skip, limit) |
+| `GET` | `/api/compras/fornecedores` | Lista fornecedores **paginada `Page[SupplierOut]`** (`search` nome/documento; `order_by`: `name`). Dívida da D6 quitada na D8 — antes era `SuccessResponse`/skip-limit |
 | `POST` | `/api/compras/fornecedores` | Cria fornecedor. Valida o `document` (CPF/CNPJ); `400 "CNPJ/CPF inválido"` se inválido |
 | `GET` | `/api/compras/fornecedores/{id}` | Detalhe do fornecedor (inclui endereço estruturado) |
 | `PUT` | `/api/compras/fornecedores/{id}` | Atualiza fornecedor. Se `document` vier no corpo, é revalidado (`400` se inválido) |
@@ -52,7 +52,7 @@ Catálogo é a lista de **itens de estoque que um fornecedor vende, com preço s
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/compras/ordens` | Lista ordens (filtros: `status`, `supplier_id`, paginação) |
+| `GET` | `/api/compras/ordens` | Lista ordens **paginada `Page[PurchaseOrderOut]`** (filtros `status`, `supplier_id`; `search` nome/documento do fornecedor; `order_by`: `ordered_at`/`status`) |
 | `POST` | `/api/compras/ordens` | Cria ordem com itens (status inicial: `em_andamento`) |
 | `GET` | `/api/compras/ordens/{id}` | Detalhe da ordem com itens |
 | `PATCH` | `/api/compras/ordens/{id}/status` | **Legacy** — restrito a cancelamento. Use os endpoints dedicados do fluxo para as demais transições |
@@ -68,7 +68,7 @@ Catálogo é a lista de **itens de estoque que um fornecedor vende, com preço s
 | `POST` | `/api/compras/ordens/{id}/recusar` | `aguardando_aprovacao_financeiro` → `cancelada` (body: `{ "note": "..." }`, salvo em `financial_approval_note`) |
 | `POST` | `/api/compras/ordens/{id}/iniciar-conferencia` | `aprovada` → `em_conferencia` (cria 1 `purchase_order_receipt` por item, status `pendente`). **Apenas ordens de produto** — retorna `400` se `order_type == "servico"` |
 | `POST` | `/api/compras/ordens/{id}/finalizar-conferencia` | `em_conferencia` → `aguardando_pagamento` (registra qtd aceita/recusada por item, calcula `receipt_total_amount`, **dá entrada no estoque dos aceitos, emite NF de recebimento/devolução/transporte** e gera a conta a pagar) |
-| `GET` | `/api/compras/recebimentos` | Lista ordens **de produto** (`order_type == "produto"`) elegíveis a recebimento (status `aprovada` ou `em_conferencia`). Ordens de serviço nunca aparecem aqui |
+| `GET` | `/api/compras/recebimentos` | Lista ordens **de produto** (`order_type == "produto"`) elegíveis a recebimento (status `aprovada` ou `em_conferencia`), **paginada `Page[PurchaseOrderWithReceipts]`** (`order_by`: `ordered_at`/`status`). Ordens de serviço nunca aparecem aqui |
 | `GET` | `/api/compras/recebimentos/{id}` | Detalhe da ordem com `receipts` |
 
 > A conclusão da ordem (`aguardando_pagamento` → `concluida`) acontece **automaticamente** quando o Financeiro paga a conta a pagar vinculada (`payable.purchase_order_id`) **e não resta nenhuma conta a pagar em aberto da ordem** (no parcelado, só na última parcela). Não existe endpoint manual para essa transição. Estoque e NFs **não** são gerados aqui — já foram emitidos na conferência/aceite.
@@ -392,7 +392,7 @@ Todos exigem autenticação (`get_current_user`). Prefixo `/api/compras`.
 
 | Método | Rota | Body | Descrição |
 |--------|------|------|-----------|
-| `GET` | `/cotacoes` | — | Lista cotações (query: `status: QuotationStatus?`, `order_type: str?`, `skip`, `limit`) |
+| `GET` | `/cotacoes` | — | Lista cotações **paginada `Page[QuotationOut]`** (filtros `status`, `order_type`; `order_by`: `status` (indexado), `created_at` (default desc — **sem índice**, ver nota)) |
 | `POST` | `/cotacoes` | `QuotationCreate` | Cria cotação (201) |
 | `GET` | `/cotacoes/{quotation_id}` | — | Detalhe com itens e propostas |
 | `DELETE` | `/cotacoes/{quotation_id}` | — | Soft delete (só em `em_andamento`) |
@@ -403,6 +403,13 @@ Todos exigem autenticação (`get_current_user`). Prefixo `/api/compras`.
 | `POST` | `/cotacoes/{quotation_id}/aprovar` | — | Financeiro aprova |
 | `POST` | `/cotacoes/{quotation_id}/cancelar` | `CancelQuotationRequest` | Cancela cotação |
 | `POST` | `/cotacoes/{quotation_id}/realizar-pedido` | `RealizeOrderRequest` | Gera a Ordem de Compra em `aprovada` |
+
+> **Paginação (D8) + débito de índice:** `GET /cotacoes` retorna `Page[QuotationOut]`
+> (envelope cru). O sort default é `created_at desc`, que **preserva** o comportamento
+> anterior, mas `quotations.created_at` **não tem índice** (só `status` é indexado —
+> `idx_quotations_status`). Hoje a tabela é pequena, então o scan ordenado é irrelevante;
+> **sinalizado** para avaliar um `idx_quotations_created_at` se a tabela crescer. `order_by`
+> inválido cai no default (nunca 500); PK como tiebreaker.
 
 ### Schemas (resumo)
 

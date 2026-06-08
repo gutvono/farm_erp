@@ -6,6 +6,14 @@ Página única com 4 abas (Tabs shadcn): **Itens**, **Movimentações**, **Inven
 
 > A partir da Demanda 3, a **categoria do item deixou de ser uma lista fixa** (Café/Insumo/Equipamento/Veículo/Outro) e passou a ser **cadastrável** no módulo **Configurações**. No cadastro de item, a categoria é escolhida num **menu suspenso** com as categorias cadastradas. Cada item exibe o **nome da categoria** (`category_name`); o filtro da aba Itens lista as categorias reais.
 
+> **Demanda 8 — Itens e Recebimentos viraram tabelas paginadas.** As abas **Itens** e **Recebimentos** agora são **tabelas** (shadcn) com **paginação no servidor**, ordenação por cabeçalho e filtros/busca no topo (Movimentações já era assim).
+>
+> - **Itens** — Colunas: Nome (com o aviso ⚠️ quando abaixo do mínimo), SKU, Categoria, Saldo, Mínimo, Custo unit. e ações. Ordene por **Nome** ou **SKU**. Filtros: **Buscar** (nome/SKU), **Categoria**, **Papel** e **Apenas críticos**. **Clicar na linha** abre o **histórico de movimentações** do item (Sheet lateral); as ações **Editar** e **Excluir** ficam na própria linha. O contador do topo mostra o total e quantos estão **críticos**.
+> - **Recebimentos** — Colunas: Fornecedor, Status, Data, Itens, Total e a ação. Ordene por **Status** ou **Data**. Ordens **Aprovadas** trazem **Iniciar Conferência**; ordens **Em conferência** trazem **Conferir itens**, que abre o painel de conferência à direita. O selo no título da aba conta as ordens aguardando conferência.
+
+[SCREENSHOT: aba Itens em tabela com filtros (Categoria/Papel/Críticos) e busca]
+[SCREENSHOT: aba Recebimentos em tabela com "Iniciar Conferência" / "Conferir itens"]
+
 ### Fluxos passo a passo (ótica do usuário)
 
 **Cadastrar um item escolhendo a categoria**

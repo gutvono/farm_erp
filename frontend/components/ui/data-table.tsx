@@ -42,6 +42,9 @@ export interface DataTableProps<T> {
   onSortChange?: (key: string) => void
   /** Chave estável para o React. Sem ela, usa o índice da linha. */
   rowKey?: (row: T) => string
+  /** Opcional: clique na linha (ex.: abrir detalhe). Células de ação devem
+   * chamar `stopPropagation` para não disparar este callback. */
+  onRowClick?: (row: T) => void
 }
 
 const ALIGN_CLASS: Record<NonNullable<DataTableColumn<unknown>["align"]>, string> = {
@@ -69,6 +72,7 @@ export function DataTable<T>({
   sort,
   onSortChange,
   rowKey,
+  onRowClick,
 }: DataTableProps<T>) {
   const totalPages = Math.max(pages, 1)
   const from = total === 0 ? 0 : (page - 1) * pageSize + 1
@@ -134,7 +138,11 @@ export function DataTable<T>({
               </TableRow>
             ) : (
               rows.map((row, rowIndex) => (
-                <TableRow key={rowKey ? rowKey(row) : rowIndex}>
+                <TableRow
+                  key={rowKey ? rowKey(row) : rowIndex}
+                  className={cn(onRowClick && "cursor-pointer")}
+                  onClick={onRowClick ? () => onRowClick(row) : undefined}
+                >
                   {columns.map((column) => (
                     <TableCell
                       key={column.key}

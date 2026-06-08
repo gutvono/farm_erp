@@ -17,6 +17,29 @@ pagamento. O **pagamento** é uma etapa **posterior e separada**, feita na tela
 
 [SCREENSHOT: aba "Ordens de Compra" com a lista de ordens e o filtro de status]
 
+> **Demanda 8 — listas viraram tabelas paginadas.** As três abas agora são **tabelas**
+> (shadcn) com **paginação no servidor**, ordenação por cabeçalho e filtros/busca no topo.
+> As ações ricas dos cartões antigos foram preservadas num **painel de detalhe** (abre à
+> direita ao clicar em **Detalhes**). Fornecedores, que antes paginava no navegador, agora
+> pagina no servidor.
+
+### Listas em tabela (Demanda 8)
+
+- **Ordens de Compra** — Colunas: Fornecedor (com selo *Serviço* quando for o caso),
+  Status, Data, Itens, Total e **Detalhes**. Ordene por **Status** ou **Data**. Filtros:
+  **Buscar fornecedor** (nome/documento), **Status** e **Fornecedor**. Em **Detalhes** ficam
+  todas as ações da ordem (Enviar para aprovação, Concluir serviço, **Ver notas relacionadas**,
+  Excluir e o detalhamento dos itens).
+- **Cotações** — Colunas: Tipo (Produto/Serviço), Status, Data, Itens, Propostas e
+  **Detalhes**. Ordene por **Status** ou **Data**. Filtros: **Status** e **Tipo**. Em
+  **Detalhes** ficam **Gerenciar Propostas**, **Realizar Pedido** e **Cancelar** (com motivo).
+- **Fornecedores** — Colunas: Nome (com documento), Email, Telefone, Endereço e ações.
+  Ordene por **Nome**; **Buscar** por nome/documento. Ações na linha: **catálogo de itens**,
+  **Editar** e **Excluir**.
+
+[SCREENSHOT: aba Ordens de Compra em tabela + painel de detalhe da ordem]
+[SCREENSHOT: aba Fornecedores em tabela paginada com busca]
+
 ---
 
 ## 1. Fluxos passo a passo

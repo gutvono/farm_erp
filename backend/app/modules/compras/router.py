@@ -43,16 +43,13 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.get("/fornecedores", response_model=SuccessResponse)
+@router.get("/fornecedores", response_model=Page[SupplierOut])
 def list_suppliers(
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    suppliers = compras_service.list_suppliers(db, skip=skip, limit=limit)
-    data = [SupplierOut.model_validate(s).model_dump(mode="json") for s in suppliers]
-    return success("Fornecedores listados com sucesso", data)
+) -> Page[SupplierOut]:
+    return compras_service.list_suppliers(db, params=params)
 
 
 @router.post("/fornecedores", response_model=SuccessResponse, status_code=201)
@@ -196,20 +193,17 @@ def list_suppliers_for_stock_item(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/ordens", response_model=SuccessResponse)
+@router.get("/ordens", response_model=Page[PurchaseOrderOut])
 def list_orders(
     status: Optional[PurchaseOrderStatus] = None,
     supplier_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    orders = compras_service.list_orders(
-        db, status=status, supplier_id=supplier_id, skip=skip, limit=limit
+) -> Page[PurchaseOrderOut]:
+    return compras_service.list_orders(
+        db, params=params, status=status, supplier_id=supplier_id
     )
-    data = [PurchaseOrderOut.from_model(o).model_dump(mode="json") for o in orders]
-    return success("Ordens listadas com sucesso", data)
 
 
 @router.post("/ordens", response_model=SuccessResponse, status_code=201)
@@ -355,16 +349,13 @@ def finalize_receipt(
     )
 
 
-@router.get("/recebimentos", response_model=SuccessResponse)
+@router.get("/recebimentos", response_model=Page[PurchaseOrderWithReceipts])
 def list_receipts(
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    orders = compras_service.list_orders_for_receipt(db)
-    data = [
-        PurchaseOrderWithReceipts.from_model(o).model_dump(mode="json") for o in orders
-    ]
-    return success("Recebimentos listados com sucesso", data)
+) -> Page[PurchaseOrderWithReceipts]:
+    return compras_service.list_orders_for_receipt(db, params=params)
 
 
 @router.get("/recebimentos/{order_id}", response_model=SuccessResponse)
@@ -385,20 +376,17 @@ def get_receipt(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/cotacoes", response_model=SuccessResponse)
+@router.get("/cotacoes", response_model=Page[QuotationOut])
 def list_quotations(
     status: Optional[QuotationStatus] = None,
     order_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    quotations = compras_service.list_quotations(
-        db, status=status, order_type=order_type, skip=skip, limit=limit
+) -> Page[QuotationOut]:
+    return compras_service.list_quotations(
+        db, params=params, status=status, order_type=order_type
     )
-    data = [QuotationOut.from_model(q).model_dump(mode="json") for q in quotations]
-    return success("Cotações listadas com sucesso", data)
 
 
 @router.post("/cotacoes", response_model=SuccessResponse, status_code=201)

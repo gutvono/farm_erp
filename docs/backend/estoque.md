@@ -26,7 +26,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/estoque/itens` | Lista itens (filtros: `category_id`, `role`, `below_minimum`) |
+| `GET` | `/api/estoque/itens` | Lista itens **paginada `Page[StockItemOut]`** (filtros `category_id`, `role`, `below_minimum`; `search` nome/sku; `order_by`: `name`/`sku`) |
 | `POST` | `/api/estoque/itens` | Cria novo item |
 | `GET` | `/api/estoque/itens/{id}` | Detalhe do item |
 | `PUT` | `/api/estoque/itens/{id}` | Atualiza item |
@@ -45,6 +45,12 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/api/estoque/inventario` | Todos os itens com `quantity_on_hand`, `unit_cost` e `total_value`; grand total |
+
+> **Paginação de `GET /itens` (Demanda 8):** envelope `Page[StockItemOut]` cru
+> (`items/total/page/page_size/pages`). `order_by` allowlist `name` (default asc, indexado) /
+> `sku` (indexado); inválido cai no default (nunca 500); PK como tiebreaker. O filtro
+> `below_minimum` passou a ser aplicado **em SQL** (`quantity_on_hand < minimum_stock`) — antes
+> era pós-filtro em Python, o que tornaria `total`/páginas incorretos sob paginação.
 
 ## Schemas
 

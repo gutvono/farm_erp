@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.modules.compras.model import (
@@ -33,6 +34,19 @@ from app.shared.enums import (
     QuotationStatus,
 )
 from app.shared.pagination import PageParams, paginate_query
+
+# Colunas permitidas em ?order_by (validadas por allowlist no paginate_query).
+SUPPLIER_ORDER_COLUMNS = {
+    "name": Supplier.name,
+}
+ORDER_ORDER_COLUMNS = {
+    "ordered_at": PurchaseOrder.ordered_at,
+    "status": PurchaseOrder.status,
+}
+QUOTATION_ORDER_COLUMNS = {
+    "status": Quotation.status,
+    "created_at": Quotation.created_at,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -65,16 +79,22 @@ def create_supplier(db: Session, data: SupplierCreate) -> Supplier:
 def list_suppliers(
     db: Session,
     *,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Supplier]:
-    return (
-        db.query(Supplier)
-        .filter(Supplier.deleted_at.is_(None))
-        .order_by(Supplier.name.asc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+    params: PageParams,
+) -> tuple[list[Supplier], int]:
+    """Lista fornecedores ativos, paginado. `search` por nome OU documento;
+    `order_by` allowlist: name (default, indexado)."""
+    query = db.query(Supplier).filter(Supplier.deleted_at.is_(None))
+    if params.search:
+        like = f"%{params.search}%"
+        query = query.filter(
+            or_(Supplier.name.ilike(like), Supplier.document.ilike(like))
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=SUPPLIER_ORDER_COLUMNS,
+        default_order=Supplier.name.asc(),
+        tiebreaker=Supplier.id,
     )
 
 
@@ -302,28 +322,33 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
 def list_orders(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[PurchaseOrderStatus] = None,
     supplier_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[PurchaseOrder]:
-    query = (
-        db.query(PurchaseOrder)
-        .filter(PurchaseOrder.deleted_at.is_(None))
-    )
+) -> tuple[list[PurchaseOrder], int]:
+    """Lista ordens de compra ativas, paginado. Filtros `status`/`supplier_id`;
+    `search` pelo nome/documento do fornecedor (join; `supplier_id` é NOT NULL);
+    `order_by` allowlist: ordered_at (default desc, indexado), status."""
+    query = db.query(PurchaseOrder).filter(PurchaseOrder.deleted_at.is_(None))
     if status:
         query = query.filter(PurchaseOrder.status == status)
     if supplier_id:
         query = query.filter(PurchaseOrder.supplier_id == supplier_id)
-    orders = (
-        query.order_by(PurchaseOrder.ordered_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+    if params.search:
+        like = f"%{params.search}%"
+        query = query.join(
+            Supplier, Supplier.id == PurchaseOrder.supplier_id
+        ).filter(or_(Supplier.name.ilike(like), Supplier.document.ilike(like)))
+    orders, total = paginate_query(
+        query,
+        params,
+        allowed_order_by=ORDER_ORDER_COLUMNS,
+        default_order=PurchaseOrder.ordered_at.desc(),
+        tiebreaker=PurchaseOrder.id,
     )
     for order in orders:
         _load_relations(db, order)
-    return orders
+    return orders, total
 
 
 def get_order(db: Session, order_id: UUID) -> Optional[PurchaseOrder]:
@@ -544,25 +569,32 @@ def get_order_with_receipts(
     return order
 
 
-def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
-    orders = (
-        db.query(PurchaseOrder)
-        .filter(
-            PurchaseOrder.deleted_at.is_(None),
-            PurchaseOrder.status.in_(
-                [
-                    PurchaseOrderStatus.APROVADA,
-                    PurchaseOrderStatus.EM_CONFERENCIA,
-                ]
-            ),
-            PurchaseOrder.order_type == "produto",
-        )
-        .order_by(PurchaseOrder.ordered_at.desc())
-        .all()
+def list_orders_for_receipt(
+    db: Session, *, params: PageParams
+) -> tuple[list[PurchaseOrder], int]:
+    """Ordens de PRODUTO em conferência (APROVADA/EM_CONFERENCIA), paginado.
+    A seleção (status + order_type) é preservada; `order_by` allowlist:
+    ordered_at (default desc, indexado), status."""
+    query = db.query(PurchaseOrder).filter(
+        PurchaseOrder.deleted_at.is_(None),
+        PurchaseOrder.status.in_(
+            [
+                PurchaseOrderStatus.APROVADA,
+                PurchaseOrderStatus.EM_CONFERENCIA,
+            ]
+        ),
+        PurchaseOrder.order_type == "produto",
+    )
+    orders, total = paginate_query(
+        query,
+        params,
+        allowed_order_by=ORDER_ORDER_COLUMNS,
+        default_order=PurchaseOrder.ordered_at.desc(),
+        tiebreaker=PurchaseOrder.id,
     )
     for order in orders:
         _load_order_with_receipts(db, order)
-    return orders
+    return orders, total
 
 
 def _load_order_with_receipts(db: Session, order: PurchaseOrder) -> None:
@@ -608,25 +640,29 @@ def create_quotation(db: Session, data: QuotationCreate) -> Quotation:
 def list_quotations(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[QuotationStatus] = None,
     order_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Quotation]:
+) -> tuple[list[Quotation], int]:
+    """Lista cotações ativas, paginado. Filtros `status`/`order_type`;
+    `order_by` allowlist: status (indexado), created_at (default desc).
+    NOTA: `created_at` NÃO tem índice (sort default faz scan ordenado) —
+    sinalizado no done para avaliar índice futuro se a tabela crescer."""
     query = db.query(Quotation).filter(Quotation.deleted_at.is_(None))
     if status:
         query = query.filter(Quotation.status == status)
     if order_type:
         query = query.filter(Quotation.order_type == order_type)
-    quotations = (
-        query.order_by(Quotation.created_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+    quotations, total = paginate_query(
+        query,
+        params,
+        allowed_order_by=QUOTATION_ORDER_COLUMNS,
+        default_order=Quotation.created_at.desc(),
+        tiebreaker=Quotation.id,
     )
     for quotation in quotations:
         _load_quotation_relations(db, quotation)
-    return quotations
+    return quotations, total
 
 
 def get_quotation(db: Session, quotation_id: UUID) -> Optional[Quotation]:

@@ -11,6 +11,7 @@ from app.modules.auth.model import User
 from app.modules.auth.router import get_current_user
 from app.modules.folha import service as folha_service
 from app.modules.folha.schemas import (
+    EmployeeOut,
     EmployeeUpdate,
     JobPositionCreate,
     JobPositionOut,
@@ -96,24 +97,20 @@ def delete_position(
 # ---------------------------------------------------------------------------
 
 
-@router.get("/funcionarios", response_model=SuccessResponse)
+@router.get("/funcionarios", response_model=Page[EmployeeOut])
 def list_employees(
     is_active: Optional[bool] = None,
     contract_type: Optional[ContractType] = None,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    employees = folha_service.list_employees(
+) -> Page[EmployeeOut]:
+    return folha_service.list_employees(
         db,
-        skip=skip,
-        limit=limit,
+        params=params,
         is_active=is_active,
         contract_type=contract_type,
     )
-    data = [folha_service.serialize_employee(e) for e in employees]
-    return success("Funcionários listados com sucesso", data)
 
 
 @router.post("/funcionarios", response_model=SuccessResponse, status_code=201)

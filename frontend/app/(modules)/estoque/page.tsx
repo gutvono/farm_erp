@@ -1,19 +1,11 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { AlertTriangle, ChevronDown, ChevronUp, PackageCheck, Plus, RefreshCw } from "lucide-react"
+import { AlertTriangle, PackageCheck, Plus, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import {
   Sheet,
   SheetContent,
@@ -21,48 +13,32 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { StockItemRow } from "@/components/modules/estoque/StockItemRow"
+import { ItensTable } from "@/components/modules/estoque/ItensTable"
+import { useItens } from "@/components/modules/estoque/useItens"
 import { StockItemForm } from "@/components/modules/estoque/StockItemForm"
 import { MovimentacaoForm } from "@/components/modules/estoque/MovimentacaoForm"
 import { MovimentacoesTable } from "@/components/modules/estoque/MovimentacoesTable"
 import { MovimentacoesHistory } from "@/components/modules/estoque/MovimentacoesHistory"
 import { useMovimentacoes } from "@/components/modules/estoque/useMovimentacoes"
 import { InventarioModal } from "@/components/modules/estoque/InventarioModal"
-import { ConferenciaRecebimento } from "@/components/modules/estoque/ConferenciaRecebimento"
-import {
-  getItens,
-  getInventario,
-} from "@/services/estoque"
+import { RecebimentosTable } from "@/components/modules/estoque/RecebimentosTable"
+import { useRecebimentos } from "@/components/modules/estoque/useRecebimentos"
+import { getItens, getInventario } from "@/services/estoque"
 import { getCategorias } from "@/services/configuracoes"
-import { getRecebimentos, iniciarConferencia } from "@/services/compras"
-import {
-  Category,
-  Inventory,
-  PurchaseOrderWithReceipts,
-  StockItem,
-} from "@/types/index"
-import { formatCurrency, formatDate } from "@/lib/utils"
+import { Category, Inventory, StockItem } from "@/types/index"
 
 const CATEGORIAS_PAGE_SIZE = 100
 
-const STATUS_BADGE: Record<string, string> = {
-  aprovada: "bg-emerald-100 text-emerald-700",
-  em_conferencia: "bg-orange-100 text-orange-800",
-}
-
-const STATUS_LABEL: Record<string, string> = {
-  aprovada: "Aprovada",
-  em_conferencia: "Em conferência",
-}
-
 export default function EstoquePage() {
-  const [items, setItems] = useState<StockItem[]>([])
-  const [itemsLoading, setItemsLoading] = useState(false)
-  const [categoryFilter, setCategoryFilter] = useState<string>("all")
-  const [belowMinFilter, setBelowMinFilter] = useState(false)
+  const itens = useItens()
+  const movements = useMovimentacoes()
+  const recebimentos = useRecebimentos()
+
   const [categories, setCategories] = useState<Category[]>([])
 
-  const movements = useMovimentacoes()
+  // Lista completa de itens (ARRAY) para os SELETORES: formulário de
+  // movimentação, filtro de item nas movimentações e contagem de críticos.
+  const [allItems, setAllItems] = useState<StockItem[]>([])
 
   const [inventory, setInventory] = useState<Inventory | null>(null)
   const [inventoryLoading, setInventoryLoading] = useState(false)
@@ -76,47 +52,25 @@ export default function EstoquePage() {
   const [historyOpen, setHistoryOpen] = useState(false)
   const [historyItem, setHistoryItem] = useState<StockItem | null>(null)
 
-  // Recebimentos
-  const [recebimentos, setRecebimentos] = useState<PurchaseOrderWithReceipts[]>([])
-  const [recebimentosLoading, setRecebimentosLoading] = useState(false)
-  const [expandedConferencia, setExpandedConferencia] = useState<string | null>(null)
-  const [startingConferencia, setStartingConferencia] = useState<string | null>(null)
-
-  const loadItems = useCallback(async () => {
-    setItemsLoading(true)
-    try {
-      const data = await getItens({
-        category_id: categoryFilter !== "all" ? categoryFilter : undefined,
-        below_minimum: belowMinFilter || undefined,
-      })
-      setItems(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar itens")
-    } finally {
-      setItemsLoading(false)
-    }
-  }, [categoryFilter, belowMinFilter])
-
-  const loadRecebimentos = useCallback(async () => {
-    setRecebimentosLoading(true)
-    try {
-      const data = await getRecebimentos()
-      setRecebimentos(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar recebimentos")
-    } finally {
-      setRecebimentosLoading(false)
-    }
+  const loadAllItems = useCallback(() => {
+    getItens().then(setAllItems).catch(() => {})
   }, [])
 
-  useEffect(() => { loadItems() }, [loadItems])
-  useEffect(() => { loadRecebimentos() }, [loadRecebimentos])
+  useEffect(() => {
+    loadAllItems()
+  }, [loadAllItems])
 
   useEffect(() => {
     getCategorias({ page: 1, page_size: CATEGORIAS_PAGE_SIZE, order_by: "name", order_dir: "asc" })
       .then((res) => setCategories(res.items))
       .catch(() => {})
   }, [])
+
+  function reloadItemData() {
+    itens.reload()
+    loadAllItems()
+    movements.reload()
+  }
 
   async function handleOpenInventory() {
     setInventoryOpen(true)
@@ -146,27 +100,13 @@ export default function EstoquePage() {
     setItemFormOpen(true)
   }
 
-  async function handleIniciarConferencia(orderId: string) {
-    setStartingConferencia(orderId)
-    try {
-      await iniciarConferencia(orderId)
-      toast.success("Conferência iniciada")
-      await loadRecebimentos()
-      setExpandedConferencia(orderId)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao iniciar conferência")
-    } finally {
-      setStartingConferencia(null)
-    }
-  }
-
   async function handleConferenciaFinalizada() {
-    setExpandedConferencia(null)
-    await Promise.all([loadRecebimentos(), loadItems(), movements.reload()])
+    itens.reload()
+    loadAllItems()
+    await Promise.all([recebimentos.reload(), movements.reload()])
   }
 
-  const criticalCount = items.filter((i) => i.is_below_minimum).length
-  const recebimentosProduto = recebimentos.filter((o) => o.order_type === "produto")
+  const criticalCount = allItems.filter((i) => i.is_below_minimum).length
 
   return (
     <RootLayout title="Estoque">
@@ -185,9 +125,9 @@ export default function EstoquePage() {
             <TabsTrigger value="inventory">Inventário</TabsTrigger>
             <TabsTrigger value="recebimentos" className="relative">
               Recebimentos
-              {recebimentosProduto.length > 0 && (
+              {recebimentos.data.total > 0 && (
                 <span className="ml-1.5 rounded-full bg-orange-500 text-white text-xs px-1.5 py-0.5 leading-none">
-                  {recebimentosProduto.length}
+                  {recebimentos.data.total}
                 </span>
               )}
             </TabsTrigger>
@@ -196,67 +136,42 @@ export default function EstoquePage() {
           {/* ── Aba Itens ── */}
           <TabsContent value="items" className="space-y-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <div className="flex items-center gap-2">
-                <span className="text-sm text-slate-600">
-                  {items.length} item{items.length !== 1 ? "s" : ""} cadastrado{items.length !== 1 ? "s" : ""}
-                  {criticalCount > 0 && (
-                    <span className="ml-1 text-red-600 font-medium flex inline-flex items-center gap-1">
-                      ,{" "}
-                      <AlertTriangle className="h-3 w-3" />
-                      {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
-                    </span>
-                  )}
-                </span>
-              </div>
+              <span className="text-sm text-slate-600">
+                {itens.data.total} item{itens.data.total !== 1 ? "s" : ""}
+                {criticalCount > 0 && (
+                  <span className="ml-1 inline-flex items-center gap-1 text-red-600 font-medium">
+                    , <AlertTriangle className="h-3 w-3" />
+                    {criticalCount} crítico{criticalCount !== 1 ? "s" : ""}
+                  </span>
+                )}
+              </span>
 
-              <div className="flex items-center gap-2">
-                <Select value={categoryFilter} onValueChange={setCategoryFilter}>
-                  <SelectTrigger className="w-44">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as categorias</SelectItem>
-                    {categories.map((c) => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-
-                <Button
-                  variant={belowMinFilter ? "default" : "outline"}
-                  size="sm"
-                  onClick={() => setBelowMinFilter((v) => !v)}
-                >
-                  <AlertTriangle className="h-4 w-4 mr-1" />
-                  Apenas críticos
-                </Button>
-
-                <Button onClick={handleNewItem} size="sm">
-                  <Plus className="h-4 w-4 mr-1" />
-                  Novo Item
-                </Button>
-              </div>
+              <Button onClick={handleNewItem} size="sm">
+                <Plus className="h-4 w-4 mr-1" />
+                Novo Item
+              </Button>
             </div>
 
-            {itemsLoading ? (
-              <div className="py-12 text-center text-slate-400">Carregando itens...</div>
-            ) : items.length === 0 ? (
-              <div className="py-12 text-center text-slate-400">Nenhum item cadastrado</div>
-            ) : (
-              <div className="space-y-2">
-                {items.map((item) => (
-                  <StockItemRow
-                    key={item.id}
-                    item={item}
-                    onClick={() => handleOpenHistory(item)}
-                    onEdit={() => handleEditItem(item)}
-                    onDeleted={loadItems}
-                  />
-                ))}
-              </div>
-            )}
+            <ItensTable
+              data={itens.data}
+              loading={itens.loading}
+              page={itens.page}
+              sort={itens.sort}
+              onPageChange={itens.setPage}
+              onSortChange={itens.toggleSort}
+              search={itens.searchInput}
+              onSearchChange={itens.setSearchInput}
+              categories={categories}
+              categoryId={itens.categoryId}
+              onCategoryChange={itens.setCategory}
+              role={itens.role}
+              onRoleChange={itens.setRole}
+              belowMinimum={itens.belowMinimum}
+              onBelowMinimumChange={itens.setBelowMinimum}
+              onRowClick={handleOpenHistory}
+              onEdit={handleEditItem}
+              onChanged={reloadItemData}
+            />
           </TabsContent>
 
           {/* ── Aba Movimentações ── */}
@@ -277,7 +192,7 @@ export default function EstoquePage() {
               onSortChange={movements.toggleSort}
               filters={movements.filters}
               onFiltersChange={movements.setFilters}
-              items={items.map((i) => ({ id: i.id, name: i.name }))}
+              items={allItems.map((i) => ({ id: i.id, name: i.name }))}
             />
           </TabsContent>
 
@@ -306,99 +221,28 @@ export default function EstoquePage() {
               <p className="text-sm text-slate-500">
                 Ordens aprovadas aguardando conferência de recebimento
               </p>
-              <Button variant="outline" size="sm" onClick={loadRecebimentos}>
+              <Button variant="outline" size="sm" onClick={recebimentos.reload}>
                 <RefreshCw className="h-4 w-4 mr-1" />
                 Atualizar
               </Button>
             </div>
 
-            {recebimentosLoading ? (
-              <div className="py-12 text-center text-slate-400">Carregando recebimentos...</div>
-            ) : recebimentosProduto.length === 0 ? (
+            {!recebimentos.loading && recebimentos.data.total === 0 ? (
               <div className="py-12 text-center text-slate-400">
                 <PackageCheck className="h-10 w-10 mx-auto mb-2 text-slate-300" />
                 Nenhuma ordem aguardando conferência
               </div>
             ) : (
-              <div className="space-y-4">
-                {recebimentosProduto.map((order) => {
-                  const isExpanded = expandedConferencia === order.id
-                  return (
-                    <Card key={order.id} className="border-slate-200">
-                      <CardHeader className="pb-3">
-                        <div className="flex items-start justify-between gap-3">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-2 flex-wrap">
-                              <span className="font-semibold text-slate-800">
-                                {order.supplier_name}
-                              </span>
-                              <Badge className={STATUS_BADGE[order.status] ?? ""}>
-                                {STATUS_LABEL[order.status] ?? order.status}
-                              </Badge>
-                            </div>
-                            <p className="text-sm text-slate-500 mt-0.5">
-                              {formatDate(order.ordered_at)} ·{" "}
-                              {order.items.length} item{order.items.length !== 1 ? "s" : ""} ·{" "}
-                              <span className="font-medium text-slate-700">
-                                {formatCurrency(order.total_amount)}
-                              </span>
-                            </p>
-                            {order.notes && (
-                              <p className="text-sm text-slate-500 mt-1 italic">{order.notes}</p>
-                            )}
-                          </div>
-
-                          <div className="flex items-center gap-2 flex-shrink-0">
-                            {order.status === "aprovada" && (
-                              <Button
-                                size="sm"
-                                onClick={() => handleIniciarConferencia(order.id)}
-                                disabled={startingConferencia === order.id}
-                              >
-                                {startingConferencia === order.id
-                                  ? "Iniciando..."
-                                  : "Iniciar Conferência"}
-                              </Button>
-                            )}
-                            {order.status === "em_conferencia" && (
-                              <Button
-                                size="sm"
-                                variant="outline"
-                                onClick={() =>
-                                  setExpandedConferencia(isExpanded ? null : order.id)
-                                }
-                              >
-                                {isExpanded ? (
-                                  <>
-                                    <ChevronUp className="h-4 w-4 mr-1" />
-                                    Fechar
-                                  </>
-                                ) : (
-                                  <>
-                                    <ChevronDown className="h-4 w-4 mr-1" />
-                                    Conferir itens
-                                  </>
-                                )}
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      </CardHeader>
-
-                      {isExpanded && order.status === "em_conferencia" && (
-                        <CardContent className="pt-0 border-t">
-                          <div className="pt-4">
-                            <ConferenciaRecebimento
-                              order={order}
-                              onFinalized={handleConferenciaFinalizada}
-                            />
-                          </div>
-                        </CardContent>
-                      )}
-                    </Card>
-                  )
-                })}
-              </div>
+              <RecebimentosTable
+                data={recebimentos.data}
+                loading={recebimentos.loading}
+                page={recebimentos.page}
+                sort={recebimentos.sort}
+                onPageChange={recebimentos.setPage}
+                onSortChange={recebimentos.toggleSort}
+                onReload={recebimentos.reload}
+                onFinalized={handleConferenciaFinalizada}
+              />
             )}
           </TabsContent>
         </Tabs>
@@ -409,20 +253,14 @@ export default function EstoquePage() {
         open={itemFormOpen}
         onOpenChange={setItemFormOpen}
         item={editingItem}
-        onSuccess={() => {
-          loadItems()
-          movements.reload()
-        }}
+        onSuccess={reloadItemData}
       />
 
       <MovimentacaoForm
         open={movFormOpen}
         onOpenChange={setMovFormOpen}
-        items={items}
-        onSuccess={() => {
-          loadItems()
-          movements.reload()
-        }}
+        items={allItems}
+        onSuccess={reloadItemData}
       />
 
       <InventarioModal
@@ -436,9 +274,7 @@ export default function EstoquePage() {
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
         <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
           <SheetHeader>
-            <SheetTitle>
-              Histórico: {historyItem?.name}
-            </SheetTitle>
+            <SheetTitle>Histórico: {historyItem?.name}</SheetTitle>
           </SheetHeader>
           <div className="mt-4">
             {historyItem && (

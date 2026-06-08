@@ -237,9 +237,36 @@ function parseOrderWithReceipts(raw: RawOrderWithReceipts): PurchaseOrderWithRec
 
 // ── Fornecedores ──────────────────────────────────────────────────────────────
 
+/**
+ * Lista fornecedores como ARRAY (seletor/dropdown — ordem de compra, propostas
+ * de cotação, ordem de produção no PCP). O endpoint é paginado (`Page[T]`,
+ * Demanda 8); pede uma página grande e devolve só os `items`, preservando a
+ * assinatura `Supplier[]` dos chamadores fora do escopo. Para a TABELA paginada
+ * use `getFornecedoresPaginated`.
+ */
 export async function getFornecedores(): Promise<Supplier[]> {
-  const response = await apiFetch<ApiResponse<RawSupplier[]>>("/api/compras/fornecedores")
-  return response.data.map(parseSupplier)
+  const result = await fetchPaginated<Supplier, RawSupplier>(
+    "/api/compras/fornecedores",
+    { page_size: 100 },
+    parseSupplier
+  )
+  return result.items
+}
+
+/** Lista paginada de fornecedores (`GET /api/compras/fornecedores`, `Page[T]`).
+ * `order_by` aceito: `name`; `search` por nome/documento. */
+export async function getFornecedoresPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+}): Promise<Paginated<Supplier>> {
+  return fetchPaginated<Supplier, RawSupplier>(
+    "/api/compras/fornecedores",
+    params,
+    parseSupplier
+  )
 }
 
 export async function createFornecedor(data: SupplierPayload): Promise<Supplier> {
@@ -331,11 +358,35 @@ export async function getFornecedoresDoProduto(
 
 // ── Ordens de Compra ──────────────────────────────────────────────────────────
 
+/** Lista ordens como ARRAY (uso fora do escopo: PCP, fila do Financeiro). O
+ * endpoint é paginado (`Page[T]`); pede uma página grande e devolve `items`.
+ * Para a TABELA de ordens use `getOrdensPaginated`. */
 export async function getOrdens(status?: string): Promise<PurchaseOrder[]> {
-  const response = await apiFetch<ApiResponse<RawOrder[]>>("/api/compras/ordens", {
-    params: { status },
-  })
-  return response.data.map(parseOrder)
+  const result = await fetchPaginated<PurchaseOrder, RawOrder>(
+    "/api/compras/ordens",
+    { page_size: 100, status },
+    parseOrder
+  )
+  return result.items
+}
+
+/** Lista paginada de ordens de compra (`GET /api/compras/ordens`, `Page[T]`).
+ * `order_by` aceito: `ordered_at`, `status`; filtros: `status`, `supplier_id`;
+ * `search` por nome/documento do fornecedor. */
+export async function getOrdensPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+  status?: string
+  supplier_id?: string
+}): Promise<Paginated<PurchaseOrder>> {
+  return fetchPaginated<PurchaseOrder, RawOrder>(
+    "/api/compras/ordens",
+    params,
+    parseOrder
+  )
 }
 
 export async function createOrdem(data: {
@@ -451,9 +502,32 @@ export async function finalizarConferencia(
 
 // ── Recebimentos ──────────────────────────────────────────────────────────────
 
+/** Lista recebimentos como ARRAY (uso pontual). Endpoint paginado (`Page[T]`);
+ * já filtra no backend ordens de PRODUTO em conferência. Para a TABELA use
+ * `getRecebimentosPaginated`. */
 export async function getRecebimentos(): Promise<PurchaseOrderWithReceipts[]> {
-  const response = await apiFetch<ApiResponse<RawOrderWithReceipts[]>>("/api/compras/recebimentos")
-  return response.data.map(parseOrderWithReceipts)
+  const result = await fetchPaginated<PurchaseOrderWithReceipts, RawOrderWithReceipts>(
+    "/api/compras/recebimentos",
+    { page_size: 100 },
+    parseOrderWithReceipts
+  )
+  return result.items
+}
+
+/** Lista paginada de recebimentos (`GET /api/compras/recebimentos`, `Page[T]`).
+ * A seleção (ordens de produto APROVADA/EM_CONFERENCIA) é fixa no backend.
+ * `order_by` aceito: `ordered_at`, `status`. */
+export async function getRecebimentosPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+}): Promise<Paginated<PurchaseOrderWithReceipts>> {
+  return fetchPaginated<PurchaseOrderWithReceipts, RawOrderWithReceipts>(
+    "/api/compras/recebimentos",
+    params,
+    parseOrderWithReceipts
+  )
 }
 
 export async function getRecebimento(id: string): Promise<PurchaseOrderWithReceipts> {
@@ -551,14 +625,36 @@ function parseQuotation(raw: RawQuotation): Quotation {
   }
 }
 
+/** Lista cotações como ARRAY (uso fora do escopo: fila do Financeiro). Endpoint
+ * paginado (`Page[T]`); pede página grande e devolve `items`. Para a TABELA use
+ * `getCotacoesPaginated`. */
 export async function getCotacoes(
   status?: QuotationStatus,
   order_type?: string
 ): Promise<Quotation[]> {
-  const response = await apiFetch<ApiResponse<RawQuotation[]>>("/api/compras/cotacoes", {
-    params: { status, order_type },
-  })
-  return response.data.map(parseQuotation)
+  const result = await fetchPaginated<Quotation, RawQuotation>(
+    "/api/compras/cotacoes",
+    { page_size: 100, status, order_type },
+    parseQuotation
+  )
+  return result.items
+}
+
+/** Lista paginada de cotações (`GET /api/compras/cotacoes`, `Page[T]`).
+ * `order_by` aceito: `status`, `created_at`; filtros: `status`, `order_type`. */
+export async function getCotacoesPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  status?: string
+  order_type?: string
+}): Promise<Paginated<Quotation>> {
+  return fetchPaginated<Quotation, RawQuotation>(
+    "/api/compras/cotacoes",
+    params,
+    parseQuotation
+  )
 }
 
 export async function getCotacao(id: string): Promise<Quotation> {

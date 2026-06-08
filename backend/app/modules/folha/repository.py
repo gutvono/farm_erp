@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from sqlalchemy.orm import joinedload
 
@@ -32,6 +33,11 @@ from app.shared.pagination import PageParams, paginate_query
 POSITION_ORDER_COLUMNS = {
     "name": JobPosition.name,
     "base_salary": JobPosition.base_salary,
+}
+
+# Allowlist de ordenação para a listagem paginada de funcionários (Demanda 8).
+EMPLOYEE_ORDER_COLUMNS = {
+    "name": Employee.name,
 }
 
 
@@ -231,21 +237,29 @@ def create_employee(
 def list_employees(
     db: Session,
     *,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams,
     is_active: Optional[bool] = None,
     contract_type: Optional[ContractType] = None,
-) -> list[Employee]:
+) -> tuple[list[Employee], int]:
+    """Lista funcionários ativos (não soft-deleted), paginado. Filtros
+    `is_active`/`contract_type`; `search` por nome OU documento; `order_by`
+    allowlist: name (default, indexado)."""
     query = db.query(Employee).filter(Employee.deleted_at.is_(None))
     if is_active is not None:
         query = query.filter(Employee.is_active == is_active)
     if contract_type is not None:
         query = query.filter(Employee.contract_type == contract_type)
-    return (
-        query.order_by(Employee.name.asc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+    if params.search:
+        like = f"%{params.search}%"
+        query = query.filter(
+            or_(Employee.name.ilike(like), Employee.document.ilike(like))
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=EMPLOYEE_ORDER_COLUMNS,
+        default_order=Employee.name.asc(),
+        tiebreaker=Employee.id,
     )
 
 
