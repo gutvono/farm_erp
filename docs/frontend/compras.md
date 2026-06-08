@@ -189,8 +189,12 @@ O botão **"Ver notas relacionadas"** apenas **navega** para
 | `services/compras.ts` | Service | Orquestra chamadas a `/api/compras/*`; converte Decimal → number |
 | `components/modules/compras/OrdemCard.tsx` | Componente | Card com badges, botões contextuais e expand; navega para as NFs da ordem |
 | `components/modules/estoque/ConferenciaRecebimento.tsx` | Componente | Form de conferência (aceito/recusado) + confirmação |
-| `components/modules/compras/OrdemForm.tsx` | Componente | Dialog Produto/Serviço |
-| `components/modules/compras/FornecedorForm.tsx` / `FornecedorRow.tsx` | Componentes | CRUD de fornecedores |
+| `components/modules/compras/OrdemForm.tsx` | Componente | Dialog Produto/Serviço; produto usa fluxo produto→fornecedor com preço do catálogo |
+| `components/modules/compras/FornecedorForm.tsx` | Componente | Cadastro/edição de fornecedor (RHF+Zod), validação de documento e busca de CEP (ViaCEP) |
+| `components/modules/compras/FornecedoresTable.tsx` | Componente | Lista de fornecedores em DataTable (busca/ordenação/paginação no cliente) + ações (catálogo/editar/excluir) |
+| `components/modules/compras/CatalogoFornecedorModal.tsx` | Componente | Gerência do catálogo do fornecedor (DataTable paginada: adicionar/editar preço/ativar/remover) |
+| `lib/br-documents.ts` | Util | `isValidCpf`/`isValidCnpj`/`validateDocument` (DV oficiais, espelha o backend) + máscaras |
+| `services/cep.ts` | Service | `lookupCep` (ViaCEP, best-effort — não trava o form) |
 
 ### `OrdemCard` — navegação para as notas
 
@@ -235,6 +239,9 @@ em_andamento ──[Enviar para Aprovação]──▶ aguardando_aprovacao_finan
 | `iniciarConferencia(id)` | `POST /api/compras/ordens/{id}/iniciar-conferencia` |
 | `finalizarConferencia(id, items)` | `POST /api/compras/ordens/{id}/finalizar-conferencia` (emite NFs + entrada de estoque + conta a pagar) |
 | `getRecebimentos()` / `getRecebimento(id)` | `GET /api/compras/recebimentos[/{id}]` |
+| `getCatalogoFornecedor(id, params)` | `GET /api/compras/fornecedores/{id}/itens` (Page[T]) |
+| `addItemCatalogo` / `updateItemCatalogo` / `deleteItemCatalogo` | `POST/PUT/DELETE /api/compras/fornecedores/{id}/itens[/{itemId}]` |
+| `getFornecedoresDoProduto(stockItemId)` | `GET /api/compras/produtos/{stock_item_id}/fornecedores` |
 
 ### Tipos relevantes (`types/index.ts`)
 
@@ -300,5 +307,87 @@ pagamento (à vista/parcelado) e o parcelamento.
 
 ## Aba Fornecedores
 
-- Botão **"Novo Fornecedor"** e lista de `FornecedorRow` (nome, documento, e-mail,
-  telefone, endereço; editar/excluir).
+A aba **Fornecedores** mostra a lista de fornecedores em uma **tabela paginada**
+(busca por nome, documento ou e-mail; colunas Nome/Documento, E-mail, Telefone e
+Endereço; ordenação por Nome). Cada linha tem três ações à direita: **Itens
+vendidos** (catálogo), **Editar** (lápis) e **Excluir** (lixeira).
+
+[SCREENSHOT: aba "Fornecedores" com a tabela paginada e o campo de busca]
+
+### Cadastrar / editar um fornecedor (com busca de CEP)
+
+1. Clique em **"Novo Fornecedor"** (ou no lápis para editar).
+2. Preencha **Nome** (obrigatório). O **CNPJ / CPF** é opcional, mas, se
+   informado, é **validado**: o sistema confere os dígitos verificadores e, se o
+   número for inválido, exibe **"CPF ou CNPJ inválido"** e **não deixa salvar**.
+   O campo aplica a máscara automaticamente conforme você digita.
+3. No bloco **Endereço**, digite o **CEP** (máscara `00000-000`). Ao sair do
+   campo, o sistema **busca o endereço** e preenche **Rua, Bairro, Cidade e UF**
+   automaticamente. Todos os campos continuam **editáveis**; você completa
+   **Número** e **Complemento**.
+   - Se o CEP não existir, aparece o aviso **"CEP não encontrado"** e você
+     preenche o endereço à mão.
+   - Se a busca de CEP estiver indisponível, aparece **"Não foi possível
+     consultar o CEP. Preencha o endereço manualmente."** — isso **não impede**
+     salvar o fornecedor.
+4. Clique em **"Criar fornecedor"** / **"Salvar alterações"**. Toast de sucesso.
+
+[SCREENSHOT: formulário de fornecedor com endereço preenchido após a busca de CEP]
+
+### Gerenciar o catálogo de um fornecedor (itens vendidos)
+
+O **catálogo** define **o que** cada fornecedor vende e **por quanto** — é o que
+alimenta a seleção de fornecedores na ordem de compra.
+
+1. Na linha do fornecedor, clique no ícone **Itens vendidos** (livro). Abre a
+   janela **"Itens vendidos — {fornecedor}"**.
+2. Para **adicionar**: escolha o **Item de estoque**, informe o **Preço unit.** e
+   clique em **"Adicionar"**. (Itens marcados como avariados **não** aparecem na
+   lista de escolha.)
+3. A tabela lista os itens do catálogo (paginada, ordenável por Item e Preço).
+   Para cada item você pode:
+   - **Editar o preço** direto na célula (digite e tecle Enter ou clique fora);
+   - **Ativar/Inativar** clicando no selo de status (**Ativo** / **Inativo**) —
+     itens inativos continuam no catálogo, mas não são oferecidos na ordem;
+   - **Remover** o item do catálogo (lixeira, com confirmação).
+
+[SCREENSHOT: janela "Itens vendidos" com a linha de adicionar e a tabela do catálogo]
+
+**Mensagens do catálogo:** *"Item adicionado ao catálogo"*, *"Preço atualizado"*,
+*"Item ativado"* / *"Item desativado"*, *"Item removido do catálogo"*. Tentar
+adicionar um item já existente mostra *"Item já cadastrado no catálogo deste
+fornecedor"*.
+
+### Criar uma ordem de compra de PRODUTO (fluxo produto → fornecedor)
+
+Ao criar uma ordem do tipo **Produto** (botão **"Nova Ordem"** na aba *Ordens de
+Compra*), o fluxo começa **pelo produto**:
+
+1. Em cada linha, escolha o **Produto** primeiro. (Produtos avariados não
+   aparecem.)
+2. O campo **Fornecedor** da linha passa a listar **apenas os fornecedores que
+   vendem aquele produto**, cada um com o **preço sugerido** do catálogo. Escolha
+   um — isso **fixa o fornecedor da ordem** (uma ordem tem um único fornecedor).
+3. O **Preço unit.** vem **pré-preenchido** com o preço do catálogo e é
+   **editável** (negociação). Informe a **Quantidade**.
+4. Para as **demais linhas**, o dropdown de **Produto** já fica restrito ao
+   **catálogo do fornecedor escolhido**, e o preço vem sugerido. O fornecedor
+   aparece fixo em cada linha.
+5. Para mudar de fornecedor, clique em **"Trocar fornecedor"**: os itens que
+   **não** fazem parte do catálogo do novo fornecedor são **removidos** (aviso
+   *"N item(ns) removido(s) por não fazerem parte do catálogo de {fornecedor}"*).
+6. Opcionalmente informe **Valor do Transporte** e **Observações** e clique em
+   **"Criar ordem"**.
+
+[SCREENSHOT: nova ordem de produto mostrando produto escolhido e o dropdown de fornecedores com preço sugerido]
+
+> A partir daí a ordem segue o fluxo normal de aprovação e conferência (seção 1.1).
+
+### Cotação de serviço → pedido pagável
+
+No fluxo de **Cotações** de **serviço**, ao clicar em **"Realizar Pedido"** na
+cotação aprovada, o sistema cria a ordem de compra **já em Aguardando pagamento**
+(NF de serviço emitida e conta a pagar gerada) — pronta para ser paga no
+Financeiro. Toast: *"Pedido realizado — NF de serviço emitida; ordem aguardando
+pagamento."* (Produto continua indo para **Aprovada**, rumo à conferência:
+*"Pedido realizado! Ordem de compra criada e aprovada, pronta para conferência."*)

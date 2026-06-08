@@ -92,7 +92,9 @@ export function RealizeOrderModal({
         shipping_cost: !isService && shipping > 0 ? shipping : undefined,
       })
       toast.success(
-        "Pedido realizado com sucesso! A ordem de compra foi criada e está aprovada."
+        isService
+          ? "Pedido realizado — NF de serviço emitida; ordem aguardando pagamento."
+          : "Pedido realizado! Ordem de compra criada e aprovada, pronta para conferência."
       )
       onSuccess()
       onOpenChange(false)

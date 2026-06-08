@@ -13,6 +13,7 @@ from app.modules.compras.model import (
     Quotation,
     QuotationProposal,
     Supplier,
+    SupplierItem,
 )
 from app.modules.compras.schemas import (
     PurchaseOrderCreate,
@@ -23,11 +24,15 @@ from app.modules.compras.schemas import (
     QuotationProposalUpdate,
     RealizeOrderRequest,
     SupplierCreate,
+    SupplierItemCreate,
+    SupplierItemOut,
+    SupplierItemUpdate,
     SupplierUpdate,
 )
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
 from app.modules.financeiro import service as fin_service
+from app.shared.br_documents import validate_document
 from app.shared.enums import (
     FinancialCategory,
     MovementType,
@@ -35,6 +40,7 @@ from app.shared.enums import (
     PurchaseOrderStatus,
     QuotationStatus,
 )
+from app.shared.pagination import Page, PageParams
 
 
 # ---------------------------------------------------------------------------
@@ -61,7 +67,14 @@ def _get_order_or_404(db: Session, order_id: UUID) -> PurchaseOrder:
 # ---------------------------------------------------------------------------
 
 
+def _validate_document_or_400(document: Optional[str]) -> None:
+    """Documento é opcional; se informado, precisa ser CPF ou CNPJ válido."""
+    if document and not validate_document(document):
+        raise HTTPException(status_code=400, detail="CNPJ/CPF inválido")
+
+
 def create_supplier(db: Session, data: SupplierCreate) -> Supplier:
+    _validate_document_or_400(data.document)
     return compras_repo.create_supplier(db, data)
 
 
@@ -80,7 +93,96 @@ def get_supplier(db: Session, supplier_id: UUID) -> Supplier:
 
 def update_supplier(db: Session, supplier_id: UUID, data: SupplierUpdate) -> Supplier:
     _get_supplier_or_404(db, supplier_id)
+    # `document` só é validado quando enviado no payload (PATCH-like).
+    if "document" in data.model_dump(exclude_unset=True):
+        _validate_document_or_400(data.document)
     return compras_repo.update_supplier(db, supplier_id, data)
+
+
+# ---------------------------------------------------------------------------
+# Supplier Items (catálogo do fornecedor)
+# ---------------------------------------------------------------------------
+
+
+def _get_supplier_item_or_404(
+    db: Session, supplier_id: UUID, item_id: UUID
+) -> SupplierItem:
+    item = compras_repo.get_supplier_item(db, supplier_id, item_id)
+    if not item:
+        raise HTTPException(
+            status_code=404, detail="Item do catálogo não encontrado"
+        )
+    return item
+
+
+def create_supplier_item(
+    db: Session, supplier_id: UUID, data: SupplierItemCreate
+) -> SupplierItem:
+    _get_supplier_or_404(db, supplier_id)
+
+    stock_item = estoque_repo.get_item(db, data.stock_item_id)
+    if not stock_item:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Item de estoque não encontrado: {data.stock_item_id}",
+        )
+    # AVARIADO é detectado pelo sufixo do SKU (convenção do
+    # estoque_service.obter_ou_criar_item_avariado). Não entra no catálogo.
+    if stock_item.sku.endswith("-AVARIADO"):
+        raise HTTPException(
+            status_code=400,
+            detail="Item avariado não pode entrar no catálogo",
+        )
+
+    try:
+        return compras_repo.create_supplier_item(db, supplier_id, data)
+    except IntegrityError:
+        # Viola a UNIQUE parcial uq_supplier_items_supplier_stock_active.
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Item já cadastrado no catálogo deste fornecedor",
+        )
+
+
+def list_supplier_items(
+    db: Session, supplier_id: UUID, params: PageParams
+) -> Page[SupplierItemOut]:
+    _get_supplier_or_404(db, supplier_id)
+    items, total = compras_repo.list_supplier_items_paginated(
+        db, supplier_id, params
+    )
+    data = [SupplierItemOut.from_model(i) for i in items]
+    return Page.create(items=data, total=total, params=params)
+
+
+def update_supplier_item(
+    db: Session, supplier_id: UUID, item_id: UUID, data: SupplierItemUpdate
+) -> SupplierItem:
+    _get_supplier_or_404(db, supplier_id)
+    item = _get_supplier_item_or_404(db, supplier_id, item_id)
+    return compras_repo.update_supplier_item(db, item, data)
+
+
+def delete_supplier_item(
+    db: Session, supplier_id: UUID, item_id: UUID
+) -> SupplierItem:
+    _get_supplier_or_404(db, supplier_id)
+    item = _get_supplier_item_or_404(db, supplier_id, item_id)
+    return compras_repo.soft_delete_supplier_item(db, item)
+
+
+def list_suppliers_for_stock_item(
+    db: Session, stock_item_id: UUID
+) -> list[SupplierItem]:
+    """Fornecedores ativos que vendem o item informado (dropdown produto-primeiro)."""
+    stock_item = estoque_repo.get_item(db, stock_item_id)
+    if not stock_item:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Item de estoque não encontrado: {stock_item_id}",
+        )
+    return compras_repo.list_suppliers_for_stock_item(db, stock_item_id)
 
 
 def soft_delete_supplier(db: Session, supplier_id: UUID) -> Supplier:
@@ -97,7 +199,7 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
     # Validate supplier exists
     _get_supplier_or_404(db, data.supplier_id)
 
-    # Service orders skip item validation
+    # Service orders skip item/catalog validation (catálogo é só para produto).
     if data.order_type == "produto":
         for item_data in data.items:
             stock_item = estoque_repo.get_item(db, item_data.stock_item_id)
@@ -106,6 +208,21 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
                     status_code=404,
                     detail=f"Item de estoque não encontrado: {item_data.stock_item_id}",
                 )
+            # Demanda 6: compra direta de produto só vale para item no catálogo
+            # ATIVO do fornecedor da ordem. (Fronteira travada pelo PO: esta
+            # regra NÃO se aplica ao fluxo de cotação — ver realize_order.)
+            catalog_item = compras_repo.get_active_supplier_item_by_stock(
+                db, data.supplier_id, item_data.stock_item_id
+            )
+            if not catalog_item:
+                raise HTTPException(
+                    status_code=400,
+                    detail="Item não disponível no catálogo do fornecedor",
+                )
+            # Preço do catálogo é a SUGESTÃO/default: se o front omitir (0), usa
+            # o do catálogo; se preencher (> 0), respeita o do front (negociação).
+            if Decimal(str(item_data.unit_price)) <= 0:
+                item_data.unit_price = Decimal(str(catalog_item.unit_price))
 
     return compras_repo.create_order(db, data)
 
@@ -857,24 +974,55 @@ def realize_order(
             notes=notes,
         )
 
+    # Forma de pagamento / parcelamento opcionais — propagados para a ordem.
+    payment_method = data.payment_method
+    if payment_method == PaymentMethod.PARCELADO:
+        if data.installments < 2:
+            raise HTTPException(
+                status_code=400,
+                detail="Pagamento parcelado exige installments >= 2",
+            )
+        if data.first_due_date is None:
+            raise HTTPException(
+                status_code=400,
+                detail="first_due_date é obrigatório para pagamento parcelado",
+            )
+    approval_fields: dict = {}
+    if payment_method is not None:
+        approval_fields["payment_method"] = payment_method.value
+        approval_fields["installments"] = data.installments
+        approval_fields["first_due_date"] = data.first_due_date
+        approval_fields["installment_interval_days"] = data.installment_interval_days
+
     po = compras_repo.create_order(db, po_create_data)
     # A ordem nasce em em_andamento; avança direto para aprovada sem passar pelo
     # service (evita movimentações financeiras duplicadas do fluxo de ordens).
-    compras_repo._set_status(db, po.id, PurchaseOrderStatus.APROVADA)
+    compras_repo._set_status(
+        db, po.id, PurchaseOrderStatus.APROVADA, extra_fields=approval_fields or None
+    )
+
+    # Serviço: reaproveita complete_service_order (avança a aguardando_pagamento,
+    # emite NF de serviço + gera conta a pagar + registra o seu próprio movimento
+    # R$ 0). Para não duplicar o movimento, o R$ 0 de "ordem gerada" abaixo só é
+    # registrado para PRODUTO (decisão PO #4). Produto segue para conferência sem
+    # regressão (nasce aprovada).
+    if order_type == "servico":
+        complete_service_order(db, po.id)
+    else:
+        fin_service.registrar_movimento(
+            db,
+            movement_type=MovementType.SAIDA,
+            category=FinancialCategory.COMPRA,
+            amount=Decimal("0"),
+            description=f"Ordem de compra gerada a partir da cotação {quotation_id}",
+            source_module="compras",
+            reference_id=po.id,
+        )
 
     updated = compras_repo._set_quotation_status(
         db,
         quotation_id,
         QuotationStatus.CONCLUIDA,
         extra_fields={"purchase_order_id": po.id},
-    )
-    fin_service.registrar_movimento(
-        db,
-        movement_type=MovementType.SAIDA,
-        category=FinancialCategory.COMPRA,
-        amount=Decimal("0"),
-        description=f"Ordem de compra gerada a partir da cotação {quotation_id}",
-        source_module="compras",
-        reference_id=po.id,
     )
     return updated

@@ -1,4 +1,5 @@
 from sqlalchemy import (
+    Boolean,
     Column,
     Date,
     DateTime,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy import Enum as SAEnum
 from sqlalchemy.dialects.postgresql import UUID
@@ -32,10 +34,27 @@ class Supplier(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     document = Column(String(32), nullable=True, index=True)
     email = Column(String(255), nullable=True)
     phone = Column(String(32), nullable=True)
+    # Endereço legado (texto livre). Mantido por compatibilidade; os campos
+    # estruturados abaixo são a fonte da verdade do endereço a partir da Demanda 6.
     address = Column(String(500), nullable=True)
+    # Endereço estruturado (Demanda 6). Todos NULL em linhas pré-existentes —
+    # não há backfill por parsing do `address` (texto livre, parsing não confiável);
+    # quem popula de verdade é o seed/cadastro.
+    cep = Column(String(9), nullable=True)
+    street = Column(String(255), nullable=True)
+    number = Column(String(20), nullable=True)
+    complement = Column(String(120), nullable=True)
+    neighborhood = Column(String(120), nullable=True)
+    city = Column(String(120), nullable=True)
+    state = Column(String(2), nullable=True)
     notes = Column(Text, nullable=True)
 
     purchase_orders = relationship("PurchaseOrder", back_populates="supplier")
+    supplier_items = relationship(
+        "SupplierItem",
+        back_populates="supplier",
+        cascade="all, delete-orphan",
+    )
 
     def __repr__(self) -> str:
         return f"<Supplier {self.name}>"
@@ -294,3 +313,51 @@ class QuotationProposalItem(UUIDMixin, TimestampMixin, Base):
 
     proposal = relationship("QuotationProposal", back_populates="proposal_items")
     quotation_item = relationship("QuotationItem")
+
+
+class SupplierItem(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
+    """Catálogo do fornecedor: item de estoque que um fornecedor vende, com preço.
+
+    Sem quantidade — o estoque do fornecedor é considerado infinito. A regra do
+    Backend só permite comprar (ordem 'produto') itens presentes no catálogo
+    ativo do fornecedor da ordem.
+    """
+
+    __tablename__ = "supplier_items"
+    __table_args__ = (
+        # Um item ativo só pode aparecer uma vez por fornecedor; soft-deletes
+        # (deleted_at não nulo) não colidem, permitindo re-cadastro histórico.
+        Index(
+            "uq_supplier_items_supplier_stock_active",
+            "supplier_id",
+            "stock_item_id",
+            unique=True,
+            postgresql_where=text("deleted_at IS NULL"),
+        ),
+        Index("idx_supplier_items_supplier_id", "supplier_id"),
+        Index("idx_supplier_items_stock_item_id", "stock_item_id"),
+    )
+
+    supplier_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("suppliers.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    stock_item_id = Column(
+        UUID(as_uuid=True),
+        ForeignKey("stock_items.id", ondelete="RESTRICT"),
+        nullable=False,
+    )
+    unit_price = Column(Numeric(12, 2), nullable=False)
+    is_active = Column(
+        Boolean,
+        nullable=False,
+        default=True,
+        server_default=text("true"),
+    )
+
+    supplier = relationship("Supplier", back_populates="supplier_items")
+    stock_item = relationship("StockItem")
+
+    def __repr__(self) -> str:
+        return f"<SupplierItem supplier={self.supplier_id} item={self.stock_item_id}>"

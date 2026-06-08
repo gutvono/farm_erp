@@ -1,6 +1,8 @@
 import { apiFetch } from "@/lib/api"
+import { fetchPaginated, PaginatedQuery } from "@/lib/pagination"
 import {
   ApiResponse,
+  Paginated,
   PaymentMethod,
   PurchaseOrder,
   PurchaseOrderItem,
@@ -13,6 +15,8 @@ import {
   QuotationProposalItem,
   QuotationStatus,
   Supplier,
+  SupplierForStockItem,
+  SupplierItem,
 } from "@/types/index"
 
 function toNumber(value: unknown): number {
@@ -28,6 +32,13 @@ interface RawSupplier {
   email: string | null
   phone: string | null
   address: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   notes: string | null
   created_at: string
   updated_at: string
@@ -41,10 +52,74 @@ function parseSupplier(raw: RawSupplier): Supplier {
     email: raw.email,
     phone: raw.phone,
     address: raw.address,
+    cep: raw.cep ?? null,
+    street: raw.street ?? null,
+    number: raw.number ?? null,
+    complement: raw.complement ?? null,
+    neighborhood: raw.neighborhood ?? null,
+    city: raw.city ?? null,
+    state: raw.state ?? null,
     notes: raw.notes,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
+}
+
+interface RawSupplierItem {
+  id: string
+  supplier_id: string
+  stock_item_id: string
+  stock_item_name: string
+  stock_item_sku: string
+  unit_price: string | number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+function parseSupplierItem(raw: RawSupplierItem): SupplierItem {
+  return {
+    id: raw.id,
+    supplier_id: raw.supplier_id,
+    stock_item_id: raw.stock_item_id,
+    stock_item_name: raw.stock_item_name,
+    stock_item_sku: raw.stock_item_sku,
+    unit_price: toNumber(raw.unit_price),
+    is_active: raw.is_active,
+    created_at: raw.created_at,
+    updated_at: raw.updated_at,
+  }
+}
+
+interface RawSupplierForStockItem {
+  supplier_id: string
+  supplier_name: string
+  unit_price: string | number
+}
+
+function parseSupplierForStockItem(raw: RawSupplierForStockItem): SupplierForStockItem {
+  return {
+    supplier_id: raw.supplier_id,
+    supplier_name: raw.supplier_name,
+    unit_price: toNumber(raw.unit_price),
+  }
+}
+
+/** Campos de endereço/contato aceitos no cadastro/edição de fornecedor. */
+export interface SupplierPayload {
+  name: string
+  document?: string
+  email?: string
+  phone?: string
+  address?: string
+  cep?: string
+  street?: string
+  number?: string
+  complement?: string
+  neighborhood?: string
+  city?: string
+  state?: string
+  notes?: string
 }
 
 interface RawOrderItem {
@@ -167,14 +242,7 @@ export async function getFornecedores(): Promise<Supplier[]> {
   return response.data.map(parseSupplier)
 }
 
-export async function createFornecedor(data: {
-  name: string
-  document?: string
-  email?: string
-  phone?: string
-  address?: string
-  notes?: string
-}): Promise<Supplier> {
+export async function createFornecedor(data: SupplierPayload): Promise<Supplier> {
   const response = await apiFetch<ApiResponse<RawSupplier>>("/api/compras/fornecedores", {
     method: "POST",
     body: JSON.stringify(data),
@@ -184,14 +252,7 @@ export async function createFornecedor(data: {
 
 export async function updateFornecedor(
   id: string,
-  data: Partial<{
-    name: string
-    document: string
-    email: string
-    phone: string
-    address: string
-    notes: string
-  }>
+  data: Partial<SupplierPayload>
 ): Promise<Supplier> {
   const response = await apiFetch<ApiResponse<RawSupplier>>(
     `/api/compras/fornecedores/${id}`,
@@ -202,6 +263,70 @@ export async function updateFornecedor(
 
 export async function deleteFornecedor(id: string): Promise<void> {
   await apiFetch(`/api/compras/fornecedores/${id}`, { method: "DELETE" })
+}
+
+// ── Catálogo do fornecedor (itens vendidos) ────────────────────────────────────
+
+/**
+ * Lista paginada do catálogo de um fornecedor (`GET /fornecedores/{id}/itens`).
+ * Responde o envelope `Page[T]` (Demanda 0). `order_by` aceito:
+ * `stock_item_name`, `unit_price`, `created_at`.
+ */
+export async function getCatalogoFornecedor(
+  supplierId: string,
+  params: PaginatedQuery = {}
+): Promise<Paginated<SupplierItem>> {
+  return fetchPaginated<SupplierItem, RawSupplierItem>(
+    `/api/compras/fornecedores/${supplierId}/itens`,
+    params,
+    parseSupplierItem
+  )
+}
+
+export async function addItemCatalogo(
+  supplierId: string,
+  data: { stock_item_id: string; unit_price: number }
+): Promise<SupplierItem> {
+  const response = await apiFetch<ApiResponse<RawSupplierItem>>(
+    `/api/compras/fornecedores/${supplierId}/itens`,
+    { method: "POST", body: JSON.stringify(data) }
+  )
+  return parseSupplierItem(response.data)
+}
+
+export async function updateItemCatalogo(
+  supplierId: string,
+  itemId: string,
+  data: Partial<{ unit_price: number; is_active: boolean }>
+): Promise<SupplierItem> {
+  const response = await apiFetch<ApiResponse<RawSupplierItem>>(
+    `/api/compras/fornecedores/${supplierId}/itens/${itemId}`,
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return parseSupplierItem(response.data)
+}
+
+export async function deleteItemCatalogo(
+  supplierId: string,
+  itemId: string
+): Promise<void> {
+  await apiFetch(`/api/compras/fornecedores/${supplierId}/itens/${itemId}`, {
+    method: "DELETE",
+  })
+}
+
+/**
+ * Fornecedores que vendem um item de estoque, com o preço sugerido do catálogo
+ * (`GET /compras/produtos/{stock_item_id}/fornecedores`). Base do fluxo
+ * produto→fornecedor na ordem de compra.
+ */
+export async function getFornecedoresDoProduto(
+  stockItemId: string
+): Promise<SupplierForStockItem[]> {
+  const response = await apiFetch<ApiResponse<RawSupplierForStockItem[]>>(
+    `/api/compras/produtos/${stockItemId}/fornecedores`
+  )
+  return response.data.map(parseSupplierForStockItem)
 }
 
 // ── Ordens de Compra ──────────────────────────────────────────────────────────
