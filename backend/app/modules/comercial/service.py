@@ -340,10 +340,19 @@ def cancel_sale(db: Session, sale_id: UUID, reason: Optional[str] = None) -> Sal
 def soft_delete_sale(db: Session, sale_id: UUID) -> Sale:
     sale = _get_sale_or_404(db, sale_id)
 
-    if sale.status != SaleStatus.REALIZADA:
+    # "Excluir" só pode ESCONDER um registro já neutralizado. Uma venda com
+    # efeitos fiscais vivos (REALIZADA/ENTREGUE) não se exclui — se cancela
+    # (cancel_sale → motor do Faturamento estorna estoque, NFs e financeiro).
+    # Por isso o soft delete só é permitido quando a venda já está CANCELADA;
+    # aí o deleted_at é seguro, pois nada mais precisa ser estornado.
+    if sale.status != SaleStatus.CANCELADA:
         raise HTTPException(
-            status_code=400,
-            detail="Apenas vendas com status 'Realizada' podem ser excluídas",
+            status_code=409,
+            detail=(
+                "Vendas com efeitos fiscais não podem ser excluídas. Cancele a "
+                "venda primeiro (a ação 'Cancelar venda' estorna estoque e "
+                "financeiro)."
+            ),
         )
 
     return comercial_repo.soft_delete_sale(db, sale_id)

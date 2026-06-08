@@ -35,7 +35,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `GET` | `/api/comercial/vendas/{id}` | Detalhe da venda com itens |
 | `PATCH` | `/api/comercial/vendas/{id}/status` | Atualiza status da venda (**não** aceita `cancelada` — ver abaixo) |
 | `POST` | `/api/comercial/vendas/{id}/cancelar` | **Cancelar venda**: estorna estoque e financeiro ponta a ponta |
-| `DELETE` | `/api/comercial/vendas/{id}` | Soft delete / "Excluir" (somente se `realizada`) |
+| `DELETE` | `/api/comercial/vendas/{id}` | Soft delete / "Excluir" (somente se já `cancelada` — ver abaixo) |
 
 ## Schemas
 
@@ -141,8 +141,24 @@ entregue  → cancelada  (somente via ação "Cancelar venda")
   venda', que estorna estoque e financeiro."** Isso fecha o buraco de integridade em que
   virar o status "pelado" deixava estoque baixado, contas a receber em aberto e NF emitida.
 - `entregue` não pode retornar para `realizada`.
-- Soft delete ("Excluir") permitido apenas em vendas com status `realizada`.
+- **Soft delete ("Excluir") permitido apenas em vendas já `cancelada`** (ver "Excluir uma
+  Venda" abaixo).
 - Ao entregar: `delivered_at` é preenchido automaticamente com `datetime.now()`.
+
+### Excluir uma Venda (`DELETE /vendas/{id}`)
+
+"Excluir" é apenas **esconder** (soft delete: seta `deleted_at`) um registro **já
+neutralizado** — nunca um atalho para descartar uma venda com efeitos fiscais vivos.
+Por isso o guard é o inverso do que parece intuitivo:
+
+- Só é permitido quando a venda já está **`cancelada`** (estoque devolvido, NFs e contas a
+  receber já estornados pelo `cancel_sale`). Aí o `deleted_at` é seguro — não há nada a
+  estornar, apenas se oculta o registro.
+- Para qualquer outro status (`realizada`, `entregue`) → **409 "Vendas com efeitos fiscais
+  não podem ser excluídas. Cancele a venda primeiro (a ação 'Cancelar venda' estorna estoque
+  e financeiro)."** A venda **continua ativa** (`deleted_at IS NULL`).
+- O soft delete **não** estorna nada (quem estorna é `cancel_sale`); ele só marca
+  `deleted_at`. Fluxo coerente: **cancelar** (neutraliza) → **opcionalmente excluir** (esconde).
 
 ### Cancelar uma Venda (`POST /vendas/{id}/cancelar`)
 
@@ -294,15 +310,13 @@ Reversível via `downgrade()` (drop das duas colunas).
 
 ## Limitações conhecidas / Débito técnico
 
-- **🔴 `soft_delete_sale` ("Excluir venda") deixa estoque/financeiro pendurados (a reportar,
-  fora do escopo da D7).** O `DELETE /vendas/{id}` exige status `realizada` e apenas marca
-  `deleted_at` na `Sale` — **não** devolve estoque, **não** cancela as NFs emitidas e **não**
-  baixa as contas a receber. Resultado: uma venda "excluída" some da listagem mas deixa a NF
-  de venda, a(s) conta(s) a receber em aberto e a saída de estoque órfãs (apontando para uma
-  venda soft-deleted). É um segundo buraco de integridade, irmão do que esta demanda fechou no
-  cancelamento. **Não corrigido aqui** (a D7 trata só o cancelamento); fica para o PO decidir
-  o escopo — provavelmente "Excluir" deveria ser proibido para vendas com efeitos fiscais já
-  emitidos, ou delegar ao mesmo motor de estorno antes do soft delete.
+- **✅ Resolvido (D7): guard de "Excluir venda" invertido.** Antes, `soft_delete_sale` exigia
+  status `realizada` e apenas marcava `deleted_at`, deixando NF de venda, contas a receber em
+  aberto e a saída de estoque órfãs apontando para uma venda soft-deleted — e ainda proibia
+  excluir a venda já `cancelada` (que seria inofensivo). Agora o soft delete só é permitido em
+  venda **já `cancelada`** (efeitos já estornados pelo `cancel_sale`); qualquer outro status
+  retorna **409**. Ver "Excluir uma Venda" na seção de regras de negócio. O cancelamento
+  continua sendo o único caminho que estorna estoque/financeiro.
 
 ## Campos Importantes vs. Spec
 
