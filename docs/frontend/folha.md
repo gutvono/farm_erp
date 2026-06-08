@@ -42,7 +42,7 @@ Página única em três abas: **Folha do Mês** (gestão de períodos e holerite
 
 ### Editar o cargo de um funcionário
 
-1. Na aba **Funcionários**, clique em **"Editar"** no card do funcionário.
+1. Na aba **Funcionários**, clique em **"Editar"** na linha do funcionário.
 2. O **Cargo atual** já vem **pré-selecionado** no menu suspenso. Ao trocar de cargo, o **Salário base** é reescrito com o salário do novo cargo (ainda editável).
 3. Ajuste o que for necessário e clique em **"Salvar alterações"**.
 
@@ -71,11 +71,15 @@ A lista de holerites já vem **completa** do período selecionado; o filtro/orde
 [SCREENSHOT: tabela de holerites com os menus Status/Contrato e os cabeçalhos ordenáveis]
 [SCREENSHOT: antes/depois de "Solicitar pagamento" de um funcionário — a linha continua na mesma posição, agora com o badge "Aguardando aprovação do financeiro"]
 
-### Aba "Funcionários"
-- Filtro por contrato (Select) + toggle "Apenas ativos" (default true).
-- Botão "Novo Funcionário" abre `FuncionarioForm` em modo criação.
-- Grid responsivo: 1 col (mobile), 2 col (tablet), 3 col (desktop).
-- Vazia: "Nenhum funcionário encontrado".
+### Aba "Funcionários" (tabela paginada — Demanda 8)
+- Migrada de grade de cartões para **tabela** (`DataTable`) com **paginação no servidor**.
+- **Colunas:** Funcionário (avatar + nome + cargo), Contrato (badge CLT/PJ/Temporário), Salário base, Admissão, Situação (Ativo/Inativo) e ações.
+- **Ordenar:** clique em **Funcionário** (ordena por nome — allowlist do backend).
+- **Filtrar/buscar:** **Buscar** (nome/documento, com debounce), Select de **Contrato** e o botão **Apenas ativos** (default ativo).
+- **Ações na linha** (apenas funcionários ativos): **Editar** (abre `FuncionarioForm`) e **Demitir** (AlertDialog com o custo de rescisão).
+- Botão **Novo Funcionário** abre `FuncionarioForm` em modo criação. Tabela vazia: "Nenhum funcionário encontrado".
+
+[SCREENSHOT: aba Funcionários em tabela com busca, filtro de contrato e paginação]
 
 ### Aba "Cargos"
 - `CargosTab` — listagem paginada server-side (`DataTable` da Demanda 0), busca por nome e botão "Novo Cargo".
@@ -157,12 +161,12 @@ Tabela de apresentação dos holerites do período. O estado de **filtros + orde
 
 **Retorno (`useHolerites`):** `rows` (filtrado+ordenado), `sort {by,dir}`, `toggleSort(key)`, `filters {status?,contract_type?}`, `setFilters(next)`
 
-### `FuncionarioCard`
-Card de funcionário com foto/avatar circular (54×54), nome, **nome do cargo** (`position_name`), badge de contrato (CLT azul / PJ roxo / Temporário laranja), salário base e data de admissão. Badge "Inativo" se `is_active = false`. Ações (apenas se ativo): "Editar" (callback) e "Demitir" (AlertDialog com custo calculado).
+### `FuncionariosTable` (+ `useFuncionarios`)
+Tabela paginada server-side de funcionários (Demanda 8, substitui o antigo `FuncionarioCard`). `useFuncionarios` guarda página/ordenação/filtros (`is_active`, `contract_type`) e a busca com debounce; a tabela é só apresentação. Cada linha traz avatar (foto ou inicial), nome + cargo, badge de contrato (CLT azul / PJ roxo / Temporário laranja), salário base, admissão e badge de situação (Ativo/Inativo). Ações por linha (apenas se ativo): **Editar** (callback) e **Demitir** (AlertDialog com custo calculado).
 
 **Custo de demissão exibido:** `termination_cost_override` se preenchido, caso contrário CLT R$5.000 / PJ R$1.000 / Temporário R$500. Cálculo idêntico ao backend, apenas para UX — o valor real é o que o backend lança.
 
-**Props:** `employee: Employee`, `onEdit: () => void`, `onDemitted: () => void`
+**Props (`FuncionariosTable`):** `data: Paginated<Employee>`, `loading`, `page`, `sort`, `onPageChange`, `onSortChange`, `search`, `onSearchChange`, `activeOnly`, `onActiveOnlyChange`, `contractType`, `onContractTypeChange`, `onEdit`, `onChanged`.
 
 ### `FuncionarioForm`
 Dialog com dois schemas Zod separados: criação (inclui `cpf` regex `000.000.000-00`) e edição (sem CPF, sem foto). Foto opcional na criação via input `<input type="file" accept="image/jpeg,image/png">`, validada no client (rejeita formatos inválidos com mensagem). FormData montado no submit (envia `position_id`).
@@ -240,7 +244,7 @@ Botão verde **"Solicitar pagamento de todos (R$ X)"** calculando o total das pe
 
 ## Fluxo: Demissão
 
-`FuncionarioCard` → AlertDialog com custo calculado (override ou padrão por contrato) → `demitirFuncionario(id)` → backend lança `saida/folha` no Financeiro + cria conta a pagar (vencimento `hoje + 10d`) + soft delete + `is_active = false`. Funcionário some das listagens com `is_active=true`; aparece em "Todos" com badge "Inativo".
+Ação **Demitir** na linha da `FuncionariosTable` → AlertDialog com custo calculado (override ou padrão por contrato) → `demitirFuncionario(id)` → backend lança `saida/folha` no Financeiro + cria conta a pagar (vencimento `hoje + 10d`) + soft delete + `is_active = false`. Funcionário some das listagens com `is_active=true`; aparece em "Todos" com badge "Inativo".
 
 ## Geração de Holerite PDF
 

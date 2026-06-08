@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState } from "react"
+import { useState } from "react"
 import { BookOpen, Pencil, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -19,10 +19,8 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
 import { deleteFornecedor } from "@/services/compras"
-import { StockItem, Supplier } from "@/types/index"
+import { Paginated, StockItem, Supplier } from "@/types/index"
 import { CatalogoFornecedorModal } from "./CatalogoFornecedorModal"
-
-const PAGE_SIZE = 10
 
 /**
  * Monta o endereço exibível a partir dos campos estruturados (Demanda 6),
@@ -123,65 +121,36 @@ function FornecedorActions({
 }
 
 interface FornecedoresTableProps {
-  suppliers: Supplier[]
+  data: Paginated<Supplier>
   loading: boolean
   stockItems: StockItem[]
+  page: number
+  sort: { by: string; dir: "asc" | "desc" }
+  onPageChange: (page: number) => void
+  onSortChange: (key: string) => void
+  search: string
+  onSearchChange: (value: string) => void
   onEdit: (supplier: Supplier) => void
   onChanged: () => void
 }
 
 /**
- * Lista de fornecedores em DataTable (Demanda 0) com busca, ordenação e
- * paginação no cliente — o endpoint de fornecedores devolve a lista completa.
+ * Lista de fornecedores em DataTable com busca, ordenação e paginação
+ * SERVER-SIDE (Demanda 8 — quita a dívida da D6 de paginar no cliente).
  */
 export function FornecedoresTable({
-  suppliers,
+  data,
   loading,
   stockItems,
+  page,
+  sort,
+  onPageChange,
+  onSortChange,
+  search,
+  onSearchChange,
   onEdit,
   onChanged,
 }: FornecedoresTableProps) {
-  const [page, setPage] = useState(1)
-  const [search, setSearch] = useState("")
-  const [sort, setSort] = useState<{ by: string; dir: "asc" | "desc" }>({
-    by: "name",
-    dir: "asc",
-  })
-
-  const filtered = useMemo(() => {
-    const term = search.trim().toLowerCase()
-    const base = term
-      ? suppliers.filter((s) =>
-          [s.name, s.document, s.email]
-            .filter(Boolean)
-            .some((v) => (v as string).toLowerCase().includes(term))
-        )
-      : suppliers
-    const sorted = [...base].sort((a, b) => {
-      const av = (a[sort.by as keyof Supplier] ?? "") as string
-      const bv = (b[sort.by as keyof Supplier] ?? "") as string
-      const cmp = String(av).localeCompare(String(bv), "pt-BR", {
-        sensitivity: "base",
-      })
-      return sort.dir === "asc" ? cmp : -cmp
-    })
-    return sorted
-  }, [suppliers, search, sort])
-
-  const total = filtered.length
-  const pages = Math.max(Math.ceil(total / PAGE_SIZE), 1)
-  const currentPage = Math.min(page, pages)
-  const rows = filtered.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
-
-  function toggleSort(key: string) {
-    setSort((prev) =>
-      prev.by === key
-        ? { by: key, dir: prev.dir === "asc" ? "desc" : "asc" }
-        : { by: key, dir: "asc" }
-    )
-    setPage(1)
-  }
-
   const columns: DataTableColumn<Supplier>[] = [
     {
       key: "name",
@@ -240,27 +209,24 @@ export function FornecedoresTable({
         <Label className="text-xs text-slate-500">Buscar</Label>
         <Input
           value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPage(1)
-          }}
-          placeholder="Nome, documento ou e-mail..."
+          onChange={(e) => onSearchChange(e.target.value)}
+          placeholder="Nome ou documento..."
           className="w-72"
         />
       </div>
 
       <DataTable<Supplier>
         columns={columns}
-        rows={rows}
+        rows={data.items}
         loading={loading}
         emptyMessage="Nenhum fornecedor cadastrado"
-        page={currentPage}
-        pageSize={PAGE_SIZE}
-        total={total}
-        pages={pages}
-        onPageChange={setPage}
+        page={page}
+        pageSize={data.page_size}
+        total={data.total}
+        pages={data.pages}
+        onPageChange={onPageChange}
         sort={sort}
-        onSortChange={toggleSort}
+        onSortChange={onSortChange}
         rowKey={(s) => s.id}
       />
     </div>

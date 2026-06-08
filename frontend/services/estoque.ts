@@ -124,22 +124,50 @@ function parseInventory(raw: RawInventory): Inventory {
   }
 }
 
+/**
+ * Lista itens de estoque como ARRAY (seletor/dropdown — venda, ordem de compra,
+ * cotação, movimentação, destinos de configuração). O endpoint é paginado
+ * (`Page[T]`, Demanda 8); aqui pedimos uma página grande e devolvemos só os
+ * `items`, preservando a assinatura `StockItem[]` e os filtros que os chamadores
+ * fora do escopo já usam (ex.: `role: "produto_vendavel"`). Para a TABELA
+ * paginada de itens use `getItensPaginated`.
+ */
 export async function getItens(params?: {
   category_id?: string
   role?: SystemRole
   below_minimum?: boolean
 }): Promise<StockItem[]> {
-  const response = await apiFetch<ApiResponse<RawStockItem[]>>(
+  const result = await fetchPaginated<StockItem, RawStockItem>(
     "/api/estoque/itens",
     {
-      params: {
-        category_id: params?.category_id,
-        role: params?.role,
-        below_minimum: params?.below_minimum,
-      },
-    }
+      page_size: 100,
+      category_id: params?.category_id,
+      role: params?.role,
+      below_minimum: params?.below_minimum,
+    },
+    parseStockItem
   )
-  return response.data.map(parseStockItem)
+  return result.items
+}
+
+/** Lista paginada de itens (`GET /api/estoque/itens`, `Page[T]`).
+ * `order_by` aceito: `name`, `sku`; filtros: `category_id`, `role`,
+ * `below_minimum`; `search` por nome/sku. */
+export async function getItensPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+  category_id?: string
+  role?: SystemRole
+  below_minimum?: boolean
+}): Promise<Paginated<StockItem>> {
+  return fetchPaginated<StockItem, RawStockItem>(
+    "/api/estoque/itens",
+    params,
+    parseStockItem
+  )
 }
 
 export async function createItem(data: {

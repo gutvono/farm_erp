@@ -2,120 +2,45 @@
 
 import { useCallback, useEffect, useState } from "react"
 import { Plus } from "lucide-react"
-import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
 import { Button } from "@/components/ui/button"
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FornecedorForm } from "@/components/modules/compras/FornecedorForm"
 import { FornecedoresTable } from "@/components/modules/compras/FornecedoresTable"
-import { OrdemCard } from "@/components/modules/compras/OrdemCard"
+import { useFornecedores } from "@/components/modules/compras/useFornecedores"
+import { OrdensTable } from "@/components/modules/compras/OrdensTable"
+import { useOrdens } from "@/components/modules/compras/useOrdens"
 import { OrdemForm } from "@/components/modules/compras/OrdemForm"
-import { CotacaoCard } from "@/components/modules/compras/CotacaoCard"
+import { CotacoesTable } from "@/components/modules/compras/CotacoesTable"
+import { useCotacoes } from "@/components/modules/compras/useCotacoes"
 import { CotacaoForm } from "@/components/modules/compras/CotacaoForm"
-import {
-  getCotacoes,
-  getFornecedores,
-  getOrdens,
-} from "@/services/compras"
+import { getFornecedores } from "@/services/compras"
 import { getItens } from "@/services/estoque"
-import {
-  PurchaseOrder,
-  PurchaseOrderStatus,
-  Quotation,
-  QuotationStatus,
-  StockItem,
-  Supplier,
-} from "@/types/index"
-
-const STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "Todos os status" },
-  { value: "em_andamento", label: "Em andamento" },
-  { value: "aguardando_aprovacao_financeiro", label: "Aguardando aprovação" },
-  { value: "aprovada", label: "Aprovada" },
-  { value: "em_conferencia", label: "Em conferência" },
-  { value: "aguardando_pagamento", label: "Aguardando pagamento" },
-  { value: "concluida", label: "Concluída" },
-  { value: "cancelada", label: "Cancelada" },
-]
-
-const COTACAO_STATUS_OPTIONS: { value: string; label: string }[] = [
-  { value: "all", label: "Todos os status" },
-  { value: "em_andamento", label: "Em andamento" },
-  { value: "aguardando_aprovacao_financeiro", label: "Aguardando aprovação" },
-  { value: "aprovado_financeiro", label: "Aprovado financeiro" },
-  { value: "concluida", label: "Concluída" },
-  { value: "cancelada", label: "Cancelada" },
-]
+import { StockItem, Supplier } from "@/types/index"
 
 export default function ComprasPage() {
-  const [orders, setOrders] = useState<PurchaseOrder[]>([])
-  const [ordersLoading, setOrdersLoading] = useState(false)
-  const [statusFilter, setStatusFilter] = useState("all")
+  const ordens = useOrdens()
+  const cotacoes = useCotacoes()
+  const fornecedores = useFornecedores()
 
-  const [suppliers, setSuppliers] = useState<Supplier[]>([])
-  const [suppliersLoading, setSuppliersLoading] = useState(false)
-
+  // Listas completas (ARRAY) para SELETORES e detalhes: fornecedores alimentam a
+  // ordem de compra, as propostas de cotação e os filtros das tabelas; itens
+  // alimentam os formulários. Independentes das tabelas paginadas.
+  const [allSuppliers, setAllSuppliers] = useState<Supplier[]>([])
   const [stockItems, setStockItems] = useState<StockItem[]>([])
 
   const [ordemFormOpen, setOrdemFormOpen] = useState(false)
   const [fornecedorFormOpen, setFornecedorFormOpen] = useState(false)
   const [editingSupplier, setEditingSupplier] = useState<Supplier | null>(null)
-
-  const [quotations, setQuotations] = useState<Quotation[]>([])
-  const [quotationsLoading, setQuotationsLoading] = useState(false)
-  const [quotationStatusFilter, setQuotationStatusFilter] = useState("all")
   const [cotacaoFormOpen, setCotacaoFormOpen] = useState(false)
 
-  const loadOrders = useCallback(async () => {
-    setOrdersLoading(true)
-    try {
-      const data = await getOrdens(statusFilter !== "all" ? (statusFilter as PurchaseOrderStatus) : undefined)
-      setOrders(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar ordens")
-    } finally {
-      setOrdersLoading(false)
-    }
-  }, [statusFilter])
-
-  const loadSuppliers = useCallback(async () => {
-    setSuppliersLoading(true)
-    try {
-      const data = await getFornecedores()
-      setSuppliers(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar fornecedores")
-    } finally {
-      setSuppliersLoading(false)
-    }
+  const loadAllSuppliers = useCallback(() => {
+    getFornecedores().then(setAllSuppliers).catch(() => {})
   }, [])
 
-  const loadQuotations = useCallback(async () => {
-    setQuotationsLoading(true)
-    try {
-      const data = await getCotacoes(
-        quotationStatusFilter !== "all"
-          ? (quotationStatusFilter as QuotationStatus)
-          : undefined
-      )
-      setQuotations(data)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Erro ao carregar cotações")
-    } finally {
-      setQuotationsLoading(false)
-    }
-  }, [quotationStatusFilter])
-
-  useEffect(() => { loadOrders() }, [loadOrders])
-  useEffect(() => { loadSuppliers() }, [loadSuppliers])
-  useEffect(() => { loadQuotations() }, [loadQuotations])
+  useEffect(() => {
+    loadAllSuppliers()
+  }, [loadAllSuppliers])
 
   useEffect(() => {
     getItens().then(setStockItems).catch(() => {})
@@ -129,6 +54,11 @@ export default function ComprasPage() {
   function handleNewSupplier() {
     setEditingSupplier(null)
     setFornecedorFormOpen(true)
+  }
+
+  function handleSupplierChanged() {
+    fornecedores.reload()
+    loadAllSuppliers()
   }
 
   return (
@@ -148,80 +78,54 @@ export default function ComprasPage() {
 
           {/* ── Aba Ordens ── */}
           <TabsContent value="orders" className="space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {STATUS_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
+            <div className="flex items-center justify-end">
               <Button size="sm" onClick={() => setOrdemFormOpen(true)}>
                 <Plus className="h-4 w-4 mr-1" />
                 Nova Ordem
               </Button>
             </div>
 
-            {ordersLoading ? (
-              <div className="py-12 text-center text-slate-400">Carregando ordens...</div>
-            ) : orders.length === 0 ? (
-              <div className="py-12 text-center text-slate-400">Nenhuma ordem encontrada</div>
-            ) : (
-              <div className="space-y-3">
-                {orders.map((order) => (
-                  <OrdemCard key={order.id} order={order} onChanged={loadOrders} />
-                ))}
-              </div>
-            )}
+            <OrdensTable
+              data={ordens.data}
+              loading={ordens.loading}
+              page={ordens.page}
+              sort={ordens.sort}
+              onPageChange={ordens.setPage}
+              onSortChange={ordens.toggleSort}
+              search={ordens.searchInput}
+              onSearchChange={ordens.setSearchInput}
+              status={ordens.status}
+              onStatusChange={ordens.setStatus}
+              suppliers={allSuppliers}
+              supplierId={ordens.supplierId}
+              onSupplierChange={ordens.setSupplierId}
+              onChanged={ordens.reload}
+            />
           </TabsContent>
 
           {/* ── Aba Cotações ── */}
           <TabsContent value="cotacoes" className="space-y-4">
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-              <Select
-                value={quotationStatusFilter}
-                onValueChange={setQuotationStatusFilter}
-              >
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {COTACAO_STATUS_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-
+            <div className="flex items-center justify-end">
               <Button size="sm" onClick={() => setCotacaoFormOpen(true)}>
                 <Plus className="h-4 w-4 mr-1" />
                 Nova Cotação
               </Button>
             </div>
 
-            {quotationsLoading ? (
-              <div className="py-12 text-center text-slate-400">Carregando cotações...</div>
-            ) : quotations.length === 0 ? (
-              <div className="py-12 text-center text-slate-400">Nenhuma cotação encontrada</div>
-            ) : (
-              <div className="space-y-3">
-                {quotations.map((q) => (
-                  <CotacaoCard
-                    key={q.id}
-                    quotation={q}
-                    suppliers={suppliers}
-                    onChanged={loadQuotations}
-                  />
-                ))}
-              </div>
-            )}
+            <CotacoesTable
+              data={cotacoes.data}
+              loading={cotacoes.loading}
+              page={cotacoes.page}
+              sort={cotacoes.sort}
+              onPageChange={cotacoes.setPage}
+              onSortChange={cotacoes.toggleSort}
+              status={cotacoes.status}
+              onStatusChange={cotacoes.setStatus}
+              orderType={cotacoes.orderType}
+              onOrderTypeChange={cotacoes.setOrderType}
+              suppliers={allSuppliers}
+              onChanged={cotacoes.reload}
+            />
           </TabsContent>
 
           {/* ── Aba Fornecedores ── */}
@@ -234,11 +138,17 @@ export default function ComprasPage() {
             </div>
 
             <FornecedoresTable
-              suppliers={suppliers}
-              loading={suppliersLoading}
+              data={fornecedores.data}
+              loading={fornecedores.loading}
               stockItems={stockItems}
+              page={fornecedores.page}
+              sort={fornecedores.sort}
+              onPageChange={fornecedores.setPage}
+              onSortChange={fornecedores.toggleSort}
+              search={fornecedores.searchInput}
+              onSearchChange={fornecedores.setSearchInput}
               onEdit={handleEditSupplier}
-              onChanged={loadSuppliers}
+              onChanged={handleSupplierChanged}
             />
           </TabsContent>
         </Tabs>
@@ -247,23 +157,23 @@ export default function ComprasPage() {
       <OrdemForm
         open={ordemFormOpen}
         onOpenChange={setOrdemFormOpen}
-        suppliers={suppliers}
+        suppliers={allSuppliers}
         stockItems={stockItems}
-        onSuccess={() => { loadOrders() }}
+        onSuccess={() => ordens.reload()}
       />
 
       <FornecedorForm
         open={fornecedorFormOpen}
         onOpenChange={setFornecedorFormOpen}
         supplier={editingSupplier}
-        onSuccess={loadSuppliers}
+        onSuccess={handleSupplierChanged}
       />
 
       <CotacaoForm
         open={cotacaoFormOpen}
         onOpenChange={setCotacaoFormOpen}
         stockItems={stockItems}
-        onSuccess={() => { loadQuotations() }}
+        onSuccess={() => cotacoes.reload()}
       />
     </RootLayout>
   )

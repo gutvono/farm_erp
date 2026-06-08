@@ -79,20 +79,46 @@ function parseEmployee(raw: RawEmployee): Employee {
   }
 }
 
+/**
+ * Lista funcionários como ARRAY (seletor/dropdown — atividade de talhão no PCP,
+ * mapa de avatares dos holerites). O endpoint é paginado (`Page[T]`, Demanda 8);
+ * pede uma página grande e devolve só os `items`, preservando a assinatura
+ * `Employee[]` e os filtros (`is_active`, `contract_type`) dos chamadores fora do
+ * escopo. Para a TABELA paginada use `getFuncionariosPaginated`.
+ */
 export async function getFuncionarios(params?: {
   is_active?: boolean
   contract_type?: ContractType
 }): Promise<Employee[]> {
-  const response = await apiFetch<ApiResponse<RawEmployee[]>>(
+  const result = await fetchPaginated<Employee, RawEmployee>(
     "/api/folha/funcionarios",
     {
-      params: {
-        is_active: params?.is_active,
-        contract_type: params?.contract_type,
-      },
-    }
+      page_size: 100,
+      is_active: params?.is_active,
+      contract_type: params?.contract_type,
+    },
+    parseEmployee
   )
-  return response.data.map(parseEmployee)
+  return result.items
+}
+
+/** Lista paginada de funcionários (`GET /api/folha/funcionarios`, `Page[T]`).
+ * `order_by` aceito: `name`; filtros: `is_active`, `contract_type`; `search`
+ * por nome/documento. */
+export async function getFuncionariosPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+  is_active?: boolean
+  contract_type?: ContractType
+}): Promise<Paginated<Employee>> {
+  return fetchPaginated<Employee, RawEmployee>(
+    "/api/folha/funcionarios",
+    params,
+    parseEmployee
+  )
 }
 
 export async function createFuncionario(data: FormData): Promise<Employee> {

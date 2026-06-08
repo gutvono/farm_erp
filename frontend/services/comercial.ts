@@ -1,12 +1,21 @@
 import { apiFetch } from "@/lib/api"
+import { fetchPaginated } from "@/lib/pagination"
 import {
   ApiResponse,
   Client,
+  Paginated,
   PaymentMethod,
   Sale,
   SaleItem,
   SaleStatus,
 } from "@/types/index"
+
+/**
+ * `page_size` usado pelos helpers que ainda devolvem um ARRAY (seletores/
+ * dropdowns fora do escopo da Demanda 8). Cobre a escala atual; se algum
+ * seletor precisar de mais itens, migrá-lo para busca paginada.
+ */
+const SELECT_PAGE_SIZE = 100
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -129,11 +138,37 @@ function parseSale(raw: RawSale): Sale {
 
 // ── Clientes ──────────────────────────────────────────────────────────────────
 
+/**
+ * Lista clientes como ARRAY (seletor/dropdown — ex.: nota manual no Faturamento,
+ * seleção de cliente na venda). O endpoint é paginado (`Page[T]`, Demanda 8); aqui
+ * pedimos uma página grande e devolvemos só os `items`, preservando a assinatura
+ * `Client[]` que os chamadores fora do escopo já usam. Para a TABELA paginada de
+ * clientes use `getClientesPaginated`.
+ */
 export async function getClientes(is_delinquent?: boolean): Promise<Client[]> {
-  const response = await apiFetch<ApiResponse<RawClient[]>>("/api/comercial/clientes", {
-    params: { is_delinquent },
-  })
-  return response.data.map(parseClient)
+  const result = await fetchPaginated<Client, RawClient>(
+    "/api/comercial/clientes",
+    { page_size: SELECT_PAGE_SIZE, is_delinquent },
+    parseClient
+  )
+  return result.items
+}
+
+/** Lista paginada de clientes (`GET /api/comercial/clientes`, `Page[T]`).
+ * `order_by` aceito: `name`, `created_at`; `search` por nome/documento. */
+export async function getClientesPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  search?: string
+  is_delinquent?: boolean
+}): Promise<Paginated<Client>> {
+  return fetchPaginated<Client, RawClient>(
+    "/api/comercial/clientes",
+    params,
+    parseClient
+  )
 }
 
 export async function createCliente(data: {
@@ -198,11 +233,32 @@ export async function reverterInadimplencia(id: string): Promise<Client> {
 
 // ── Vendas ────────────────────────────────────────────────────────────────────
 
+/** Lista vendas como ARRAY (uso pontual). O endpoint é paginado (`Page[T]`);
+ * pede uma página grande e devolve `items`. Para a TABELA use `getVendasPaginated`. */
 export async function getVendas(status?: string): Promise<Sale[]> {
-  const response = await apiFetch<ApiResponse<RawSale[]>>("/api/comercial/vendas", {
-    params: { status },
-  })
-  return response.data.map(parseSale)
+  const result = await fetchPaginated<Sale, RawSale>(
+    "/api/comercial/vendas",
+    { page_size: SELECT_PAGE_SIZE, status },
+    parseSale
+  )
+  return result.items
+}
+
+/** Lista paginada de vendas (`GET /api/comercial/vendas`, `Page[T]`).
+ * `order_by` aceito: `sold_at`, `status`; filtros: `status`, `client_id`. */
+export async function getVendasPaginated(params: {
+  page?: number
+  page_size?: number
+  order_by?: string
+  order_dir?: "asc" | "desc"
+  status?: string
+  client_id?: string
+}): Promise<Paginated<Sale>> {
+  return fetchPaginated<Sale, RawSale>(
+    "/api/comercial/vendas",
+    params,
+    parseSale
+  )
 }
 
 export async function createVenda(data: {
