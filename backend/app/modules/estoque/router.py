@@ -29,19 +29,22 @@ router = APIRouter()
 # ---------------------------------------------------------------------------
 
 
-@router.get("/itens", response_model=SuccessResponse)
+@router.get("/itens", response_model=Page[StockItemOut])
 def list_items(
     category_id: Optional[UUID] = None,
     role: Optional[SystemRole] = None,
     below_minimum: bool = False,
+    params: PageParams = Depends(get_page_params),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
-) -> SuccessResponse:
-    items = estoque_service.list_items(
-        db, category_id=category_id, role=role, below_minimum=below_minimum
+) -> Page[StockItemOut]:
+    return estoque_service.list_items(
+        db,
+        params=params,
+        category_id=category_id,
+        role=role,
+        below_minimum=below_minimum,
     )
-    data = [StockItemOut.from_model(i).model_dump(mode="json") for i in items]
-    return success("Itens listados com sucesso", data)
 
 
 @router.post("/itens", response_model=SuccessResponse, status_code=201)

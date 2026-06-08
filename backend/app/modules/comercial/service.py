@@ -10,8 +10,10 @@ from app.modules.comercial import repository as comercial_repo
 from app.modules.comercial.model import Client, Sale
 from app.modules.comercial.schemas import (
     ClientCreate,
+    ClientOut,
     ClientUpdate,
     SaleCreate,
+    SaleOut,
 )
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
@@ -24,6 +26,7 @@ from app.shared.enums import (
     MovementType,
     SaleStatus,
 )
+from app.shared.pagination import Page, PageParams
 
 
 # ---------------------------------------------------------------------------
@@ -68,11 +71,14 @@ def create_client(db: Session, data: ClientCreate) -> Client:
 def list_clients(
     db: Session,
     *,
+    params: PageParams,
     is_delinquent: Optional[bool] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Client]:
-    return comercial_repo.list_clients(db, is_delinquent=is_delinquent, skip=skip, limit=limit)
+) -> Page[ClientOut]:
+    clients, total = comercial_repo.list_clients(
+        db, params=params, is_delinquent=is_delinquent
+    )
+    items = [ClientOut.model_validate(c) for c in clients]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_client(db: Session, client_id: UUID) -> Client:
@@ -241,14 +247,15 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
 def list_sales(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[SaleStatus] = None,
     client_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Sale]:
-    return comercial_repo.list_sales(
-        db, status=status, client_id=client_id, skip=skip, limit=limit
+) -> Page[SaleOut]:
+    sales, total = comercial_repo.list_sales(
+        db, params=params, status=status, client_id=client_id
     )
+    items = [SaleOut.from_model(s) for s in sales]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_sale(db: Session, sale_id: UUID) -> Sale:

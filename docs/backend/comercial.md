@@ -18,7 +18,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/comercial/clientes` | Lista clientes (filtros: `is_delinquent`, paginação) |
+| `GET` | `/api/comercial/clientes` | Lista clientes **paginada `Page[ClientOut]`** (filtro `is_delinquent`; `search` nome/documento; `order_by`: `name`/`created_at`) |
 | `POST` | `/api/comercial/clientes` | Cria cliente |
 | `GET` | `/api/comercial/clientes/{id}` | Detalhe do cliente |
 | `PUT` | `/api/comercial/clientes/{id}` | Atualiza dados do cliente |
@@ -30,12 +30,28 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/comercial/vendas` | Lista vendas (filtros: `status`, `client_id`, paginação) |
+| `GET` | `/api/comercial/vendas` | Lista vendas **paginada `Page[SaleOut]`** (filtros `status`, `client_id`; `order_by`: `sold_at`/`status`) |
 | `POST` | `/api/comercial/vendas` | Cria venda com itens (dispara integrações) |
 | `GET` | `/api/comercial/vendas/{id}` | Detalhe da venda com itens |
 | `PATCH` | `/api/comercial/vendas/{id}/status` | Atualiza status da venda (**não** aceita `cancelada` — ver abaixo) |
 | `POST` | `/api/comercial/vendas/{id}/cancelar` | **Cancelar venda**: estorna estoque e financeiro ponta a ponta |
 | `DELETE` | `/api/comercial/vendas/{id}` | Soft delete / "Excluir" (somente se já `cancelada` — ver abaixo) |
+
+## Paginação server-side (Demanda 8)
+
+`GET /clientes` e `GET /vendas` retornam o envelope **`Page[T]` cru** (não embrulhado em
+`SuccessResponse`), no padrão de `app/shared/pagination.py`:
+`{ items, total, page, page_size, pages }`. Parâmetros comuns: `page` (≥1, default 1),
+`page_size` (1–100, default 20), `order_by`, `order_dir` (`asc`/`desc`), `search`.
+
+| Endpoint | Filtros preservados | `search` (ILIKE) | `order_by` allowlist (default) |
+|----------|---------------------|------------------|--------------------------------|
+| `GET /clientes` | `is_delinquent` | nome, documento | `name` (default), `created_at` |
+| `GET /vendas` | `status`, `client_id` | — | `sold_at` (default desc, indexado), `status` |
+
+`order_by` é validado por allowlist: valor fora da lista cai no default (responde 200,
+**nunca 500**). A PK é usada como `tiebreaker` (estabilidade entre páginas). `total` reflete
+o conjunto filtrado completo (`deleted_at IS NULL`).
 
 ## Schemas
 

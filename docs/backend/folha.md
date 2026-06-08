@@ -34,7 +34,7 @@ A listagem usa a infra de paginação compartilhada (Demanda 0): `order_by` é v
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/folha/funcionarios` | Lista funcionários (filtros: `is_active`, `contract_type`, paginação) |
+| `GET` | `/api/folha/funcionarios` | Lista funcionários **paginada `Page[EmployeeOut]`** (envelope cru; filtros `is_active`, `contract_type`; `search` nome/documento; `order_by`: `name` default; inválido→default, nunca 500; PK como tiebreaker) |
 | `POST` | `/api/folha/funcionarios` | Cria funcionário (multipart/form-data; foto opcional) |
 | `GET` | `/api/folha/funcionarios/{id}` | Detalhe do funcionário |
 | `PUT` | `/api/folha/funcionarios/{id}` | Atualiza dados cadastrais (sem foto) |

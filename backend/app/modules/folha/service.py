@@ -340,18 +340,21 @@ def create_employee(
 def list_employees(
     db: Session,
     *,
-    skip: int = 0,
-    limit: int = 100,
+    params: PageParams,
     is_active: Optional[bool] = None,
     contract_type: Optional[ContractType] = None,
-) -> list[Employee]:
-    return folha_repo.list_employees(
+) -> Page[EmployeeOut]:
+    employees, total = folha_repo.list_employees(
         db,
-        skip=skip,
-        limit=limit,
+        params=params,
         is_active=is_active,
         contract_type=contract_type,
     )
+    items = [
+        EmployeeOut.from_model(e, photo_url=_photo_url(e.photo_path))
+        for e in employees
+    ]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_employee(db: Session, employee_id: UUID) -> Employee:

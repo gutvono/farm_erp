@@ -90,22 +90,26 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
 def list_items(
     db: Session,
     *,
+    params: PageParams,
     category_id: Optional[UUID] = None,
     role=None,
     below_minimum: bool = False,
-) -> list[StockItem]:
+) -> Page[StockItemOut]:
     # Filtro por papel (role) é resolvido aqui em ids de itens, via Configurações.
     item_ids: Optional[list[UUID]] = None
     if role is not None:
         from app.modules.configuracoes import service as config_service
 
         item_ids = config_service.get_item_ids_by_role(db, role)
-    return estoque_repo.list_items(
+    items, total = estoque_repo.list_items(
         db,
+        params=params,
         category_id=category_id,
         item_ids=item_ids,
         below_minimum=below_minimum,
     )
+    out = [StockItemOut.from_model(i) for i in items]
+    return Page.create(items=out, total=total, params=params)
 
 
 def get_item(db: Session, item_id: UUID) -> StockItem:

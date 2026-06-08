@@ -3,12 +3,19 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session, joinedload
 
 from app.modules.estoque.model import StockItem, StockMovement
 from app.modules.estoque.schemas import StockItemCreate, StockItemUpdate, StockMovementCreate
 from app.shared.enums import MovementType
 from app.shared.pagination import PageParams, paginate_query
+
+# Colunas permitidas em ?order_by (validadas por allowlist no paginate_query).
+STOCK_ITEM_ORDER_COLUMNS = {
+    "name": StockItem.name,
+    "sku": StockItem.sku,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -37,12 +44,14 @@ def create_item(db: Session, data: StockItemCreate) -> StockItem:
 def list_items(
     db: Session,
     *,
+    params: PageParams,
     category_id: Optional[UUID] = None,
     item_ids: Optional[list[UUID]] = None,
     below_minimum: bool = False,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[StockItem]:
+) -> tuple[list[StockItem], int]:
+    """Lista itens ativos, paginado. Filtros `category_id`/papel (via item_ids)/
+    `below_minimum`; `search` por nome OU sku; `order_by` allowlist: name
+    (default), sku."""
     query = (
         db.query(StockItem)
         .options(joinedload(StockItem.category))
@@ -54,10 +63,22 @@ def list_items(
         # Filtro por papel resolvido no service (lista de ids). Lista vazia →
         # nenhum item (in_([]) é sempre falso), comportamento correto.
         query = query.filter(StockItem.id.in_(item_ids))
-    items = query.order_by(StockItem.name.asc()).offset(skip).limit(limit).all()
     if below_minimum:
-        items = [i for i in items if Decimal(i.quantity_on_hand) < Decimal(i.minimum_stock)]
-    return items
+        # Empurrado para SQL (antes era pós-filtro em Python) para que o total
+        # paginado e as páginas fiquem corretos.
+        query = query.filter(StockItem.quantity_on_hand < StockItem.minimum_stock)
+    if params.search:
+        like = f"%{params.search}%"
+        query = query.filter(
+            or_(StockItem.name.ilike(like), StockItem.sku.ilike(like))
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=STOCK_ITEM_ORDER_COLUMNS,
+        default_order=StockItem.name.asc(),
+        tiebreaker=StockItem.id,
+    )
 
 
 def get_item(db: Session, item_id: UUID) -> Optional[StockItem]:

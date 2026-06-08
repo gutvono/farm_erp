@@ -18,8 +18,11 @@ from app.modules.compras.model import (
 from app.modules.compras.schemas import (
     PurchaseOrderCreate,
     PurchaseOrderItemCreate,
+    PurchaseOrderOut,
     PurchaseOrderReceiptItem,
+    PurchaseOrderWithReceipts,
     QuotationCreate,
+    QuotationOut,
     QuotationProposalCreate,
     QuotationProposalUpdate,
     RealizeOrderRequest,
@@ -27,6 +30,7 @@ from app.modules.compras.schemas import (
     SupplierItemCreate,
     SupplierItemOut,
     SupplierItemUpdate,
+    SupplierOut,
     SupplierUpdate,
 )
 from app.modules.estoque import repository as estoque_repo
@@ -81,10 +85,11 @@ def create_supplier(db: Session, data: SupplierCreate) -> Supplier:
 def list_suppliers(
     db: Session,
     *,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Supplier]:
-    return compras_repo.list_suppliers(db, skip=skip, limit=limit)
+    params: PageParams,
+) -> Page[SupplierOut]:
+    suppliers, total = compras_repo.list_suppliers(db, params=params)
+    items = [SupplierOut.model_validate(s) for s in suppliers]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_supplier(db: Session, supplier_id: UUID) -> Supplier:
@@ -230,14 +235,15 @@ def create_order(db: Session, data: PurchaseOrderCreate) -> PurchaseOrder:
 def list_orders(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[PurchaseOrderStatus] = None,
     supplier_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[PurchaseOrder]:
-    return compras_repo.list_orders(
-        db, status=status, supplier_id=supplier_id, skip=skip, limit=limit
+) -> Page[PurchaseOrderOut]:
+    orders, total = compras_repo.list_orders(
+        db, params=params, status=status, supplier_id=supplier_id
     )
+    items = [PurchaseOrderOut.from_model(o) for o in orders]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_order(db: Session, order_id: UUID) -> PurchaseOrder:
@@ -615,8 +621,12 @@ def get_order_with_receipts(db: Session, order_id: UUID) -> PurchaseOrder:
     return order
 
 
-def list_orders_for_receipt(db: Session) -> list[PurchaseOrder]:
-    return compras_repo.list_orders_for_receipt(db)
+def list_orders_for_receipt(
+    db: Session, *, params: PageParams
+) -> Page[PurchaseOrderWithReceipts]:
+    orders, total = compras_repo.list_orders_for_receipt(db, params=params)
+    items = [PurchaseOrderWithReceipts.from_model(o) for o in orders]
+    return Page.create(items=items, total=total, params=params)
 
 
 def complete_order_after_payment(db: Session, order_id: UUID) -> PurchaseOrder:
@@ -724,14 +734,15 @@ def create_quotation(db: Session, data: QuotationCreate) -> Quotation:
 def list_quotations(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[QuotationStatus] = None,
     order_type: Optional[str] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Quotation]:
-    return compras_repo.list_quotations(
-        db, status=status, order_type=order_type, skip=skip, limit=limit
+) -> Page[QuotationOut]:
+    quotations, total = compras_repo.list_quotations(
+        db, params=params, status=status, order_type=order_type
     )
+    items = [QuotationOut.from_model(q) for q in quotations]
+    return Page.create(items=items, total=total, params=params)
 
 
 def get_quotation(db: Session, quotation_id: UUID) -> Quotation:

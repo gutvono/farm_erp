@@ -3,12 +3,24 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 
 from app.modules.comercial.model import Client, Sale, SaleItem
 from app.modules.comercial.schemas import ClientCreate, ClientUpdate, SaleCreate
 from app.modules.estoque.model import StockItem
 from app.shared.enums import SaleStatus
+from app.shared.pagination import PageParams, paginate_query
+
+# Colunas permitidas em ?order_by (validadas por allowlist no paginate_query).
+CLIENT_ORDER_COLUMNS = {
+    "name": Client.name,
+    "created_at": Client.created_at,
+}
+SALE_ORDER_COLUMNS = {
+    "sold_at": Sale.sold_at,
+    "status": Sale.status,
+}
 
 
 # ---------------------------------------------------------------------------
@@ -41,14 +53,26 @@ def create_client(db: Session, data: ClientCreate) -> Client:
 def list_clients(
     db: Session,
     *,
+    params: PageParams,
     is_delinquent: Optional[bool] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Client]:
+) -> tuple[list[Client], int]:
+    """Lista clientes ativos, paginado. Filtro `is_delinquent`; `search` por
+    nome OU documento; `order_by` allowlist: name (default), created_at."""
     query = db.query(Client).filter(Client.deleted_at.is_(None))
     if is_delinquent is not None:
         query = query.filter(Client.is_delinquent == is_delinquent)
-    return query.order_by(Client.name.asc()).offset(skip).limit(limit).all()
+    if params.search:
+        like = f"%{params.search}%"
+        query = query.filter(
+            or_(Client.name.ilike(like), Client.document.ilike(like))
+        )
+    return paginate_query(
+        query,
+        params,
+        allowed_order_by=CLIENT_ORDER_COLUMNS,
+        default_order=Client.name.asc(),
+        tiebreaker=Client.id,
+    )
 
 
 def get_client(db: Session, client_id: UUID) -> Optional[Client]:
@@ -144,25 +168,27 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
 def list_sales(
     db: Session,
     *,
+    params: PageParams,
     status: Optional[SaleStatus] = None,
     client_id: Optional[UUID] = None,
-    skip: int = 0,
-    limit: int = 100,
-) -> list[Sale]:
+) -> tuple[list[Sale], int]:
+    """Lista vendas ativas, paginado. Filtros `status`/`client_id`; `order_by`
+    allowlist: sold_at (default desc, indexado), status."""
     query = db.query(Sale).filter(Sale.deleted_at.is_(None))
     if status:
         query = query.filter(Sale.status == status)
     if client_id:
         query = query.filter(Sale.client_id == client_id)
-    sales = (
-        query.order_by(Sale.sold_at.desc())
-        .offset(skip)
-        .limit(limit)
-        .all()
+    sales, total = paginate_query(
+        query,
+        params,
+        allowed_order_by=SALE_ORDER_COLUMNS,
+        default_order=Sale.sold_at.desc(),
+        tiebreaker=Sale.id,
     )
     for sale in sales:
         _load_relations(db, sale)
-    return sales
+    return sales, total
 
 
 def get_sale(db: Session, sale_id: UUID) -> Optional[Sale]:
