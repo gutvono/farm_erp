@@ -137,6 +137,61 @@ Itens de uma venda.
 #### `suppliers`
 Fornecedores de insumos, café verde e equipamentos.
 
+Endereço estruturado adicionado na **Demanda 6** (migration `0019_supplier_address`).
+Todos os campos abaixo são `NULL` (preenchidos no cadastro/seed).
+
+| Coluna | Tipo | Nulo? | Descrição |
+|--------|------|-------|-----------|
+| `address` | `VARCHAR(500)` | sim | **Endereço legado (texto livre).** Mantido por compatibilidade |
+| `cep` | `VARCHAR(9)` | sim | CEP no formato `00000-000` |
+| `street` | `VARCHAR(255)` | sim | Logradouro (rua/avenida/rodovia) |
+| `number` | `VARCHAR(20)` | sim | Número (texto: aceita `S/N`, `KM 500`) |
+| `complement` | `VARCHAR(120)` | sim | Complemento (galpão, sala, fazenda) |
+| `neighborhood` | `VARCHAR(120)` | sim | Bairro / zona |
+| `city` | `VARCHAR(120)` | sim | Cidade |
+| `state` | `VARCHAR(2)` | sim | UF (sigla, ex.: `MG`) |
+
+> **Decisão do PO (Demanda 6 — travada):** a coluna `address` legada **não é dropada**
+> e **não há backfill** parseando `address` → campos estruturados. O texto livre não é
+> confiável para parsing (geraria dado sujo); nas linhas pré-existentes os novos campos
+> ficam `NULL` e quem popula de verdade é o seed/cadastro. A partir da D6 os campos
+> estruturados (`cep`..`state`) são a fonte da verdade do endereço.
+
+#### `supplier_items`
+**Catálogo do fornecedor** (Demanda 6, migration `0020_supplier_items`): liga um
+fornecedor a um item de estoque que ele vende, com preço unitário. **Sem coluna de
+quantidade** — o estoque do fornecedor é considerado infinito. Regra de negócio
+(validada pelo Backend): toda ordem de compra de **produto** só pode conter itens
+presentes no catálogo **ativo** do fornecedor daquela ordem.
+
+| Coluna | Tipo | Nulo? | Default | Descrição |
+|--------|------|-------|---------|-----------|
+| `id` | `UUID` PK | não | `gen_random_uuid()` | Identificador |
+| `supplier_id` | `UUID` FK → `suppliers.id` RESTRICT | não | | Fornecedor |
+| `stock_item_id` | `UUID` FK → `stock_items.id` RESTRICT | não | | Item de estoque vendido |
+| `unit_price` | `NUMERIC(12,2)` | não | | Preço unitário praticado pelo fornecedor |
+| `is_active` | `BOOLEAN` | não | `true` | Item disponível no catálogo (oferta corrente) |
+| `created_at`, `updated_at` | `TIMESTAMPTZ` | não | `now()` | Auditoria |
+| `deleted_at` | `TIMESTAMPTZ` | sim | | Soft delete (NULL = ativo) |
+
+##### Relacionamentos
+- `supplier_items.supplier_id → suppliers.id` (N:1) — fornecedor dono da oferta.
+- `supplier_items.stock_item_id → stock_items.id` (N:1) — item de estoque ofertado.
+
+##### Índices e constraints
+- `uq_supplier_items_supplier_stock_active` — UNIQUE **parcial** em
+  `(supplier_id, stock_item_id) WHERE deleted_at IS NULL`. Impede duplicar o **mesmo
+  item ativo** no mesmo fornecedor; soft-deletes (histórico) **não colidem**, permitindo
+  re-cadastrar o item depois de removido.
+- `idx_supplier_items_supplier_id`, `idx_supplier_items_stock_item_id` — espelham as FKs.
+- `ix_supplier_items_deleted_at` — herdado do `SoftDeleteMixin`.
+
+##### Migration
+- `0020_supplier_items` (revises `0019_supplier_address`). Upgrade: `CREATE TABLE IF NOT
+  EXISTS supplier_items` + os quatro índices (`CREATE [UNIQUE] INDEX IF NOT EXISTS`).
+  Downgrade: dropa índices e tabela. Idempotente (banco novo já cria via `create_all`,
+  com os mesmos nomes de índice). Head resultante: `0020_supplier_items`.
+
 #### `purchase_orders`
 Ordens de compra. Fluxo expandido:
 `em_andamento → aguardando_aprovacao_financeiro → aprovada → em_conferencia → aguardando_pagamento → concluida → cancelada`
@@ -613,6 +668,7 @@ clients ──────┬───── sales ──── sale_items ─�
 
 suppliers ────┬──── purchase_orders ──┬── purchase_order_items ──▶ stock_items
               │                       └── purchase_order_receipts ──▶ purchase_order_items
+              ├──── supplier_items ──▶ stock_items (catálogo fornecedor↔item)
               └──── accounts_payable
 
 stock_categories ──◀ stock_items ──── stock_movements (ledger)
@@ -833,8 +889,8 @@ o drop.
 
 ### PCP refac — hectares, cargos, recursos, colheita por destino (Demanda 5)
 
-A migration **`0018_pcp_refac`** (`down_revision` `0017_payroll_approval`,
-**head atual**) é a maior mudança de schema do PCP. Numa única migration,
+A migration **`0018_pcp_refac`** (`down_revision` `0017_payroll_approval`)
+é a maior mudança de schema do PCP. Numa única migration,
 coerente, idempotente e reversível:
 
 1. **`plots.total_hectares`** e **`production_orders.hectares_used` /
@@ -867,6 +923,31 @@ preservados no ida-e-volta.
 
 > As enums `contract_type` e `system_role` **não** são criadas aqui — já existem
 > (Demandas 2 e 3); a migration apenas as referencia nas colunas novas.
+
+### Compras — endereço do fornecedor e catálogo (Demanda 6)
+
+Duas migrations encadeadas a partir de `0018_pcp_refac` (**head atual:
+`0020_supplier_items`**):
+
+1. **`0019_supplier_address`** (`down_revision` `0018_pcp_refac`) — adiciona em
+   `suppliers` os sete campos de endereço estruturado (`cep`, `street`, `number`,
+   `complement`, `neighborhood`, `city`, `state`), todos `NULL`, via
+   `ADD COLUMN IF NOT EXISTS`. **Decisão do PO (travada):** a coluna `address` legada
+   é **mantida** (não dropada) e **não há backfill** parseando o texto livre — nas
+   linhas existentes os novos campos ficam `NULL`; o seed/cadastro popula. Downgrade
+   dropa os sete campos e preserva `address`.
+2. **`0020_supplier_items`** (`down_revision` `0019_supplier_address`) — cria
+   `supplier_items` (catálogo fornecedor↔item de estoque, com `unit_price` e
+   `is_active`, **sem quantidade**). UNIQUE **parcial**
+   `uq_supplier_items_supplier_stock_active` em `(supplier_id, stock_item_id) WHERE
+   deleted_at IS NULL` + índices das FKs e do `deleted_at`. Idempotente (`CREATE TABLE
+   / INDEX IF NOT EXISTS`, mesmos nomes do `create_all`) e reversível.
+
+Ambas testadas localmente: `upgrade head → downgrade -1 (×2) → upgrade head`,
+`alembic check` limpo, `reset_db` + `seed_only` (×2) OK. O seed cobre o catálogo de
+forma que **toda ordem de compra de produto** semeada tem seus itens no catálogo ativo
+do fornecedor da ordem (regra do Backend), e os endereços dos fornecedores do seed são
+preenchidos.
 
 ---
 

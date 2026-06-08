@@ -15,16 +15,36 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { createFornecedor, updateFornecedor } from "@/services/compras"
+import { lookupCep } from "@/services/cep"
+import { maskCep, maskDocument, onlyDigits, validateDocument } from "@/lib/br-documents"
 import { Supplier } from "@/types/index"
 
-const schema = z.object({
-  name: z.string().min(1, "Nome é obrigatório"),
-  document: z.string().optional(),
-  email: z.string().email("Email inválido").optional().or(z.literal("")),
-  phone: z.string().optional(),
-  address: z.string().optional(),
-  notes: z.string().optional(),
-})
+const schema = z
+  .object({
+    name: z.string().min(1, "Nome é obrigatório"),
+    document: z.string().optional(),
+    email: z.string().email("Email inválido").optional().or(z.literal("")),
+    phone: z.string().optional(),
+    cep: z.string().optional(),
+    street: z.string().optional(),
+    number: z.string().optional(),
+    complement: z.string().optional(),
+    neighborhood: z.string().optional(),
+    city: z.string().optional(),
+    state: z.string().optional(),
+    notes: z.string().optional(),
+  })
+  .superRefine((data, ctx) => {
+    // Documento é opcional; quando informado, precisa ser CPF ou CNPJ válido
+    // (mesma regra do backend). É a única validação que bloqueia o submit.
+    if (data.document && data.document.trim() && !validateDocument(data.document)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        message: "CPF ou CNPJ inválido",
+        path: ["document"],
+      })
+    }
+  })
 
 type FormData = z.infer<typeof schema>
 
@@ -42,11 +62,14 @@ export function FornecedorForm({
   onSuccess,
 }: FornecedorFormProps) {
   const [loading, setLoading] = useState(false)
+  const [cepLoading, setCepLoading] = useState(false)
 
   const {
     register,
     handleSubmit,
     reset,
+    watch,
+    setValue,
     formState: { errors },
   } = useForm<FormData>({ resolver: zodResolver(schema) })
 
@@ -57,11 +80,40 @@ export function FornecedorForm({
         document: supplier?.document ?? "",
         email: supplier?.email ?? "",
         phone: supplier?.phone ?? "",
-        address: supplier?.address ?? "",
+        cep: supplier?.cep ?? "",
+        street: supplier?.street ?? "",
+        number: supplier?.number ?? "",
+        complement: supplier?.complement ?? "",
+        neighborhood: supplier?.neighborhood ?? "",
+        city: supplier?.city ?? "",
+        state: supplier?.state ?? "",
         notes: supplier?.notes ?? "",
       })
     }
   }, [open, supplier, reset])
+
+  async function handleCepBlur() {
+    const cep = watch("cep") ?? ""
+    if (onlyDigits(cep).length !== 8) return
+    setCepLoading(true)
+    try {
+      const result = await lookupCep(cep)
+      if (!result) {
+        toast.error("CEP não encontrado")
+        return
+      }
+      // Autopreenche, mantendo tudo editável.
+      setValue("street", result.street)
+      setValue("neighborhood", result.neighborhood)
+      setValue("city", result.city)
+      setValue("state", result.state)
+    } catch {
+      // Falha de rede no ViaCEP é best-effort: avisa mas não trava o cadastro.
+      toast.error("Não foi possível consultar o CEP. Preencha o endereço manualmente.")
+    } finally {
+      setCepLoading(false)
+    }
+  }
 
   async function onSubmit(data: FormData) {
     setLoading(true)
@@ -71,7 +123,13 @@ export function FornecedorForm({
         document: data.document || undefined,
         email: data.email || undefined,
         phone: data.phone || undefined,
-        address: data.address || undefined,
+        cep: data.cep || undefined,
+        street: data.street || undefined,
+        number: data.number || undefined,
+        complement: data.complement || undefined,
+        neighborhood: data.neighborhood || undefined,
+        city: data.city || undefined,
+        state: data.state || undefined,
         notes: data.notes || undefined,
       }
       if (supplier) {
@@ -92,7 +150,7 @@ export function FornecedorForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-lg">
+      <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>{supplier ? "Editar Fornecedor" : "Novo Fornecedor"}</DialogTitle>
         </DialogHeader>
@@ -107,7 +165,20 @@ export function FornecedorForm({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="document">CNPJ / CPF</Label>
-              <Input id="document" {...register("document")} placeholder="00.000.000/0001-00" />
+              <Input
+                id="document"
+                {...register("document")}
+                value={watch("document") ?? ""}
+                onChange={(e) =>
+                  setValue("document", maskDocument(e.target.value), {
+                    shouldValidate: true,
+                  })
+                }
+                placeholder="00.000.000/0001-00"
+              />
+              {errors.document && (
+                <p className="text-xs text-red-500">{errors.document.message}</p>
+              )}
             </div>
             <div className="space-y-1">
               <Label htmlFor="phone">Telefone</Label>
@@ -121,9 +192,65 @@ export function FornecedorForm({
             {errors.email && <p className="text-xs text-red-500">{errors.email.message}</p>}
           </div>
 
-          <div className="space-y-1">
-            <Label htmlFor="address">Endereço</Label>
-            <Input id="address" {...register("address")} placeholder="Rua, número, cidade" />
+          {/* Endereço estruturado */}
+          <div className="space-y-3 rounded-md border border-slate-200 p-3">
+            <p className="text-sm font-medium text-slate-700">Endereço</p>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="cep">CEP</Label>
+                <Input
+                  id="cep"
+                  {...register("cep")}
+                  value={watch("cep") ?? ""}
+                  onChange={(e) => setValue("cep", maskCep(e.target.value))}
+                  onBlur={handleCepBlur}
+                  placeholder="00000-000"
+                />
+                {cepLoading && (
+                  <p className="text-xs text-slate-400">Buscando endereço...</p>
+                )}
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label htmlFor="street">Rua / Logradouro</Label>
+                <Input id="street" {...register("street")} placeholder="Rua das Flores" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-3 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="number">Número</Label>
+                <Input id="number" {...register("number")} placeholder="123" />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label htmlFor="complement">Complemento</Label>
+                <Input id="complement" {...register("complement")} placeholder="Sala 4" />
+              </div>
+            </div>
+
+            <div className="grid grid-cols-6 gap-4">
+              <div className="col-span-3 space-y-1">
+                <Label htmlFor="neighborhood">Bairro</Label>
+                <Input id="neighborhood" {...register("neighborhood")} placeholder="Centro" />
+              </div>
+              <div className="col-span-2 space-y-1">
+                <Label htmlFor="city">Cidade</Label>
+                <Input id="city" {...register("city")} placeholder="São Paulo" />
+              </div>
+              <div className="col-span-1 space-y-1">
+                <Label htmlFor="state">UF</Label>
+                <Input
+                  id="state"
+                  maxLength={2}
+                  {...register("state")}
+                  value={watch("state") ?? ""}
+                  onChange={(e) =>
+                    setValue("state", e.target.value.toUpperCase().slice(0, 2))
+                  }
+                  placeholder="SP"
+                />
+              </div>
+            </div>
           </div>
 
           <div className="space-y-1">

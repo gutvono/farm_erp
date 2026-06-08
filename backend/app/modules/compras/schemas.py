@@ -23,7 +23,17 @@ class SupplierCreate(BaseModel):
     document: Optional[str] = Field(default=None, max_length=32)
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
+    # Endereço legado (texto livre) — mantido por compatibilidade.
     address: Optional[str] = Field(default=None, max_length=500)
+    # Endereço estruturado (Demanda 6). A busca por CEP (ViaCEP) é feita no
+    # front; o backend só persiste o que recebe.
+    cep: Optional[str] = Field(default=None, max_length=9)
+    street: Optional[str] = Field(default=None, max_length=255)
+    number: Optional[str] = Field(default=None, max_length=20)
+    complement: Optional[str] = Field(default=None, max_length=120)
+    neighborhood: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=2)
     notes: Optional[str] = None
 
 
@@ -33,6 +43,13 @@ class SupplierUpdate(BaseModel):
     email: Optional[str] = Field(default=None, max_length=255)
     phone: Optional[str] = Field(default=None, max_length=32)
     address: Optional[str] = Field(default=None, max_length=500)
+    cep: Optional[str] = Field(default=None, max_length=9)
+    street: Optional[str] = Field(default=None, max_length=255)
+    number: Optional[str] = Field(default=None, max_length=20)
+    complement: Optional[str] = Field(default=None, max_length=120)
+    neighborhood: Optional[str] = Field(default=None, max_length=120)
+    city: Optional[str] = Field(default=None, max_length=120)
+    state: Optional[str] = Field(default=None, max_length=2)
     notes: Optional[str] = None
 
 
@@ -43,9 +60,70 @@ class SupplierOut(BaseModel):
     email: Optional[str] = None
     phone: Optional[str] = None
     address: Optional[str] = None
+    cep: Optional[str] = None
+    street: Optional[str] = None
+    number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Supplier Items (catálogo do fornecedor)
+# ---------------------------------------------------------------------------
+
+
+class SupplierItemCreate(BaseModel):
+    stock_item_id: UUID
+    unit_price: Decimal = Field(gt=0)
+
+
+class SupplierItemUpdate(BaseModel):
+    unit_price: Optional[Decimal] = Field(default=None, gt=0)
+    is_active: Optional[bool] = None
+
+
+class SupplierItemOut(BaseModel):
+    id: UUID
+    supplier_id: UUID
+    stock_item_id: UUID
+    stock_item_name: str
+    stock_item_sku: str
+    unit_price: Decimal
+    is_active: bool
+    created_at: datetime
+    updated_at: datetime
+
+    model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, item) -> "SupplierItemOut":
+        stock_item = getattr(item, "stock_item", None)
+        return cls(
+            id=item.id,
+            supplier_id=item.supplier_id,
+            stock_item_id=item.stock_item_id,
+            stock_item_name=stock_item.name if stock_item else "",
+            stock_item_sku=stock_item.sku if stock_item else "",
+            unit_price=item.unit_price,
+            is_active=item.is_active,
+            created_at=item.created_at,
+            updated_at=item.updated_at,
+        )
+
+
+class SupplierForStockItemOut(BaseModel):
+    """Fornecedor que vende um item (dropdown produto-primeiro)."""
+
+    supplier_id: UUID
+    supplier_name: str
+    unit_price: Decimal
 
     model_config = ConfigDict(from_attributes=True)
 
@@ -386,6 +464,13 @@ class RealizeOrderRequest(BaseModel):
     shipping_cost: Optional[Decimal] = Field(default=None, ge=0)
     ordered_at: Optional[datetime] = None
     notes: Optional[str] = None
+    # Forma de pagamento / parcelamento opcionais — quando informados, são
+    # propagados para a Ordem de Compra gerada (relevante para serviço, cuja
+    # conta a pagar é gerada já no realizar-pedido via complete_service_order).
+    payment_method: Optional[PaymentMethod] = None
+    installments: int = Field(default=1, ge=1, le=24)
+    first_due_date: Optional[date] = None
+    installment_interval_days: int = Field(default=30, ge=1)
 
 
 # ---------------------------------------------------------------------------

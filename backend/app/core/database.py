@@ -45,6 +45,7 @@ from app.modules.compras.model import (  # noqa: E402, F401
     QuotationProposal,
     QuotationProposalItem,
     Supplier,
+    SupplierItem,
 )
 from app.modules.faturamento.model import Invoice, InvoiceItem  # noqa: E402, F401
 from app.modules.financeiro.model import (  # noqa: E402, F401

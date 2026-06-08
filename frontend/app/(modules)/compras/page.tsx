@@ -14,7 +14,7 @@ import {
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { FornecedorForm } from "@/components/modules/compras/FornecedorForm"
-import { FornecedorRow } from "@/components/modules/compras/FornecedorRow"
+import { FornecedoresTable } from "@/components/modules/compras/FornecedoresTable"
 import { OrdemCard } from "@/components/modules/compras/OrdemCard"
 import { OrdemForm } from "@/components/modules/compras/OrdemForm"
 import { CotacaoCard } from "@/components/modules/compras/CotacaoCard"
@@ -233,22 +233,13 @@ export default function ComprasPage() {
               </Button>
             </div>
 
-            {suppliersLoading ? (
-              <div className="py-12 text-center text-slate-400">Carregando fornecedores...</div>
-            ) : suppliers.length === 0 ? (
-              <div className="py-12 text-center text-slate-400">Nenhum fornecedor cadastrado</div>
-            ) : (
-              <div className="space-y-2">
-                {suppliers.map((s) => (
-                  <FornecedorRow
-                    key={s.id}
-                    supplier={s}
-                    onEdit={() => handleEditSupplier(s)}
-                    onDeleted={loadSuppliers}
-                  />
-                ))}
-              </div>
-            )}
+            <FornecedoresTable
+              suppliers={suppliers}
+              loading={suppliersLoading}
+              stockItems={stockItems}
+              onEdit={handleEditSupplier}
+              onChanged={loadSuppliers}
+            />
           </TabsContent>
         </Tabs>
       </div>

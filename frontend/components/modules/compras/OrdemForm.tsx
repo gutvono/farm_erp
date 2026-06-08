@@ -1,9 +1,6 @@
 "use client"
 
-import { useEffect, useState } from "react"
-import { useForm, useFieldArray } from "react-hook-form"
-import { zodResolver } from "@hookform/resolvers/zod"
-import { z } from "zod"
+import { useEffect, useRef, useState } from "react"
 import { Plus, Trash2 } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
@@ -22,54 +19,28 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { createOrdem } from "@/services/compras"
-import { StockItem, Supplier } from "@/types/index"
+import {
+  createOrdem,
+  getCatalogoFornecedor,
+  getFornecedoresDoProduto,
+} from "@/services/compras"
+import { StockItem, Supplier, SupplierForStockItem } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
 
-const itemSchema = z.object({
-  stock_item_id: z.string().min(1, "Selecione um item"),
-  quantity: z.number({ error: "Informe a quantidade" }).positive("Qtd > 0"),
-  unit_price: z.number({ error: "Informe o preço" }).min(0, "Preço >= 0"),
-})
+/** Itens avariados não têm fornecedor — ficam fora dos dropdowns (decisão #1). */
+function isAvariado(item: StockItem): boolean {
+  return item.sku.endsWith("-AVARIADO")
+}
 
-const schema = z
-  .object({
-    supplier_id: z.string().min(1, "Selecione um fornecedor"),
-    notes: z.string().optional(),
-    order_type: z.enum(["produto", "servico"]),
-    service_description: z.string().optional(),
-    total_amount: z.number().optional(),
-    shipping_cost: z.number().min(0).optional(),
-    items: z.array(itemSchema),
-  })
-  .superRefine((data, ctx) => {
-    if (data.order_type === "servico") {
-      if (!data.service_description || !data.service_description.trim()) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Descreva o serviço",
-          path: ["service_description"],
-        })
-      }
-      if (!data.total_amount || data.total_amount <= 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Informe o valor do serviço",
-          path: ["total_amount"],
-        })
-      }
-    } else {
-      if (!data.items || data.items.length === 0) {
-        ctx.addIssue({
-          code: z.ZodIssueCode.custom,
-          message: "Adicione pelo menos 1 item",
-          path: ["items"],
-        })
-      }
-    }
-  })
-
-type FormData = z.infer<typeof schema>
+interface ProdLine {
+  key: string
+  stockItemId: string
+  /** Fornecedores que vendem o produto (preenchido enquanto o fornecedor da ordem não está fixado). */
+  supplierOptions: SupplierForStockItem[]
+  loadingSuppliers: boolean
+  quantity: string
+  unitPrice: string
+}
 
 interface OrdemFormProps {
   open: boolean
@@ -86,86 +57,269 @@ export function OrdemForm({
   stockItems,
   onSuccess,
 }: OrdemFormProps) {
-  const [loading, setLoading] = useState(false)
-
-  const {
-    register,
-    handleSubmit,
-    reset,
-    watch,
-    setValue,
-    control,
-    formState: { errors },
-  } = useForm<FormData>({
-    resolver: zodResolver(schema),
-    defaultValues: {
-      supplier_id: "",
-      notes: "",
-      order_type: "produto",
-      service_description: "",
-      total_amount: undefined,
-      shipping_cost: undefined,
-      items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
-    },
+  const lineCounter = useRef(0)
+  const newLine = (): ProdLine => ({
+    key: `line-${lineCounter.current++}`,
+    stockItemId: "",
+    supplierOptions: [],
+    loadingSuppliers: false,
+    quantity: "",
+    unitPrice: "",
   })
 
-  const { fields, append, remove } = useFieldArray({ control, name: "items" })
+  const [loading, setLoading] = useState(false)
+  const [orderType, setOrderType] = useState<"produto" | "servico">("produto")
+  const [notes, setNotes] = useState("")
 
-  const watchedItems = watch("items")
-  const supplierId = watch("supplier_id")
-  const orderType = watch("order_type")
+  // Fornecedor da ordem (único). Em produto é fixado pelo 1º produto→fornecedor;
+  // em serviço é escolhido diretamente.
+  const [supplierId, setSupplierId] = useState("")
+  const [supplierName, setSupplierName] = useState("")
 
-  const shippingCost = orderType === "produto" ? Number(watch("shipping_cost")) || 0 : 0
+  // Catálogo ativo do fornecedor fixado (restringe os produtos das demais linhas
+  // e fornece o preço sugerido).
+  const [catalogProductIds, setCatalogProductIds] = useState<Set<string>>(new Set())
+  const [catalogPriceByProduct, setCatalogPriceByProduct] = useState<Map<string, number>>(
+    new Map()
+  )
 
-  const totalAmount =
-    orderType === "produto"
-      ? watchedItems.reduce((acc, item) => {
-          const q = Number(item.quantity) || 0
-          const p = Number(item.unit_price) || 0
-          return acc + q * p
-        }, 0) + shippingCost
-      : Number(watch("total_amount")) || 0
+  // Produto
+  const [lines, setLines] = useState<ProdLine[]>([newLine()])
+  const [shippingCost, setShippingCost] = useState("")
+
+  // Serviço
+  const [serviceDescription, setServiceDescription] = useState("")
+  const [totalAmount, setTotalAmount] = useState("")
 
   useEffect(() => {
     if (open) {
-      reset({
-        supplier_id: "",
-        notes: "",
-        order_type: "produto",
-        service_description: "",
-        total_amount: undefined,
-        shipping_cost: undefined,
-        items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
-      })
+      lineCounter.current = 0
+      setOrderType("produto")
+      setNotes("")
+      setSupplierId("")
+      setSupplierName("")
+      setCatalogProductIds(new Set())
+      setCatalogPriceByProduct(new Map())
+      setLines([newLine()])
+      setShippingCost("")
+      setServiceDescription("")
+      setTotalAmount("")
     }
-  }, [open, reset])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open])
 
-  async function onSubmit(data: FormData) {
-    setLoading(true)
+  const supplierFixed = supplierId !== "" && orderType === "produto"
+
+  /** Carrega o catálogo ATIVO do fornecedor e devolve (ids, preços). */
+  async function loadCatalog(
+    supId: string
+  ): Promise<{ ids: Set<string>; prices: Map<string, number> }> {
+    const page = await getCatalogoFornecedor(supId, { page: 1, page_size: 200 })
+    const active = page.items.filter((i) => i.is_active)
+    const ids = new Set(active.map((i) => i.stock_item_id))
+    const prices = new Map(active.map((i) => [i.stock_item_id, i.unit_price]))
+    setCatalogProductIds(ids)
+    setCatalogPriceByProduct(prices)
+    return { ids, prices }
+  }
+
+  function updateLine(key: string, patch: Partial<ProdLine>) {
+    setLines((prev) => prev.map((l) => (l.key === key ? { ...l, ...patch } : l)))
+  }
+
+  async function handleProductChange(key: string, productId: string) {
+    if (supplierFixed) {
+      // Fornecedor já definido: produto vem do catálogo; preço sugerido editável.
+      const suggested = catalogPriceByProduct.get(productId)
+      updateLine(key, {
+        stockItemId: productId,
+        unitPrice: suggested !== undefined ? String(suggested) : "",
+        supplierOptions: [],
+      })
+      return
+    }
+    // Fornecedor ainda não fixado: produto primeiro → carrega quem o vende.
+    updateLine(key, {
+      stockItemId: productId,
+      unitPrice: "",
+      loadingSuppliers: true,
+      supplierOptions: [],
+    })
     try {
-      if (data.order_type === "servico") {
+      const options = await getFornecedoresDoProduto(productId)
+      updateLine(key, { supplierOptions: options, loadingSuppliers: false })
+      if (options.length === 0) {
+        toast.error("Nenhum fornecedor cadastrado vende este item")
+      }
+    } catch (err) {
+      updateLine(key, { loadingSuppliers: false })
+      toast.error(err instanceof Error ? err.message : "Erro ao buscar fornecedores")
+    }
+  }
+
+  async function handleSupplierSelect(key: string, option: SupplierForStockItem) {
+    setSupplierId(option.supplier_id)
+    setSupplierName(option.supplier_name)
+    let catalog: { ids: Set<string>; prices: Map<string, number> }
+    try {
+      catalog = await loadCatalog(option.supplier_id)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao carregar catálogo do fornecedor")
+      // Reverte o fornecedor para não travar o usuário num estado inconsistente.
+      setSupplierId("")
+      setSupplierName("")
+      return
+    }
+
+    // Revalida todas as linhas contra o catálogo do fornecedor escolhido.
+    let removed = 0
+    setLines((prev) =>
+      prev.map((l) => {
+        if (l.key === key) {
+          // Linha que fixou o fornecedor: preço sugerido = preço do catálogo.
+          return { ...l, unitPrice: String(option.unit_price), supplierOptions: [] }
+        }
+        if (l.stockItemId && !catalog.ids.has(l.stockItemId)) {
+          removed++
+          return { ...l, stockItemId: "", unitPrice: "", supplierOptions: [] }
+        }
+        if (l.stockItemId && catalog.prices.has(l.stockItemId)) {
+          return {
+            ...l,
+            unitPrice: String(catalog.prices.get(l.stockItemId)),
+            supplierOptions: [],
+          }
+        }
+        return { ...l, supplierOptions: [] }
+      })
+    )
+    if (removed > 0) {
+      toast.warning(
+        `${removed} item(ns) removido(s) por não fazerem parte do catálogo de ${option.supplier_name}`
+      )
+    }
+  }
+
+  async function handleChangeSupplier() {
+    // "Trocar fornecedor": libera os selects de fornecedor por linha de novo,
+    // mantendo os produtos já escolhidos (serão revalidados ao escolher o novo).
+    setSupplierId("")
+    setSupplierName("")
+    setCatalogProductIds(new Set())
+    setCatalogPriceByProduct(new Map())
+    // Recarrega as opções de fornecedor de cada linha que tem produto.
+    const current = lines
+    setLines((prev) =>
+      prev.map((l) => (l.stockItemId ? { ...l, loadingSuppliers: true } : l))
+    )
+    await Promise.all(
+      current.map(async (l) => {
+        if (!l.stockItemId) return
+        try {
+          const options = await getFornecedoresDoProduto(l.stockItemId)
+          updateLine(l.key, { supplierOptions: options, loadingSuppliers: false })
+        } catch {
+          updateLine(l.key, { loadingSuppliers: false })
+        }
+      })
+    )
+  }
+
+  function addLine() {
+    setLines((prev) => [...prev, newLine()])
+  }
+
+  function removeLine(key: string) {
+    setLines((prev) => (prev.length === 1 ? prev : prev.filter((l) => l.key !== key)))
+  }
+
+  // Produtos disponíveis no dropdown de cada linha.
+  const productOptions = stockItems.filter((s) => {
+    if (isAvariado(s)) return false
+    if (supplierFixed) return catalogProductIds.has(s.id)
+    return true
+  })
+
+  const shipping = orderType === "produto" ? Number(shippingCost) || 0 : 0
+  const itemsTotal = lines.reduce((acc, l) => {
+    const q = Number(l.quantity) || 0
+    const p = Number(l.unitPrice) || 0
+    return acc + q * p
+  }, 0)
+  const total =
+    orderType === "produto" ? itemsTotal + shipping : Number(totalAmount) || 0
+
+  async function handleSubmit() {
+    if (orderType === "servico") {
+      if (!supplierId) {
+        toast.error("Selecione um fornecedor")
+        return
+      }
+      if (!serviceDescription.trim()) {
+        toast.error("Descreva o serviço")
+        return
+      }
+      const amount = Number(totalAmount)
+      if (!Number.isFinite(amount) || amount <= 0) {
+        toast.error("Informe o valor do serviço")
+        return
+      }
+      setLoading(true)
+      try {
         await createOrdem({
-          supplier_id: data.supplier_id,
-          notes: data.notes || undefined,
+          supplier_id: supplierId,
+          notes: notes || undefined,
           order_type: "servico",
-          service_description: data.service_description,
-          total_amount: data.total_amount,
+          service_description: serviceDescription,
+          total_amount: amount,
           items: [],
         })
-      } else {
-        await createOrdem({
-          supplier_id: data.supplier_id,
-          notes: data.notes || undefined,
-          order_type: "produto",
-          shipping_cost:
-            data.shipping_cost && data.shipping_cost > 0 ? data.shipping_cost : undefined,
-          items: data.items.map((item) => ({
-            stock_item_id: item.stock_item_id,
-            quantity: item.quantity,
-            unit_price: item.unit_price,
-          })),
-        })
+        toast.success("Ordem de compra criada com sucesso")
+        onSuccess()
+        onOpenChange(false)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : "Erro ao criar ordem de compra")
+      } finally {
+        setLoading(false)
       }
+      return
+    }
+
+    // Produto
+    if (!supplierId) {
+      toast.error("Escolha um produto e o fornecedor que o vende")
+      return
+    }
+    const filled = lines.filter((l) => l.stockItemId)
+    if (filled.length === 0) {
+      toast.error("Adicione pelo menos 1 item")
+      return
+    }
+    for (const l of filled) {
+      const q = Number(l.quantity)
+      if (!Number.isFinite(q) || q <= 0) {
+        toast.error("Informe a quantidade de todos os itens")
+        return
+      }
+      const p = Number(l.unitPrice)
+      if (!Number.isFinite(p) || p < 0) {
+        toast.error("Informe o preço de todos os itens")
+        return
+      }
+    }
+    setLoading(true)
+    try {
+      await createOrdem({
+        supplier_id: supplierId,
+        notes: notes || undefined,
+        order_type: "produto",
+        shipping_cost: shipping > 0 ? shipping : undefined,
+        items: filled.map((l) => ({
+          stock_item_id: l.stockItemId,
+          quantity: Number(l.quantity),
+          unit_price: Number(l.unitPrice),
+        })),
+      })
       toast.success("Ordem de compra criada com sucesso")
       onSuccess()
       onOpenChange(false)
@@ -183,36 +337,7 @@ export function OrdemForm({
           <DialogTitle>Nova Ordem de Compra</DialogTitle>
         </DialogHeader>
 
-        <form onSubmit={handleSubmit(onSubmit)} className="space-y-5">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1">
-              <Label>Fornecedor *</Label>
-              <Select
-                value={supplierId}
-                onValueChange={(v) => setValue("supplier_id", v)}
-              >
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecione" />
-                </SelectTrigger>
-                <SelectContent>
-                  {suppliers.map((s) => (
-                    <SelectItem key={s.id} value={s.id}>
-                      {s.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              {errors.supplier_id && (
-                <p className="text-xs text-red-500">{errors.supplier_id.message}</p>
-              )}
-            </div>
-
-            <div className="space-y-1">
-              <Label htmlFor="notes">Observações</Label>
-              <Input id="notes" {...register("notes")} placeholder="Informações adicionais..." />
-            </div>
-          </div>
-
+        <div className="space-y-5">
           {/* Tipo de Ordem */}
           <div className="space-y-2">
             <Label>Tipo de Ordem</Label>
@@ -220,8 +345,10 @@ export function OrdemForm({
               <button
                 type="button"
                 onClick={() => {
-                  setValue("order_type", "produto")
-                  setValue("items", [{ stock_item_id: "", quantity: 0, unit_price: 0 }])
+                  setOrderType("produto")
+                  setSupplierId("")
+                  setSupplierName("")
+                  setLines([newLine()])
                 }}
                 className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                   orderType === "produto"
@@ -234,9 +361,10 @@ export function OrdemForm({
               <button
                 type="button"
                 onClick={() => {
-                  setValue("order_type", "servico")
-                  setValue("items", [])
-                  setValue("shipping_cost", undefined)
+                  setOrderType("servico")
+                  setSupplierId("")
+                  setSupplierName("")
+                  setShippingCost("")
                 }}
                 className={`flex-1 rounded-md border px-4 py-2 text-sm font-medium transition-colors ${
                   orderType === "servico"
@@ -250,25 +378,37 @@ export function OrdemForm({
             <p className="text-xs text-slate-500">
               {orderType === "servico"
                 ? "As condições de pagamento serão definidas na aprovação financeira."
-                : "Os itens de produto serão conferidos no recebimento."}
+                : "Escolha o produto primeiro; depois o fornecedor que o vende. A ordem tem um único fornecedor."}
             </p>
           </div>
 
           {orderType === "servico" ? (
-            /* Campos para Serviço */
             <div className="space-y-4">
+              <div className="space-y-1">
+                <Label>Fornecedor *</Label>
+                <Select value={supplierId} onValueChange={setSupplierId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {suppliers.map((s) => (
+                      <SelectItem key={s.id} value={s.id}>
+                        {s.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
               <div className="space-y-1">
                 <Label htmlFor="service_description">Descrição do Serviço *</Label>
                 <textarea
                   id="service_description"
-                  {...register("service_description")}
+                  value={serviceDescription}
+                  onChange={(e) => setServiceDescription(e.target.value)}
                   rows={3}
                   placeholder="Descreva o serviço a ser realizado..."
                   className="w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 resize-none"
                 />
-                {errors.service_description && (
-                  <p className="text-xs text-red-500">{errors.service_description.message}</p>
-                )}
               </div>
               <div className="space-y-1">
                 <Label htmlFor="total_amount">Valor do Serviço (R$) *</Label>
@@ -277,62 +417,111 @@ export function OrdemForm({
                   type="number"
                   step="0.01"
                   min="0.01"
-                  {...register("total_amount", { valueAsNumber: true })}
+                  value={totalAmount}
+                  onChange={(e) => setTotalAmount(e.target.value)}
                   placeholder="0.00"
                 />
-                {errors.total_amount && (
-                  <p className="text-xs text-red-500">{errors.total_amount.message}</p>
-                )}
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="notes-servico">Observações</Label>
+                <Input
+                  id="notes-servico"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Informações adicionais..."
+                />
               </div>
             </div>
           ) : (
-            /* Itens para Produto */
-            <div className="space-y-2">
+            <div className="space-y-3">
               <div className="flex items-center justify-between">
-                <Label>Itens *</Label>
-                <Button
-                  type="button"
-                  variant="outline"
-                  size="sm"
-                  onClick={() => append({ stock_item_id: "", quantity: 0, unit_price: 0 })}
-                >
-                  <Plus className="h-3 w-3 mr-1" /> Adicionar item
-                </Button>
+                <div>
+                  <Label>Itens *</Label>
+                  {supplierFixed && (
+                    <p className="text-xs text-slate-500">
+                      Fornecedor: <strong>{supplierName}</strong>
+                    </p>
+                  )}
+                </div>
+                <div className="flex items-center gap-2">
+                  {supplierFixed && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={handleChangeSupplier}
+                    >
+                      Trocar fornecedor
+                    </Button>
+                  )}
+                  <Button type="button" variant="outline" size="sm" onClick={addLine}>
+                    <Plus className="h-3 w-3 mr-1" /> Adicionar item
+                  </Button>
+                </div>
               </div>
 
-              {errors.items && typeof errors.items.message === "string" && (
-                <p className="text-xs text-red-500">{errors.items.message}</p>
-              )}
-
               <div className="space-y-2">
-                {fields.map((field, idx) => {
-                  const qty = Number(watchedItems[idx]?.quantity) || 0
-                  const price = Number(watchedItems[idx]?.unit_price) || 0
+                {lines.map((line, idx) => {
+                  const qty = Number(line.quantity) || 0
+                  const price = Number(line.unitPrice) || 0
                   const lineTotal = qty * price
-
                   return (
-                    <div key={field.id} className="grid grid-cols-12 gap-2 items-end">
-                      <div className="col-span-5 space-y-1">
-                        {idx === 0 && <Label className="text-xs">Item</Label>}
+                    <div key={line.key} className="grid grid-cols-12 gap-2 items-end">
+                      <div className="col-span-3 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Produto</Label>}
                         <Select
-                          value={watchedItems[idx]?.stock_item_id ?? ""}
-                          onValueChange={(v) => setValue(`items.${idx}.stock_item_id`, v)}
+                          value={line.stockItemId}
+                          onValueChange={(v) => handleProductChange(line.key, v)}
                         >
                           <SelectTrigger>
                             <SelectValue placeholder="Selecione" />
                           </SelectTrigger>
                           <SelectContent>
-                            {stockItems.map((s) => (
+                            {productOptions.map((s) => (
                               <SelectItem key={s.id} value={s.id}>
                                 {s.name}
                               </SelectItem>
                             ))}
                           </SelectContent>
                         </Select>
-                        {errors.items?.[idx]?.stock_item_id && (
-                          <p className="text-xs text-red-500">
-                            {errors.items[idx]?.stock_item_id?.message}
-                          </p>
+                      </div>
+
+                      <div className="col-span-3 space-y-1">
+                        {idx === 0 && <Label className="text-xs">Fornecedor</Label>}
+                        {supplierFixed ? (
+                          <div className="h-9 flex items-center px-2 rounded-md border bg-slate-50 text-sm text-slate-600 truncate">
+                            {supplierName}
+                          </div>
+                        ) : (
+                          <Select
+                            value=""
+                            disabled={!line.stockItemId || line.loadingSuppliers}
+                            onValueChange={(v) => {
+                              const opt = line.supplierOptions.find(
+                                (o) => o.supplier_id === v
+                              )
+                              if (opt) handleSupplierSelect(line.key, opt)
+                            }}
+                          >
+                            <SelectTrigger>
+                              <SelectValue
+                                placeholder={
+                                  !line.stockItemId
+                                    ? "Escolha o produto"
+                                    : line.loadingSuppliers
+                                      ? "Carregando..."
+                                      : "Selecione"
+                                }
+                              />
+                            </SelectTrigger>
+                            <SelectContent>
+                              {line.supplierOptions.map((o) => (
+                                <SelectItem key={o.supplier_id} value={o.supplier_id}>
+                                  {o.supplier_name} — {formatCurrency(o.unit_price)}
+                                </SelectItem>
+                              ))}
+                            </SelectContent>
+                          </Select>
                         )}
                       </div>
 
@@ -341,7 +530,10 @@ export function OrdemForm({
                         <Input
                           type="number"
                           step="0.001"
-                          {...register(`items.${idx}.quantity`, { valueAsNumber: true })}
+                          value={line.quantity}
+                          onChange={(e) =>
+                            updateLine(line.key, { quantity: e.target.value })
+                          }
                         />
                       </div>
 
@@ -350,13 +542,16 @@ export function OrdemForm({
                         <Input
                           type="number"
                           step="0.01"
-                          {...register(`items.${idx}.unit_price`, { valueAsNumber: true })}
+                          value={line.unitPrice}
+                          onChange={(e) =>
+                            updateLine(line.key, { unitPrice: e.target.value })
+                          }
                         />
                       </div>
 
-                      <div className="col-span-2 space-y-1">
+                      <div className="col-span-1 space-y-1">
                         {idx === 0 && <Label className="text-xs">Subtotal</Label>}
-                        <div className="h-9 flex items-center px-2 rounded-md border bg-slate-50 text-sm font-medium">
+                        <div className="h-9 flex items-center px-1 rounded-md border bg-slate-50 text-xs font-medium">
                           {formatCurrency(lineTotal)}
                         </div>
                       </div>
@@ -367,8 +562,8 @@ export function OrdemForm({
                           type="button"
                           variant="ghost"
                           size="icon"
-                          disabled={fields.length === 1}
-                          onClick={() => remove(idx)}
+                          disabled={lines.length === 1}
+                          onClick={() => removeLine(line.key)}
                         >
                           <Trash2 className="h-4 w-4 text-red-500" />
                         </Button>
@@ -390,14 +585,19 @@ export function OrdemForm({
                   type="number"
                   step="0.01"
                   min="0"
-                  {...register("shipping_cost", {
-                    setValueAs: (v) => {
-                      if (v === "" || v === null || v === undefined) return undefined
-                      const n = Number(v)
-                      return Number.isNaN(n) ? undefined : n
-                    },
-                  })}
+                  value={shippingCost}
+                  onChange={(e) => setShippingCost(e.target.value)}
                   placeholder="0.00"
+                />
+              </div>
+
+              <div className="space-y-1">
+                <Label htmlFor="notes-produto">Observações</Label>
+                <Input
+                  id="notes-produto"
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  placeholder="Informações adicionais..."
                 />
               </div>
             </div>
@@ -407,19 +607,19 @@ export function OrdemForm({
             <div className="text-sm font-semibold text-slate-700">
               Total:{" "}
               <span className="text-lg font-bold text-slate-900">
-                {formatCurrency(totalAmount)}
+                {formatCurrency(total)}
               </span>
             </div>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
                 Cancelar
               </Button>
-              <Button type="submit" disabled={loading}>
+              <Button type="button" onClick={handleSubmit} disabled={loading}>
                 {loading ? "Criando..." : "Criar ordem"}
               </Button>
             </div>
           </div>
-        </form>
+        </div>
       </DialogContent>
     </Dialog>
   )

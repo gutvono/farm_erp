@@ -14,6 +14,7 @@ from app.modules.compras.model import (
     QuotationProposal,
     QuotationProposalItem,
     Supplier,
+    SupplierItem,
 )
 from app.modules.compras.schemas import (
     PurchaseOrderCreate,
@@ -21,6 +22,8 @@ from app.modules.compras.schemas import (
     QuotationProposalCreate,
     QuotationProposalUpdate,
     SupplierCreate,
+    SupplierItemCreate,
+    SupplierItemUpdate,
     SupplierUpdate,
 )
 from app.modules.estoque.model import StockItem
@@ -29,6 +32,7 @@ from app.shared.enums import (
     PurchaseOrderStatus,
     QuotationStatus,
 )
+from app.shared.pagination import PageParams, paginate_query
 
 
 # ---------------------------------------------------------------------------
@@ -43,6 +47,13 @@ def create_supplier(db: Session, data: SupplierCreate) -> Supplier:
         email=data.email,
         phone=data.phone,
         address=data.address,
+        cep=data.cep,
+        street=data.street,
+        number=data.number,
+        complement=data.complement,
+        neighborhood=data.neighborhood,
+        city=data.city,
+        state=data.state,
         notes=data.notes,
     )
     db.add(supplier)
@@ -96,6 +107,146 @@ def soft_delete_supplier(db: Session, supplier_id: UUID) -> Optional[Supplier]:
     db.commit()
     db.refresh(supplier)
     return supplier
+
+
+# ---------------------------------------------------------------------------
+# Supplier Items (catálogo do fornecedor)
+# ---------------------------------------------------------------------------
+
+
+def _load_supplier_item_stock(db: Session, item: SupplierItem) -> None:
+    """Attach the stock_item (name/sku) for serialization."""
+    _ = item.stock_item
+
+
+def create_supplier_item(
+    db: Session, supplier_id: UUID, data: SupplierItemCreate
+) -> SupplierItem:
+    item = SupplierItem(
+        supplier_id=supplier_id,
+        stock_item_id=data.stock_item_id,
+        unit_price=Decimal(str(data.unit_price)),
+        is_active=True,
+    )
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    _load_supplier_item_stock(db, item)
+    return item
+
+
+def list_supplier_items_paginated(
+    db: Session, supplier_id: UUID, params: PageParams
+) -> tuple[list[SupplierItem], int]:
+    """Lista o catálogo ATIVO (não soft-deleted) do fornecedor, paginado."""
+    query = (
+        db.query(SupplierItem)
+        .filter(
+            SupplierItem.supplier_id == supplier_id,
+            SupplierItem.deleted_at.is_(None),
+        )
+        .join(StockItem, StockItem.id == SupplierItem.stock_item_id)
+    )
+    if params.search:
+        like = f"%{params.search}%"
+        from sqlalchemy import or_
+
+        query = query.filter(
+            or_(StockItem.name.ilike(like), StockItem.sku.ilike(like))
+        )
+
+    items, total = paginate_query(
+        query,
+        params,
+        allowed_order_by={
+            "stock_item_name": StockItem.name,
+            "unit_price": SupplierItem.unit_price,
+            "created_at": SupplierItem.created_at,
+        },
+        default_order=StockItem.name.asc(),
+        tiebreaker=SupplierItem.id,
+    )
+    for item in items:
+        _load_supplier_item_stock(db, item)
+    return items, total
+
+
+def get_supplier_item(
+    db: Session, supplier_id: UUID, item_id: UUID
+) -> Optional[SupplierItem]:
+    item = (
+        db.query(SupplierItem)
+        .filter(
+            SupplierItem.id == item_id,
+            SupplierItem.supplier_id == supplier_id,
+            SupplierItem.deleted_at.is_(None),
+        )
+        .first()
+    )
+    if item:
+        _load_supplier_item_stock(db, item)
+    return item
+
+
+def get_active_supplier_item_by_stock(
+    db: Session, supplier_id: UUID, stock_item_id: UUID
+) -> Optional[SupplierItem]:
+    """Busca o item ATIVO do catálogo (is_active=True, não deletado)."""
+    return (
+        db.query(SupplierItem)
+        .filter(
+            SupplierItem.supplier_id == supplier_id,
+            SupplierItem.stock_item_id == stock_item_id,
+            SupplierItem.is_active.is_(True),
+            SupplierItem.deleted_at.is_(None),
+        )
+        .first()
+    )
+
+
+def update_supplier_item(
+    db: Session, item: SupplierItem, data: SupplierItemUpdate
+) -> SupplierItem:
+    payload = data.model_dump(exclude_unset=True)
+    if "unit_price" in payload and payload["unit_price"] is not None:
+        item.unit_price = Decimal(str(payload["unit_price"]))
+    if "is_active" in payload and payload["is_active"] is not None:
+        item.is_active = payload["is_active"]
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    _load_supplier_item_stock(db, item)
+    return item
+
+
+def soft_delete_supplier_item(db: Session, item: SupplierItem) -> SupplierItem:
+    item.deleted_at = datetime.now(timezone.utc)
+    db.add(item)
+    db.commit()
+    db.refresh(item)
+    return item
+
+
+def list_suppliers_for_stock_item(
+    db: Session, stock_item_id: UUID
+) -> list[SupplierItem]:
+    """Catálogos ATIVOS (item + fornecedor ativos, não deletados) que vendem o
+    item informado. Retorna SupplierItem com supplier carregado."""
+    items = (
+        db.query(SupplierItem)
+        .join(Supplier, Supplier.id == SupplierItem.supplier_id)
+        .filter(
+            SupplierItem.stock_item_id == stock_item_id,
+            SupplierItem.is_active.is_(True),
+            SupplierItem.deleted_at.is_(None),
+            Supplier.deleted_at.is_(None),
+        )
+        .order_by(Supplier.name.asc())
+        .all()
+    )
+    for item in items:
+        _ = item.supplier
+    return items
 
 
 # ---------------------------------------------------------------------------

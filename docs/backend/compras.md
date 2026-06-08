@@ -19,10 +19,34 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | Método | Rota | Descrição |
 |--------|------|-----------|
 | `GET` | `/api/compras/fornecedores` | Lista fornecedores (paginação: skip, limit) |
-| `POST` | `/api/compras/fornecedores` | Cria fornecedor |
-| `GET` | `/api/compras/fornecedores/{id}` | Detalhe do fornecedor |
-| `PUT` | `/api/compras/fornecedores/{id}` | Atualiza fornecedor |
+| `POST` | `/api/compras/fornecedores` | Cria fornecedor. Valida o `document` (CPF/CNPJ); `400 "CNPJ/CPF inválido"` se inválido |
+| `GET` | `/api/compras/fornecedores/{id}` | Detalhe do fornecedor (inclui endereço estruturado) |
+| `PUT` | `/api/compras/fornecedores/{id}` | Atualiza fornecedor. Se `document` vier no corpo, é revalidado (`400` se inválido) |
 | `DELETE` | `/api/compras/fornecedores/{id}` | Soft delete do fornecedor |
+
+### Catálogo do fornecedor (Supplier Items)
+
+Catálogo é a lista de **itens de estoque que um fornecedor vende, com preço sugerido**. Não tem quantidade — o estoque do fornecedor é tratado como **infinito**. A compra **direta** de produto só é permitida para itens presentes no catálogo **ativo** do fornecedor da ordem (ver "Validações na Criação").
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/compras/fornecedores/{supplier_id}/itens` | Lista o catálogo **ativo** do fornecedor, **paginado** (`Page[SupplierItemOut]` — envelope cru, `page`/`page_size`/`order_by`/`order_dir`/`search`). `order_by` aceito: `stock_item_name`, `unit_price`, `created_at`. `search` casa nome **ou** SKU do item |
+| `POST` | `/api/compras/fornecedores/{supplier_id}/itens` | Adiciona item ao catálogo (corpo: `stock_item_id`, `unit_price > 0`). `201` |
+| `PUT` | `/api/compras/fornecedores/{supplier_id}/itens/{item_id}` | Atualiza `unit_price` e/ou `is_active` |
+| `DELETE` | `/api/compras/fornecedores/{supplier_id}/itens/{item_id}` | Soft delete do item do catálogo |
+
+**Mensagens de erro (catálogo):**
+- `404 "Fornecedor não encontrado"` — `supplier_id` inexistente/deletado.
+- `404 "Item de estoque não encontrado: {id}"` — `stock_item_id` inexistente.
+- `400 "Item avariado não pode entrar no catálogo"` — o item é avariado (SKU termina em `-AVARIADO`).
+- `400 "Item já cadastrado no catálogo deste fornecedor"` — já existe esse item **ativo** no catálogo (viola a UNIQUE parcial `uq_supplier_items_supplier_stock_active`).
+- `404 "Item do catálogo não encontrado"` — `item_id` não pertence ao fornecedor ou está deletado.
+
+### Compra produto-primeiro
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/compras/produtos/{stock_item_id}/fornecedores` | Lista os fornecedores **ativos** que têm aquele item no catálogo **ativo**, retornando `supplier_id`, `supplier_name` e `unit_price` (preço sugerido). Alimenta o dropdown "escolha o item → veja quem vende". `404` se o item de estoque não existir |
 
 ### Ordens de Compra
 
@@ -55,13 +79,43 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 ```json
 {
   "name": "Fornecedor ABC",
-  "document": "12.345.678/0001-99",
+  "document": "11.222.333/0001-81",
   "email": "contato@abc.com",
   "phone": "(11) 99999-9999",
-  "address": "Rua X, 100",
+  "address": "Rua X, 100 (legado, texto livre)",
+  "cep": "37000-000",
+  "street": "Rua X",
+  "number": "100",
+  "complement": "Sala 2",
+  "neighborhood": "Centro",
+  "city": "Varginha",
+  "state": "MG",
   "notes": "opcional"
 }
 ```
+
+- `document` é **opcional**; quando informado, precisa ser um **CPF ou CNPJ válido** (dígitos verificadores oficiais, máscara ignorada). A validação roda no Service via `app/shared/br_documents.validate_document` e retorna `400 "CNPJ/CPF inválido"` (não 422) — é regra de negócio, não de schema. O utilitário (`is_valid_cpf`, `is_valid_cnpj`, `validate_document`) é reutilizável (será reaproveitado pelo Comercial).
+- **Endereço estruturado** (`cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`): todos opcionais; são a fonte da verdade do endereço a partir da Demanda 6. A coluna legada `address` (texto livre) é mantida por compatibilidade. **A busca por CEP (ViaCEP) é feita no front** — o backend só persiste o que recebe.
+
+### SupplierItemCreate / SupplierItemUpdate / SupplierItemOut
+```json
+// SupplierItemCreate (POST)
+{ "stock_item_id": "uuid", "unit_price": 11.50 }
+
+// SupplierItemUpdate (PUT) — campos opcionais
+{ "unit_price": 12.00, "is_active": false }
+
+// SupplierItemOut
+{
+  "id": "uuid", "supplier_id": "uuid", "stock_item_id": "uuid",
+  "stock_item_name": "Fertilizante NPK", "stock_item_sku": "INS-FERT",
+  "unit_price": 11.50, "is_active": true,
+  "created_at": "...", "updated_at": "..."
+}
+```
+
+- `unit_price > 0` (o preço do catálogo é uma sugestão real; ver "Preço do catálogo").
+- `SupplierForStockItemOut` (saída de `/produtos/{id}/fornecedores`): `supplier_id`, `supplier_name`, `unit_price`.
 
 ### PurchaseOrderCreate
 
@@ -240,6 +294,14 @@ Por tipo de NF:
 ### Validações na Criação
 - `supplier_id` deve existir e não estar deletado (404 se não encontrado)
 - Todos os `stock_item_id` nos itens devem existir (404 identificando o item ausente)
+- **Catálogo (Demanda 6 — só `create_order` de produto):** cada item da ordem precisa estar no catálogo **ativo** do `supplier_id` da ordem, senão `400 "Item não disponível no catálogo do fornecedor"`. Estoque do fornecedor é infinito → a quantidade **não** é validada contra o fornecedor. Ordens de **serviço** não usam catálogo.
+- **Preço do catálogo (decisão PO travada):** o preço do catálogo é a **sugestão/default**, a compra é negociação. Na criação da ordem, se o item vier **sem** `unit_price` (ou `0`), aplica-se o `unit_price` do catálogo; se vier **preenchido (> 0)**, respeita-se o preço do front (override).
+
+#### Fronteira catálogo × cotação (decisão PO travada)
+A validação de catálogo **vale apenas para a criação DIRETA de ordem de produto** (`POST /ordens` → `create_order`). O fluxo de **cotação** (`/cotacoes/.../realizar-pedido` → `realize_order`) **NÃO** impõe catálogo: a cotação é uma negociação própria via propostas de vários fornecedores, e impor catálogo ali causaria regressão/scope creep. Tecnicamente, `realize_order` cria a ordem chamando `repository.create_order` **direto** (pula o `service.create_order`), de modo que a regra de catálogo não é exercida nesse caminho.
+
+#### Item avariado não é comprável
+Itens **avariados** (SKU terminando em `-AVARIADO`, convenção de `estoque_service.obter_ou_criar_item_avariado`) **não** podem entrar no catálogo do fornecedor (`400` no `POST .../itens`). São itens gerados internamente pelo estorno de devolução, não produtos vendáveis.
 
 ## Database Schema
 
@@ -248,12 +310,31 @@ Por tipo de NF:
 |--------|------|
 | `id` | UUID PK |
 | `name` | VARCHAR(255) |
-| `document` | VARCHAR(32) (nullable) |
+| `document` | VARCHAR(32) (nullable) — CPF/CNPJ; validado no cadastro |
 | `email` | VARCHAR(255) (nullable) |
 | `phone` | VARCHAR(32) (nullable) |
-| `address` | VARCHAR(500) (nullable) |
+| `address` | VARCHAR(500) (nullable) — endereço legado (texto livre) |
+| `cep` | VARCHAR(9) (nullable) |
+| `street` | VARCHAR(255) (nullable) |
+| `number` | VARCHAR(20) (nullable) |
+| `complement` | VARCHAR(120) (nullable) |
+| `neighborhood` | VARCHAR(120) (nullable) |
+| `city` | VARCHAR(120) (nullable) |
+| `state` | VARCHAR(2) (nullable) |
 | `notes` | TEXT (nullable) |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
+
+### `supplier_items` (catálogo do fornecedor)
+| Coluna | Tipo |
+|--------|------|
+| `id` | UUID PK |
+| `supplier_id` | UUID FK → suppliers (RESTRICT) |
+| `stock_item_id` | UUID FK → stock_items (RESTRICT) |
+| `unit_price` | NUMERIC(12,2) — preço sugerido (sem quantidade; estoque infinito) |
+| `is_active` | BOOLEAN (default TRUE) |
+| `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
+
+UNIQUE parcial `uq_supplier_items_supplier_stock_active` em `(supplier_id, stock_item_id) WHERE deleted_at IS NULL`: um item ativo só aparece uma vez por fornecedor; soft-deletes não colidem (permite re-cadastro). Migrations `0019_supplier_address` (campos de endereço) e `0020_supplier_items` (tabela do catálogo).
 
 ### `purchase_orders`
 | Coluna | Tipo |
@@ -333,7 +414,7 @@ Todos exigem autenticação (`get_current_user`). Prefixo `/api/compras`.
 - `QuotationProposalUpdate`: mesmos campos, todos opcionais (`proposal_items` regenera os itens quando presente).
 - `SelectWinnerRequest`: `proposal_id: UUID`.
 - `CancelQuotationRequest`: `note: str` (1–2000).
-- `RealizeOrderRequest`: `shipping_cost: Decimal? ≥ 0`, `ordered_at: datetime?`, `notes: str?`.
+- `RealizeOrderRequest`: `shipping_cost: Decimal? ≥ 0`, `ordered_at: datetime?`, `notes: str?`, `payment_method: PaymentMethod?`, `installments: int = 1`, `first_due_date: date?`, `installment_interval_days: int = 30`. Os campos de pagamento são **opcionais**; quando informados, são propagados para a Ordem de Compra gerada (relevante para **serviço**, cuja conta a pagar é gerada já no realizar-pedido). Se `payment_method == "parcelado"`, exige `installments >= 2` e `first_due_date` (senão `400`).
 
 **Saída**
 - `QuotationItemOut`: `id`, `stock_item_id`, `stock_item_name`, `quantity`.
@@ -351,6 +432,8 @@ em_andamento ──selecionar-vencedor──▶ aguardando_aprovacao_financeiro 
 
 - **`cancelar`** é possível em qualquer estado exceto os finais (`concluida` / `cancelada`).
 - **`realizar-pedido`** cria a `PurchaseOrder` (via `repository.create_order`), avança-a direto para `aprovada` com `repository._set_status` e grava `quotation.purchase_order_id`.
+  - **Produto:** a ordem nasce `aprovada` e segue o fluxo normal de conferência/recebimento/pagamento (estoque e conta a pagar só na conferência). Registra 1 movimento de auditoria R$ 0,00.
+  - **Serviço (corrigido na Demanda 6):** após criar a ordem `aprovada`, o `realize_order` **reaproveita `complete_service_order`** — a ordem avança para `aguardando_pagamento`, **emite a NF de serviço** e **gera a conta a pagar** (`total_amount` da proposta vencedora), propagando `payment_method`/parcelamento do `RealizeOrderRequest`. O movimento R$ 0,00 de "ordem gerada a partir da cotação" passa a ser registrado **só para produto** (serviço já registra o seu próprio movimento R$ 0,00 em `complete_service_order`), evitando duplicação.
 
 ### Regras de negócio
 
@@ -368,6 +451,13 @@ em_andamento ──selecionar-vencedor──▶ aguardando_aprovacao_financeiro 
 - **Estoque** (`estoque_repo.get_item`): valida itens na criação da cotação.
 - **Financeiro** (`fin_service.registrar_movimento`): movimentações de auditoria nas transições.
 - **Compras / Ordens de Compra** (`repository.create_order` + `_set_status`): a Ordem de Compra gerada segue daí o fluxo normal de conferência/recebimento/pagamento.
+- **Faturamento** (`fat_service.criar_nota_servico`, via `complete_service_order`): cotação de **serviço** emite a NF de serviço já no realizar-pedido.
+
+### Bug corrigido na Demanda 6 — cotação de serviço presa em `aprovada`
+
+**Antes:** ao realizar o pedido de uma cotação de **serviço**, o `realize_order` criava a ordem e a deixava em `aprovada`, mas **nunca** chamava `complete_service_order`. Como o endpoint `/iniciar-conferencia` é restrito a produto e `/concluir-servico` não era acionado, a ordem de serviço ficava **presa em `aprovada`, sem NF de serviço e sem conta a pagar** — o financeiro não tinha o que pagar e a ordem nunca concluía. (A cotação de **produto** não tinha esse problema: nasce `aprovada` e segue para conferência normalmente.)
+
+**Depois:** o `realize_order`, para `order_type == "servico"`, **reaproveita `complete_service_order(db, po.id)`** logo após criar a ordem `aprovada`: a ordem avança para `aguardando_pagamento`, emite a NF de serviço e gera a conta a pagar com o `total_amount` da proposta vencedora (propagando `payment_method`/parcelamento do `RealizeOrderRequest`). O movimento de auditoria R$ 0,00 de "ordem gerada a partir da cotação" passou a ser registrado **apenas para produto**, porque `complete_service_order` já registra o seu próprio movimento R$ 0,00 — evitando movimento duplicado para serviço. Produto segue **sem regressão** (continua nascendo `aprovada` e indo para a conferência).
 
 ## Migrations
 

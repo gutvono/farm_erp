@@ -24,10 +24,15 @@ from app.modules.compras.schemas import (
     RealizeOrderRequest,
     SelectWinnerRequest,
     SupplierCreate,
+    SupplierForStockItemOut,
+    SupplierItemCreate,
+    SupplierItemOut,
+    SupplierItemUpdate,
     SupplierOut,
     SupplierUpdate,
 )
 from app.shared.enums import PurchaseOrderStatus, QuotationStatus
+from app.shared.pagination import Page, PageParams, get_page_params
 from app.shared.responses import SuccessResponse, success
 
 router = APIRouter()
@@ -98,6 +103,92 @@ def delete_supplier(
 ) -> SuccessResponse:
     compras_service.soft_delete_supplier(db, supplier_id)
     return success("Fornecedor removido com sucesso")
+
+
+# ---------------------------------------------------------------------------
+# Supplier Items (catálogo do fornecedor)
+# ---------------------------------------------------------------------------
+
+
+@router.get(
+    "/fornecedores/{supplier_id}/itens",
+    response_model=Page[SupplierItemOut],
+)
+def list_supplier_items(
+    supplier_id: UUID,
+    params: PageParams = Depends(get_page_params),
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> Page[SupplierItemOut]:
+    return compras_service.list_supplier_items(db, supplier_id, params)
+
+
+@router.post(
+    "/fornecedores/{supplier_id}/itens",
+    response_model=SuccessResponse,
+    status_code=201,
+)
+def create_supplier_item(
+    supplier_id: UUID,
+    body: SupplierItemCreate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    item = compras_service.create_supplier_item(db, supplier_id, body)
+    return success(
+        "Item adicionado ao catálogo com sucesso",
+        SupplierItemOut.from_model(item).model_dump(mode="json"),
+    )
+
+
+@router.put(
+    "/fornecedores/{supplier_id}/itens/{item_id}",
+    response_model=SuccessResponse,
+)
+def update_supplier_item(
+    supplier_id: UUID,
+    item_id: UUID,
+    body: SupplierItemUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    item = compras_service.update_supplier_item(db, supplier_id, item_id, body)
+    return success(
+        "Item do catálogo atualizado com sucesso",
+        SupplierItemOut.from_model(item).model_dump(mode="json"),
+    )
+
+
+@router.delete(
+    "/fornecedores/{supplier_id}/itens/{item_id}",
+    response_model=SuccessResponse,
+)
+def delete_supplier_item(
+    supplier_id: UUID,
+    item_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    compras_service.delete_supplier_item(db, supplier_id, item_id)
+    return success("Item removido do catálogo com sucesso")
+
+
+@router.get("/produtos/{stock_item_id}/fornecedores", response_model=SuccessResponse)
+def list_suppliers_for_stock_item(
+    stock_item_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    items = compras_service.list_suppliers_for_stock_item(db, stock_item_id)
+    data = [
+        SupplierForStockItemOut(
+            supplier_id=i.supplier_id,
+            supplier_name=i.supplier.name if i.supplier else "",
+            unit_price=i.unit_price,
+        ).model_dump(mode="json")
+        for i in items
+    ]
+    return success("Fornecedores do produto listados com sucesso", data)
 
 
 # ---------------------------------------------------------------------------

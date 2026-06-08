@@ -24,6 +24,7 @@
 --   b1...  quotation_items (compras)
 --   b2...  quotation_proposals (compras)
 --   b3...  quotation_proposal_items (compras)
+--   b4...  supplier_items (compras — catálogo fornecedor↔item)
 -- =============================================================================
 
 -- -----------------------------------------------------------------------------
@@ -47,10 +48,12 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 3. SUPPLIERS (3)
 -- -----------------------------------------------------------------------------
-INSERT INTO suppliers (id, name, document, email, phone, address, notes) VALUES
-('33333333-3333-3333-3333-333333333001', 'AgroInsumos do Brasil S.A.',      '55.444.333/0001-22', 'vendas@agroinsumos.com.br',  '(31) 3200-4001', 'Rod. Fernão Dias, KM 500 - Betim/MG',  'Fertilizantes, adubos e pesticidas'),
-('33333333-3333-3333-3333-333333333002', 'Fazenda São Pedro Café Verde',    '66.555.444/0001-33', 'comercial@fazendasp.com.br', '(35) 3700-4002', 'Zona Rural - Patrocínio/MG',           'Café verde para beneficiamento'),
-('33333333-3333-3333-3333-333333333003', 'Máquinas Serra Verde Ltda',       '77.666.555/0001-44', 'pecas@serraverde.com.br',    '(35) 3900-4003', 'Av. dos Tratores, 200 - Varginha/MG',  'Máquinas agrícolas e peças')
+-- address (legado, texto livre) mantido; os campos estruturados (cep..state)
+-- são a fonte da verdade do endereço a partir da Demanda 6.
+INSERT INTO suppliers (id, name, document, email, phone, address, cep, street, number, complement, neighborhood, city, state, notes) VALUES
+('33333333-3333-3333-3333-333333333001', 'AgroInsumos do Brasil S.A.',      '55.444.333/0001-00', 'vendas@agroinsumos.com.br',  '(31) 3200-4001', 'Rod. Fernão Dias, KM 500 - Betim/MG',  '32600-000', 'Rodovia Fernão Dias',  'KM 500', 'Galpão 3', 'Distrito Industrial', 'Betim',      'MG', 'Fertilizantes, adubos e pesticidas'),
+('33333333-3333-3333-3333-333333333002', 'Fazenda São Pedro Café Verde',    '66.555.444/0001-00', 'comercial@fazendasp.com.br', '(35) 3700-4002', 'Zona Rural - Patrocínio/MG',           '38740-000', 'Rodovia BR-365',       'S/N',    'Fazenda São Pedro', 'Zona Rural',        'Patrocínio', 'MG', 'Café verde para beneficiamento'),
+('33333333-3333-3333-3333-333333333003', 'Máquinas Serra Verde Ltda',       '77.666.555/0001-00', 'pecas@serraverde.com.br',    '(35) 3900-4003', 'Av. dos Tratores, 200 - Varginha/MG',  '37026-400', 'Avenida dos Tratores', '200',    'Loja A',    'Industrial JK',      'Varginha',   'MG', 'Máquinas agrícolas e peças')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -164,6 +167,32 @@ INSERT INTO app_settings (id, key, value) VALUES
 ('88888888-8888-8888-8888-888888880001', 'harvest_destination_industria_item_id', '55555555-5555-5555-5555-555555555002'),
 ('88888888-8888-8888-8888-888888880002', 'harvest_destination_embalagem_item_id', '55555555-5555-5555-5555-555555555001'),
 ('88888888-8888-8888-8888-888888880003', 'harvest_destination_descarte_item_id',  '55555555-5555-5555-5555-555555555031')
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 6c. SUPPLIER ITEMS (catálogo fornecedor ↔ item de estoque, com preço)
+-- Sem quantidade (estoque do fornecedor = infinito). Preços coerentes com o
+-- unit_cost dos itens. NUNCA itens de descarte/refugo (não são vendáveis).
+-- COBERTURA CRÍTICA: todo item de ordem de compra de PRODUTO do seed precisa
+-- estar no catálogo do fornecedor daquela ordem (senão o Backend invalidaria a
+-- ordem). As ordens de produto do seed são do fornecedor 33...3001 (AgroInsumos)
+-- e usam os itens INS-FERT (5011), INS-ADUB (5012) e INS-PEST (5013) — todos
+-- presentes abaixo no catálogo da AgroInsumos.
+-- -----------------------------------------------------------------------------
+INSERT INTO supplier_items (id, supplier_id, stock_item_id, unit_price, is_active) VALUES
+-- AgroInsumos do Brasil S.A. (insumos) — cobre todas as ordens de produto do seed
+('b4000000-0000-0000-0000-b40000000001', '33333333-3333-3333-3333-333333333001', '55555555-5555-5555-5555-555555555011',     11.50, TRUE),  -- Fertilizante NPK
+('b4000000-0000-0000-0000-b40000000002', '33333333-3333-3333-3333-333333333001', '55555555-5555-5555-5555-555555555012',      7.80, TRUE),  -- Adubo Orgânico
+('b4000000-0000-0000-0000-b40000000003', '33333333-3333-3333-3333-333333333001', '55555555-5555-5555-5555-555555555013',     24.00, TRUE),  -- Pesticida Fungicida
+('b4000000-0000-0000-0000-b40000000004', '33333333-3333-3333-3333-333333333001', '55555555-5555-5555-5555-555555555014',      3.20, TRUE),  -- Calcário Dolomítico
+('b4000000-0000-0000-0000-b40000000005', '33333333-3333-3333-3333-333333333001', '55555555-5555-5555-5555-555555555041',      4.80, TRUE),  -- Saca de Polipropileno 60kg
+-- Fazenda São Pedro Café Verde (cafés verdes para beneficiamento)
+('b4000000-0000-0000-0000-b40000000011', '33333333-3333-3333-3333-333333333002', '55555555-5555-5555-5555-555555555001',    880.00, TRUE),  -- Café Especial
+('b4000000-0000-0000-0000-b40000000012', '33333333-3333-3333-3333-333333333002', '55555555-5555-5555-5555-555555555002',    640.00, TRUE),  -- Café Superior
+('b4000000-0000-0000-0000-b40000000013', '33333333-3333-3333-3333-333333333002', '55555555-5555-5555-5555-555555555003',    440.00, TRUE),  -- Café Tradicional
+-- Máquinas Serra Verde Ltda (máquinas/equipamentos)
+('b4000000-0000-0000-0000-b40000000021', '33333333-3333-3333-3333-333333333003', '55555555-5555-5555-5555-555555555021', 182000.00, TRUE),  -- Trator New Holland T6
+('b4000000-0000-0000-0000-b40000000022', '33333333-3333-3333-3333-333333333003', '55555555-5555-5555-5555-555555555022', 248000.00, TRUE)   -- Colheitadeira Jacto Máster
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

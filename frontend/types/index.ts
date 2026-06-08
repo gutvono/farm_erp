@@ -261,10 +261,45 @@ export interface Supplier {
   document: string | null
   email: string | null
   phone: string | null
+  /** Endereço legado (texto livre) — mantido por compatibilidade. */
   address: string | null
+  /** Endereço estruturado (Demanda 6). */
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   notes: string | null
   created_at: string
   updated_at: string
+}
+
+/**
+ * Item do catálogo de um fornecedor (Demanda 6): o item de estoque que ele
+ * vende, com o preço de referência e o flag de ativo.
+ */
+export interface SupplierItem {
+  id: string
+  supplier_id: string
+  stock_item_id: string
+  stock_item_name: string
+  stock_item_sku: string
+  unit_price: number
+  is_active: boolean
+  created_at: string
+  updated_at: string
+}
+
+/**
+ * Fornecedor que vende um item de estoque, com o preço sugerido do catálogo
+ * (fluxo produto→fornecedor na ordem de compra).
+ */
+export interface SupplierForStockItem {
+  supplier_id: string
+  supplier_name: string
+  unit_price: number
 }
 
 export interface PurchaseOrderItem {
