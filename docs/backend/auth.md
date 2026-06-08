@@ -93,6 +93,31 @@ Lança `401` se cookie ausente ou sessão inválida/expirada.
 - Cookie `secure=True` em produção, `secure=False` em development (controlado via `ENVIRONMENT`)
 - Estrutura preparada para migração para JWT: basta trocar `create_session_token()` e `validate_session()` sem reescrever router/service
 
+## Stack de Hashing
+
+O hashing de senha usa a biblioteca **`bcrypt`** diretamente (`app/core/security.py`):
+`bcrypt.hashpw` / `bcrypt.checkpw` com `gensalt(rounds=12)`. Não há dependência de
+`passlib`/`CryptContext`.
+
+| Item | Valor |
+|------|-------|
+| Biblioteca | `bcrypt = "^5.0.0"` (declarada direta no `pyproject.toml`) |
+| Algoritmo | bcrypt, prefixo `$2b$`, custo (rounds) = 12 |
+| Tamanho do hash | 60 caracteres |
+
+### Limitações conhecidas / Débito técnico
+
+- **Resolvido (2026-06-07): remoção do `passlib`.** O projeto declarava
+  `passlib = {extras=["bcrypt"], version="^1.7.4"}`, mas `passlib` nunca era importado —
+  o código sempre usou `bcrypt` diretamente. Como `passlib` 1.7.4 (última release, sem
+  manutenção) não reconhece a API do `bcrypt ≥ 4.1`, ele emitia o warning
+  `(trapped) error reading bcrypt version` ao carregar seu backend. A correção foi
+  **remover a dependência morta `passlib`** e declarar `bcrypt` diretamente, em vez de
+  fixar o `bcrypt` numa versão antiga para agradar uma lib sem manutenção. Isso elimina o
+  caminho de código do warning na raiz e mantém o `bcrypt` 5.0.0 (mantido). Login e
+  verificação de hash permanecem idênticos.
+- bcrypt trunca senhas em 72 bytes (limitação do algoritmo); não é validado no input hoje.
+
 ## Seed
 
 Usuário padrão para desenvolvimento:

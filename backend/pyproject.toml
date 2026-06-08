@@ -18,7 +18,7 @@ pydantic-settings = "^2.6.1"
 python-multipart = "^0.0.19"
 pillow = "^11.0.0"
 reportlab = "^4.2.5"
-passlib = {extras = ["bcrypt"], version = "^1.7.4"}
+bcrypt = "^5.0.0"
 python-jose = {extras = ["cryptography"], version = "^3.3.0"}
 
 [tool.poetry.group.dev.dependencies]
