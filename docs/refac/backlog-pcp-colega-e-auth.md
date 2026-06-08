@@ -1,8 +1,18 @@
-# Demanda 8 — PCP: Avaliar/absorver melhorias da branch do colega (parking lot)
+# Backlog — PCP do colega (DESCARTADO) + resgate do refac de autenticação
 
-> **Status: BACKLOG / AVALIAÇÃO.** Não é trabalho priorizado ainda. Aqui ficam registradas as
-> melhorias que o colega (Ggiovani047) fez em paralelo no PCP, para a gente decidir **depois**
-> se reimplementa **do nosso jeito** (alinhado ao modelo da Demanda 5) ou descarta.
+> **Status: BACKLOG.** Reorganização **2026-06-07**: deixou de ser a "Demanda 8" (o número 8 agora é o
+> Front-end geral). **Decisão do PO:** a parte de **PCP está DESCARTADA** — o refac de PCP da Demanda 5
+> já cobriu e **superou** estas ideias (reserva por quantidade, recursos da OP) e o **pessoal do PCP
+> aprovou** o nosso resultado. **Não reimplementar.**
+>
+> **Único item salvo:** o **fix de login → refac de autenticação**, promovido a um refac de "toque
+> profissional" (sessão/JWT, expiração, refresh, possivelmente RBAC) a ser **conversado no fim de tudo**,
+> depois da D7 (Comercial) e da D8 (Front geral). Ver a seção "Resgate: autenticação" ao final e a
+> memória do projeto. **Atenção:** a stack de hashing já mudou (bcrypt 5; `create_session_token` é UUID
+> com gancho declarado p/ JWT) e há um gotcha de senha > 72 bytes a tratar antes de ligar cadastro/auth.
+>
+> O conteúdo abaixo (melhorias de PCP do colega) fica só como **registro histórico** do que foi avaliado
+> e por que não entrou.
 
 ## Contexto
 Durante a Demanda 5 (refac do PCP), descobrimos trabalho paralelo do colega em várias branches de
@@ -80,3 +90,26 @@ A definir quando a demanda for priorizada (depende das decisões em aberto acima
 
 > **Sem prompts de agente por enquanto** — é parking lot. Quando priorizar, o PO gera os prompts
 > reaproveitando o que fizer sentido do trabalho do colega, no modelo da Demanda 5.
+
+---
+
+## Resgate: autenticação (ÚNICO item vivo deste backlog)
+
+Tudo acima (PCP) está **descartado**. O que sobrevive é a autenticação, promovida a um **refac de
+fechamento** ("toque profissional") a rodar **depois da D7 e da D8**, conversado com o PO antes de
+especificar. Direção provável (a validar quando priorizar):
+
+- **Sessão de verdade:** hoje `create_session_token` é um UUID com gancho declarado para migrar a **JWT**
+  (`app/core/security.py`). Avaliar JWT com **expiração** + **refresh**, e possivelmente **RBAC** (papéis
+  além do `is_active`).
+- **Login no Chrome (pista do colega):** o problema era cookie cross-origin; a abordagem foi **URL
+  relativa + rewrite proxy do Next** (`/api/* → backend`), que exige `BACKEND_URL=http://backend:8000`
+  no compose e o valor interno na Railway. Reimplementar **do nosso jeito, com o wiring correto** +
+  smoke (login no Chrome, módulos carregando sem 401).
+- **Pré-requisito técnico já conhecido:** a stack de hashing mudou para **bcrypt 5** (D pós-deploy
+  Railway). Há um **gotcha de senha > 72 bytes** (bcrypt 5 levanta `ValueError`; `hash_password` está
+  órfão hoje) que **precisa ser tratado antes** de expor cadastro/troca de senha. Ver a memória do
+  projeto `project_bcrypt5_hash_password_gotcha`.
+
+> **Sem prompts ainda** — quando o PO priorizar este refac, gera os 3 prompts (DBA/BACK/FRONT) no padrão
+> do projeto, cobrindo migração de sessão, wiring do proxy e o tratamento dos 72 bytes.
