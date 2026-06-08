@@ -12,6 +12,7 @@ from app.modules.comercial.schemas import (
     ClientCreate,
     ClientOut,
     ClientUpdate,
+    SaleCancelRequest,
     SaleCreate,
     SaleOut,
     SaleStatusUpdate,
@@ -172,6 +173,22 @@ def update_sale_status(
     sale = comercial_service.update_status(db, sale_id, body.status)
     return success(
         "Status atualizado com sucesso",
+        SaleOut.from_model(sale).model_dump(mode="json"),
+    )
+
+
+@router.post("/vendas/{sale_id}/cancelar", response_model=SuccessResponse)
+def cancel_sale(
+    sale_id: UUID,
+    body: Optional[SaleCancelRequest] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    sale = comercial_service.cancel_sale(
+        db, sale_id, body.reason if body else None
+    )
+    return success(
+        "Venda cancelada com sucesso",
         SaleOut.from_model(sale).model_dump(mode="json"),
     )
 

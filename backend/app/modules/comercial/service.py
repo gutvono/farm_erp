@@ -17,7 +17,13 @@ from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
 from app.modules.faturamento import service as faturamento_service
 from app.modules.financeiro import service as fin_service
-from app.shared.enums import FinancialCategory, MovementType, SaleStatus
+from app.shared.br_documents import validate_document
+from app.shared.enums import (
+    FinancialCategory,
+    InvoiceStatus,
+    MovementType,
+    SaleStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -39,12 +45,23 @@ def _get_sale_or_404(db: Session, sale_id: UUID) -> Sale:
     return sale
 
 
+def _validate_document_or_400(document: Optional[str]) -> None:
+    """Documento é opcional; se informado, precisa ser CPF ou CNPJ válido.
+
+    Mesma régua do cadastro de fornecedor (Demanda 6): reusa
+    ``validate_document`` do ``app.shared.br_documents``.
+    """
+    if document and not validate_document(document):
+        raise HTTPException(status_code=400, detail="CPF/CNPJ inválido")
+
+
 # ---------------------------------------------------------------------------
 # Clients
 # ---------------------------------------------------------------------------
 
 
 def create_client(db: Session, data: ClientCreate) -> Client:
+    _validate_document_or_400(data.document)
     return comercial_repo.create_client(db, data)
 
 
@@ -64,6 +81,9 @@ def get_client(db: Session, client_id: UUID) -> Client:
 
 def update_client(db: Session, client_id: UUID, data: ClientUpdate) -> Client:
     _get_client_or_404(db, client_id)
+    # `document` só é validado quando enviado no payload (PATCH-like).
+    if "document" in data.model_dump(exclude_unset=True):
+        _validate_document_or_400(data.document)
     return comercial_repo.update_client(db, client_id, data)
 
 
@@ -238,6 +258,18 @@ def get_sale(db: Session, sale_id: UUID) -> Sale:
 def update_status(db: Session, sale_id: UUID, new_status: SaleStatus) -> Sale:
     sale = _get_sale_or_404(db, sale_id)
 
+    # Cancelamento é evento fiscal, ancorado na NF: não pode ser feito por uma
+    # troca de status "pelada" (que não estornaria estoque/financeiro). O caminho
+    # correto é a ação "Cancelar venda" (cancel_sale → motor do Faturamento).
+    if new_status == SaleStatus.CANCELADA:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Para cancelar uma venda use a ação 'Cancelar venda', que "
+                "estorna estoque e financeiro."
+            ),
+        )
+
     if sale.status == SaleStatus.CANCELADA:
         raise HTTPException(
             status_code=400,
@@ -251,6 +283,58 @@ def update_status(db: Session, sale_id: UUID, new_status: SaleStatus) -> Sale:
         )
 
     return comercial_repo.update_sale_status(db, sale_id, new_status)
+
+
+def mark_sale_cancelled(db: Session, sale_id: UUID) -> Sale:
+    """Marca a venda como CANCELADA sem disparar estorno.
+
+    Uso **interno** do motor de cancelamento do Faturamento
+    (``_cancelar_nf_venda``), que já orquestra o estorno completo (estoque,
+    contas a receber e cadeia de NFs). NÃO é o caminho público de cancelamento:
+    para cancelar uma venda ponta a ponta use :func:`cancel_sale`. Por isso
+    contorna a guarda de ``update_status`` (que recusa a transição para
+    CANCELADA) e grava o status direto via repository.
+    """
+    return comercial_repo.update_sale_status(db, sale_id, SaleStatus.CANCELADA)
+
+
+def cancel_sale(db: Session, sale_id: UUID, reason: Optional[str] = None) -> Sale:
+    """Cancela uma venda ponta a ponta delegando ao motor do Faturamento.
+
+    Localiza uma NF de venda ativa do ``sale_id`` e chama ``cancelar_fatura``
+    **uma única vez**; o motor (``_cancelar_nf_venda``) devolve o estoque,
+    cancela toda a cadeia de NFs da venda (inclusive parcelas e a NF de
+    transporte), baixa todas as contas a receber, gera os estornos e marca a
+    ``Sale`` como CANCELADA. Não há segundo motor de estorno aqui.
+    """
+    sale = _get_sale_or_404(db, sale_id)
+
+    # Idempotência: venda já cancelada é no-op explícito (sem 2º estorno).
+    if sale.status == SaleStatus.CANCELADA:
+        raise HTTPException(status_code=400, detail="Venda já está cancelada")
+
+    # Integração entre módulos via Service: o Comercial pergunta ao Faturamento
+    # quais NFs pertencem à venda (não acessa o repository do outro módulo).
+    invoices = faturamento_service.get_invoices_by_sale(db, sale_id)
+    venda_invoice = next(
+        (
+            inv
+            for inv in invoices
+            if (inv.invoice_type or "").lower() == "venda"
+            and inv.status != InvoiceStatus.CANCELADA
+        ),
+        None,
+    )
+    if venda_invoice is None:
+        # create_sale sempre emite NF de venda; ausência aqui é estado anômalo.
+        raise HTTPException(
+            status_code=409,
+            detail="Venda sem nota fiscal de venda ativa para cancelar",
+        )
+
+    faturamento_service.cancelar_fatura(db, venda_invoice.id, reason=reason)
+
+    return _get_sale_or_404(db, sale_id)
 
 
 def soft_delete_sale(db: Session, sale_id: UUID) -> Sale:

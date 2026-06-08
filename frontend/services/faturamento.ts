@@ -75,6 +75,7 @@ export async function getFaturas(params?: {
   status?: string
   client_id?: string
   order_id?: string
+  sale_id?: string
 }): Promise<Invoice[]> {
   const response = await apiFetch<ApiResponse<RawInvoice[]>>(
     "/api/faturamento/faturas",
@@ -83,6 +84,7 @@ export async function getFaturas(params?: {
         status: params?.status,
         client_id: params?.client_id,
         order_id: params?.order_id,
+        sale_id: params?.sale_id,
       },
     }
   )

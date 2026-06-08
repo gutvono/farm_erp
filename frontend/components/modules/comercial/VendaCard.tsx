@@ -1,11 +1,14 @@
 "use client"
 
 import { useState } from "react"
-import { ChevronDown, ChevronUp } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ChevronDown, ChevronUp, FileText, XCircle } from "lucide-react"
 import { toast } from "sonner"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader } from "@/components/ui/card"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import {
   Select,
   SelectContent,
@@ -31,7 +34,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
-import { updateVendaStatus } from "@/services/comercial"
+import { cancelarVenda, updateVendaStatus } from "@/services/comercial"
 import { Sale, SaleStatus } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
 
@@ -53,22 +56,26 @@ interface VendaCardProps {
 }
 
 export function VendaCard({ sale, onChanged }: VendaCardProps) {
+  const router = useRouter()
   const [expanded, setExpanded] = useState(false)
   const [updatingStatus, setUpdatingStatus] = useState(false)
   const [pendingStatus, setPendingStatus] = useState<SaleStatus | null>(null)
+  const [cancelOpen, setCancelOpen] = useState(false)
+  const [cancelReason, setCancelReason] = useState("")
+  const [cancelling, setCancelling] = useState(false)
 
-  const isFinal = sale.status === "cancelada"
+  const isCancelled = sale.status === "cancelada"
+
+  function verNotasFiscais() {
+    router.push(`/faturamento?sale_id=${sale.id}`)
+  }
 
   async function confirmStatusChange() {
     if (!pendingStatus) return
     setUpdatingStatus(true)
     try {
       await updateVendaStatus(sale.id, pendingStatus)
-      toast.success(
-        pendingStatus === "entregue"
-          ? "Venda marcada como entregue"
-          : "Venda cancelada"
-      )
+      toast.success("Venda marcada como entregue")
       onChanged()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao atualizar status")
@@ -78,9 +85,27 @@ export function VendaCard({ sale, onChanged }: VendaCardProps) {
     }
   }
 
+  async function confirmCancel() {
+    setCancelling(true)
+    try {
+      await cancelarVenda(sale.id, cancelReason)
+      toast.success("Venda cancelada — estoque e financeiro estornados")
+      onChanged()
+      setCancelOpen(false)
+      setCancelReason("")
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao cancelar venda")
+    } finally {
+      setCancelling(false)
+    }
+  }
+
+  // O cancelamento deixou de ser uma troca de status (Demanda 7): a única
+  // transição de status pela UI é Realizada → Entregue. Cancelar é a ação
+  // dedicada "Cancelar venda", que estorna estoque e financeiro.
   function getAvailableStatuses(): SaleStatus[] {
-    if (sale.status === "realizada") return ["realizada", "entregue", "cancelada"]
-    if (sale.status === "entregue") return ["entregue", "cancelada"]
+    if (sale.status === "realizada") return ["realizada", "entregue"]
+    if (sale.status === "entregue") return ["entregue"]
     return ["cancelada"]
   }
 
@@ -113,7 +138,7 @@ export function VendaCard({ sale, onChanged }: VendaCardProps) {
             <div className="flex items-center gap-2 flex-shrink-0">
               <Select
                 value={sale.status}
-                disabled={isFinal || updatingStatus}
+                disabled={isCancelled || availableStatuses.length <= 1 || updatingStatus}
                 onValueChange={(v) => setPendingStatus(v as SaleStatus)}
               >
                 <SelectTrigger className="w-36">
@@ -127,6 +152,23 @@ export function VendaCard({ sale, onChanged }: VendaCardProps) {
                   ))}
                 </SelectContent>
               </Select>
+
+              <Button size="sm" variant="outline" onClick={verNotasFiscais}>
+                <FileText className="h-3.5 w-3.5 mr-1" />
+                Ver notas fiscais
+              </Button>
+
+              {!isCancelled && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="border-red-200 text-red-600 hover:bg-red-50"
+                  onClick={() => setCancelOpen(true)}
+                >
+                  <XCircle className="h-3.5 w-3.5 mr-1" />
+                  Cancelar venda
+                </Button>
+              )}
 
               <Button variant="ghost" size="icon" onClick={() => setExpanded((v) => !v)}>
                 {expanded ? (
@@ -196,26 +238,61 @@ export function VendaCard({ sale, onChanged }: VendaCardProps) {
         </AlertDialogContent>
       </AlertDialog>
 
-      {/* AlertDialog: cancelar */}
+      {/* AlertDialog: cancelar venda (estorno ponta a ponta) */}
       <AlertDialog
-        open={pendingStatus === "cancelada"}
-        onOpenChange={(open) => !open && setPendingStatus(null)}
+        open={cancelOpen}
+        onOpenChange={(open) => {
+          if (cancelling) return
+          setCancelOpen(open)
+          if (!open) setCancelReason("")
+        }}
       >
         <AlertDialogContent>
           <AlertDialogHeader>
-            <AlertDialogTitle>Cancelar venda?</AlertDialogTitle>
+            <AlertDialogTitle>Cancelar venda de {sale.client_name}?</AlertDialogTitle>
             <AlertDialogDescription>
-              A venda será cancelada. Esta ação não pode ser desfeita.
+              O cancelamento <strong>estorna o estoque e o financeiro</strong>: devolve os itens
+              ao estoque, cancela <strong>todas</strong> as notas fiscais da venda e baixa{" "}
+              <strong>todas</strong> as contas a receber. Esta ação é{" "}
+              <strong>irreversível</strong>.
             </AlertDialogDescription>
           </AlertDialogHeader>
+
+          <div className="space-y-1.5">
+            <Label htmlFor={`cancel-reason-${sale.id}`}>Motivo (opcional)</Label>
+            <Input
+              id={`cancel-reason-${sale.id}`}
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              placeholder="Ex.: desistência do cliente, erro no pedido…"
+              disabled={cancelling}
+            />
+          </div>
+
+          <div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={verNotasFiscais}
+              disabled={cancelling}
+            >
+              <FileText className="h-3.5 w-3.5 mr-1" />
+              Ver notas fiscais antes
+            </Button>
+          </div>
+
           <AlertDialogFooter>
-            <AlertDialogCancel onClick={() => setPendingStatus(null)}>Voltar</AlertDialogCancel>
+            <AlertDialogCancel disabled={cancelling}>Voltar</AlertDialogCancel>
             <AlertDialogAction
-              onClick={confirmStatusChange}
-              disabled={updatingStatus}
+              onClick={(e) => {
+                e.preventDefault()
+                confirmCancel()
+              }}
+              disabled={cancelling}
               className="bg-red-600 hover:bg-red-700"
             >
-              {updatingStatus ? "Cancelando..." : "Cancelar venda"}
+              {cancelling ? "Cancelando..." : "Cancelar venda"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>

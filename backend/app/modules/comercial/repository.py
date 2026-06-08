@@ -23,6 +23,13 @@ def create_client(db: Session, data: ClientCreate) -> Client:
         email=data.email,
         phone=data.phone,
         address=data.address,
+        cep=data.cep,
+        street=data.street,
+        number=data.number,
+        complement=data.complement,
+        neighborhood=data.neighborhood,
+        city=data.city,
+        state=data.state,
         notes=data.notes,
     )
     db.add(client)

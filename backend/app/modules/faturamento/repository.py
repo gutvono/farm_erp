@@ -82,6 +82,7 @@ def list_invoices(
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
     order_id: Optional[UUID] = None,
+    sale_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Invoice]:
@@ -90,6 +91,10 @@ def list_invoices(
         query = query.filter(Invoice.status == status)
     if client_id:
         query = query.filter(Invoice.client_id == client_id)
+    if sale_id:
+        # NFs de venda têm FK real `sale_id` (diferente do `order_id` das NFs de
+        # compra, que é só texto no `notes`).
+        query = query.filter(Invoice.sale_id == sale_id)
     if order_id:
         # NFs de compra não têm FK para a ordem; o vínculo é o texto
         # `order_id=<uuid>` em notes (mesmo padrão de existe_nota_recebimento).
@@ -98,6 +103,19 @@ def list_invoices(
         query.order_by(Invoice.issue_date.desc())
         .offset(skip)
         .limit(limit)
+        .all()
+    )
+    for inv in invoices:
+        _ = inv.items
+    return invoices
+
+
+def list_invoices_by_sale(db: Session, sale_id: UUID) -> list[Invoice]:
+    """Todas as NFs (não deletadas) de uma venda, por ``sale_id``."""
+    invoices = (
+        db.query(Invoice)
+        .filter(Invoice.sale_id == sale_id, Invoice.deleted_at.is_(None))
+        .order_by(Invoice.issue_date.desc())
         .all()
     )
     for inv in invoices:

@@ -257,16 +257,33 @@ def list_invoices(
     status: Optional[InvoiceStatus] = None,
     client_id: Optional[UUID] = None,
     order_id: Optional[UUID] = None,
+    sale_id: Optional[UUID] = None,
     skip: int = 0,
     limit: int = 100,
 ) -> list[Invoice]:
     return fat_repo.list_invoices(
-        db, status=status, client_id=client_id, order_id=order_id, skip=skip, limit=limit
+        db,
+        status=status,
+        client_id=client_id,
+        order_id=order_id,
+        sale_id=sale_id,
+        skip=skip,
+        limit=limit,
     )
 
 
 def get_invoice(db: Session, invoice_id: UUID) -> Invoice:
     return _get_invoice_or_404(db, invoice_id)
+
+
+def get_invoices_by_sale(db: Session, sale_id: UUID) -> list[Invoice]:
+    """Lista todas as NFs vinculadas a uma venda (qualquer tipo/status).
+
+    Ponto de integração para o Comercial localizar a NF de venda e acionar o
+    cancelamento (``cancelar_fatura``) sem acessar o repository do Faturamento
+    diretamente — a integração entre módulos passa pelo Service.
+    """
+    return fat_repo.list_invoices_by_sale(db, sale_id)
 
 
 # ---------------------------------------------------------------------------
@@ -418,9 +435,11 @@ def _cancelar_nf_venda(db: Session, invoice: Invoice, reason: Optional[str]) -> 
             reference_id=sale.id,
         )
 
-    # 2. Cancel the sale.
+    # 2. Cancel the sale. Usa o setter interno (mark_sale_cancelled), e não
+    # update_status, porque update_status agora recusa a transição para
+    # CANCELADA pelo caminho público (Demanda 7) — o estorno é orquestrado aqui.
     if sale.status != SaleStatus.CANCELADA:
-        comercial_service.update_status(db, sale.id, SaleStatus.CANCELADA)
+        comercial_service.mark_sale_cancelled(db, sale.id)
 
     # 3. Cancel all receivables of the sale (+ reverse any amount already received).
     fin_service.cancelar_contas_receber(

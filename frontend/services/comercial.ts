@@ -21,6 +21,13 @@ interface RawClient {
   email: string | null
   phone: string | null
   address: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
   notes: string | null
   is_delinquent: boolean
   created_at: string
@@ -35,11 +42,29 @@ function parseClient(raw: RawClient): Client {
     email: raw.email,
     phone: raw.phone,
     address: raw.address,
+    cep: raw.cep ?? null,
+    street: raw.street ?? null,
+    number: raw.number ?? null,
+    complement: raw.complement ?? null,
+    neighborhood: raw.neighborhood ?? null,
+    city: raw.city ?? null,
+    state: raw.state ?? null,
     notes: raw.notes,
     is_delinquent: raw.is_delinquent,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
+}
+
+/** Campos de endereço estruturado aceitos no cadastro de cliente (Demanda 7). */
+interface ClientAddressInput {
+  cep?: string
+  street?: string
+  number?: string
+  complement?: string
+  neighborhood?: string
+  city?: string
+  state?: string
 }
 
 interface RawSaleItem {
@@ -118,7 +143,7 @@ export async function createCliente(data: {
   phone?: string
   address?: string
   notes?: string
-}): Promise<Client> {
+} & ClientAddressInput): Promise<Client> {
   const response = await apiFetch<ApiResponse<RawClient>>("/api/comercial/clientes", {
     method: "POST",
     body: JSON.stringify(data),
@@ -134,6 +159,13 @@ export async function updateCliente(
     email: string
     phone: string
     address: string
+    cep: string
+    street: string
+    number: string
+    complement: string
+    neighborhood: string
+    city: string
+    state: string
     notes: string
   }>
 ): Promise<Client> {
@@ -208,6 +240,25 @@ export async function updateVendaStatus(id: string, status: SaleStatus): Promise
   const response = await apiFetch<ApiResponse<RawSale>>(
     `/api/comercial/vendas/${id}/status`,
     { method: "PATCH", body: JSON.stringify({ status }) }
+  )
+  return parseSale(response.data)
+}
+
+/**
+ * Cancela uma venda inteira (Demanda 7): delega ao motor do Faturamento, que
+ * estorna estoque, cancela TODAS as NFs da venda, baixa TODAS as contas a
+ * receber e marca a venda como `cancelada`. É irreversível. O `reason` é
+ * opcional. Erros do backend (ex.: 400 "Venda já cancelada") são propagados
+ * verbatim por `apiFetch`.
+ */
+export async function cancelarVenda(id: string, reason?: string): Promise<Sale> {
+  const trimmed = reason?.trim()
+  const response = await apiFetch<ApiResponse<RawSale>>(
+    `/api/comercial/vendas/${id}/cancelar`,
+    {
+      method: "POST",
+      body: JSON.stringify(trimmed ? { reason: trimmed } : {}),
+    }
   )
   return parseSale(response.data)
 }

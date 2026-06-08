@@ -22,6 +22,16 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog"
 import { createVenda } from "@/services/comercial"
 import { Client, PaymentMethod, StockItem } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
@@ -89,6 +99,8 @@ export function VendaForm({
   onSuccess,
 }: VendaFormProps) {
   const [loading, setLoading] = useState(false)
+  const [delinquentConfirmOpen, setDelinquentConfirmOpen] = useState(false)
+  const [pendingData, setPendingData] = useState<FormData | null>(null)
 
   const {
     register,
@@ -167,7 +179,26 @@ export function VendaForm({
     }
   }, [open, reset])
 
-  async function onSubmit(data: FormData) {
+  // Inadimplência = AVISAR, não bloquear (Demanda 7): se o cliente está
+  // inadimplente, pede confirmação antes de finalizar; confirmar prossegue.
+  function onSubmit(data: FormData) {
+    if (selectedClient?.is_delinquent) {
+      setPendingData(data)
+      setDelinquentConfirmOpen(true)
+      return
+    }
+    void createSale(data)
+  }
+
+  function confirmDelinquentSale() {
+    if (!pendingData) return
+    const data = pendingData
+    setDelinquentConfirmOpen(false)
+    setPendingData(null)
+    void createSale(data)
+  }
+
+  async function createSale(data: FormData) {
     setLoading(true)
     try {
       await createVenda({
@@ -197,6 +228,7 @@ export function VendaForm({
   }
 
   return (
+    <>
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
@@ -479,5 +511,32 @@ export function VendaForm({
         </form>
       </DialogContent>
     </Dialog>
+
+      {/* AlertDialog: confirmação de venda para cliente inadimplente */}
+      <AlertDialog
+        open={delinquentConfirmOpen}
+        onOpenChange={(o) => {
+          if (loading) return
+          setDelinquentConfirmOpen(o)
+          if (!o) setPendingData(null)
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Cliente inadimplente</AlertDialogTitle>
+            <AlertDialogDescription>
+              <strong>{selectedClient?.name}</strong> está marcado como inadimplente. Deseja
+              continuar com a venda mesmo assim?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={loading}>Voltar</AlertDialogCancel>
+            <AlertDialogAction onClick={confirmDelinquentSale} disabled={loading}>
+              {loading ? "Criando..." : "Continuar com a venda"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
   )
 }
