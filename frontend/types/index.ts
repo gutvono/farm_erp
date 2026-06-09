@@ -475,6 +475,23 @@ export interface InvoiceItem {
 
 export type InvoiceStatus = "emitida" | "paga" | "cancelada"
 
+/**
+ * Parcela (bloco de cobrança) de uma nota fiscal — Demanda 9.0. Cada parcela é
+ * uma conta a receber (`accounts_receivable`) ligada à nota. Uma venda parcelada
+ * passou a ser **1 nota + N parcelas** (espelha `InvoiceParcelaOut` do backend).
+ */
+export interface InvoiceParcela {
+  id: string
+  number: string
+  installment_number: number
+  installment_total: number
+  due_date: string
+  amount: number
+  amount_received: number
+  status: ReceivableStatus
+  payment_method: PaymentMethod | null
+}
+
 export interface Invoice {
   id: string
   number: string
@@ -493,6 +510,8 @@ export interface Invoice {
   cancelled_at: string | null
   cancellation_reason: string | null
   items: InvoiceItem[]
+  /** Bloco de cobrança (Demanda 9.0): N parcelas (AR) da nota; [] para à vista. */
+  parcelas: InvoiceParcela[]
   created_at: string
   updated_at: string
 }

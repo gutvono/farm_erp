@@ -9,7 +9,7 @@ from sqlalchemy.orm import Session
 
 from app.modules.faturamento import repository as fat_repo
 from app.modules.faturamento.model import Invoice
-from app.modules.faturamento.schemas import InvoiceCreate
+from app.modules.faturamento.schemas import InvoiceCreate, InvoiceOut
 from app.shared.enums import FinancialCategory, InvoiceStatus, MovementType, SaleStatus
 
 
@@ -65,16 +65,6 @@ def _build_sale_invoice_items(db: Session, items: list) -> list[dict]:
     return item_data_list
 
 
-def _calcular_vencimentos(
-    first_due_date: date, installments: int, interval_days: int
-) -> list[date]:
-    """Generate due dates for each installment based on the first date + interval."""
-    return [
-        first_due_date + timedelta(days=interval_days * idx)
-        for idx in range(installments)
-    ]
-
-
 def criar_fatura(
     db: Session,
     *,
@@ -115,66 +105,10 @@ def criar_fatura(
     return invoice
 
 
-def criar_faturas_parceladas(
-    db: Session,
-    *,
-    sale_id: UUID,
-    client_id: UUID,
-    items: list,
-    total_amount: Decimal,
-    installments: int,
-    first_due_date: date,
-    installment_interval_days: int,
-) -> list[Invoice]:
-    """
-    Create one invoice per installment, splitting total_amount equally.
-    Last installment absorbs centavo residual. parent_invoice_id of all
-    subsequent invoices points to the first one in the chain.
-    """
-    from app.modules.financeiro import service as fin_service
-
-    total = Decimal(str(total_amount))
-    base_share = (total / Decimal(installments)).quantize(Decimal("0.01"))
-    last_share = total - (base_share * (installments - 1))
-    due_dates = _calcular_vencimentos(
-        first_due_date, installments, installment_interval_days
-    )
-    item_data_list = _build_sale_invoice_items(db, items)
-
-    created: list[Invoice] = []
-    parent_id: Optional[UUID] = None
-    for idx in range(installments):
-        amount = last_share if idx == installments - 1 else base_share
-        invoice = fat_repo.create_invoice(
-            db,
-            client_id=client_id,
-            items=item_data_list,
-            total_amount=amount,
-            sale_id=sale_id,
-            due_date=due_dates[idx],
-            invoice_type="venda",
-            installment_number=idx + 1,
-            installment_total=installments,
-            parent_invoice_id=parent_id,
-        )
-        if idx == 0:
-            parent_id = invoice.id
-        created.append(invoice)
-
-        fin_service.registrar_movimento(
-            db,
-            movement_type=MovementType.ENTRADA,
-            category=FinancialCategory.VENDA,
-            amount=Decimal("0"),
-            description=(
-                f"Fatura emitida: {invoice.number} "
-                f"(parcela {idx + 1}/{installments})"
-            ),
-            source_module="faturamento",
-            reference_id=invoice.id,
-        )
-
-    return created
+# NOTA (Demanda 9.0): `criar_faturas_parceladas` (que cunhava N notas, uma por
+# parcela) foi REMOVIDA. O modelo agora é 1 nota (total cheio) + N parcelas que
+# vivem só na `accounts_receivable`. A divisão de valores/vencimentos passou a
+# dirigir as AR no `comercial.create_sale` (não mais as notas).
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +208,22 @@ def list_invoices(
 
 def get_invoice(db: Session, invoice_id: UUID) -> Invoice:
     return _get_invoice_or_404(db, invoice_id)
+
+
+def serialize_invoice(db: Session, invoice: Invoice) -> InvoiceOut:
+    """Monta o ``InvoiceOut`` com o bloco de parcelas (AR por `invoice_id`) e o
+    status **derivado** (Demanda 9.0). Parcelas canceladas são omitidas do bloco.
+    Ponto único de serialização usado pelo router."""
+    from app.modules.financeiro import service as fin_service
+    from app.shared.enums import AccountReceivableStatus
+
+    client_name = _get_client_name(db, invoice.client_id)
+    parcelas = [
+        ar
+        for ar in fin_service.get_receivables_by_invoice(db, invoice.id)
+        if ar.status != AccountReceivableStatus.CANCELADA
+    ]
+    return InvoiceOut.from_model(invoice, client_name, parcelas=parcelas)
 
 
 def get_invoices_by_sale(db: Session, sale_id: UUID) -> list[Invoice]:
@@ -449,8 +399,10 @@ def _cancelar_nf_venda(db: Session, invoice: Invoice, reason: Optional[str]) -> 
         estorno_reference_id=invoice.id,
     )
 
-    # 4. Mark every invoice of the chain (same sale_id) cancelled. A transport NF
-    # of this sale also gets its freight reversed.
+    # 4. Cancela as notas da venda (mesmo sale_id). Desde a Demanda 9.0 a venda
+    # tem **1 nota de venda** (não mais N) + a NF de transporte se houver frete;
+    # a iteração cobre as duas e reverte o frete da NF de transporte. As parcelas
+    # (AR) já foram canceladas no passo 3, pelo sale_id.
     chain = (
         db.query(Invoice)
         .filter(Invoice.sale_id == sale.id, Invoice.deleted_at.is_(None))

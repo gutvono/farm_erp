@@ -408,7 +408,15 @@ export function VendaForm({
                       {idx === 0 && <Label className="text-xs">Item</Label>}
                       <Select
                         value={watchedItems[idx]?.stock_item_id ?? ""}
-                        onValueChange={(v) => setValue(`items.${idx}.stock_item_id`, v)}
+                        onValueChange={(v) => {
+                          setValue(`items.${idx}.stock_item_id`, v)
+                          // Preenche o preço com o valor médio (CMP) do produto como
+                          // referência ao selecionar — editável (espelha o Compras).
+                          const selected = stockItems.find((s) => s.id === v)
+                          if (selected) {
+                            setValue(`items.${idx}.unit_price`, selected.unit_cost)
+                          }
+                        }}
                       >
                         <SelectTrigger>
                           <SelectValue placeholder="Selecione" />
@@ -416,7 +424,7 @@ export function VendaForm({
                         <SelectContent>
                           {stockItems.map((s) => (
                             <SelectItem key={s.id} value={s.id}>
-                              {s.name} ({s.quantity_on_hand} {s.unit})
+                              {s.name} — {formatCurrency(s.unit_cost)} ({s.quantity_on_hand} {s.unit})
                             </SelectItem>
                           ))}
                         </SelectContent>

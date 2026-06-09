@@ -114,7 +114,7 @@ export function OrdemForm({
   async function loadCatalog(
     supId: string
   ): Promise<{ ids: Set<string>; prices: Map<string, number> }> {
-    const page = await getCatalogoFornecedor(supId, { page: 1, page_size: 200 })
+    const page = await getCatalogoFornecedor(supId, { page: 1, page_size: 100 })
     const active = page.items.filter((i) => i.is_active)
     const ids = new Set(active.map((i) => i.stock_item_id))
     const prices = new Map(active.map((i) => [i.stock_item_id, i.unit_price]))
@@ -332,7 +332,7 @@ export function OrdemForm({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-4xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>Nova Ordem de Compra</DialogTitle>
         </DialogHeader>

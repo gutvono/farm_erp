@@ -369,17 +369,29 @@ Faturas emitidas (automáticas ou avulsas). Fluxo `emitida → paga → cancelad
 | `issue_date`, `due_date` | `DATE` | Datas |
 | `total_amount` | `NUMERIC(12,2)` | Total |
 | `invoice_type` | `VARCHAR(50)` default `venda` | Tipo: `venda`, `recebimento`, `transporte`, `devolucao`, `folha_pagamento` (NF de folha, Demanda 4). Indexado (`idx_invoices_invoice_type`) para o despacho do cancelamento |
-| `installment_number` | `INTEGER` NULL | Número desta parcela (ex.: 2) |
-| `installment_total` | `INTEGER` NULL | Total de parcelas (ex.: 3) |
-| `parent_invoice_id` | FK `invoices.id` NULL | Fatura-pai em parcelamentos (indexado `ix_invoices_parent_invoice_id`, usado para achar a cadeia parcelada) |
+| `installment_number` | `INTEGER` NULL | **Morto no fluxo de venda (D9.0)** — ver nota abaixo |
+| `installment_total` | `INTEGER` NULL | **Morto no fluxo de venda (D9.0)** — ver nota abaixo |
+| `parent_invoice_id` | FK `invoices.id` NULL | **Morto no fluxo de venda (D9.0)** — fatura-pai em parcelamentos legados (indexado `ix_invoices_parent_invoice_id`) |
 | `cancelled_at` | `TIMESTAMPTZ` NULL | Quando a NF foi cancelada (auditoria do estorno) |
 | `cancellation_reason` | `TEXT` NULL | Motivo/observação do cancelamento |
+
+> **Venda parcelada = 1 invoice + N `accounts_receivable` (Demanda 9.0):** uma venda
+> parcelada gera **UMA única nota** (`total_amount` = total cheio, itens uma vez,
+> `status = emitida`) e **N contas a receber** (as parcelas), todas com `invoice_id`
+> apontando para essa nota e `installment_number/total` na **AR**. A parcela vive na
+> `accounts_receivable`, **não** na camada de nota. Por isso, no fluxo de venda, as
+> colunas `installment_number`/`installment_total`/`parent_invoice_id` da `invoices`
+> ficam **NULL/mortas** (mantidas no schema por compatibilidade/outros tipos de nota;
+> sem migration nesta etapa — decisão: reusar a AR como bloco de parcelas). O status
+> "paga" da nota passa a ser **derivado** das AR (emitida até todas as parcelas
+> recebidas → paga). Venda à vista = caso degenerado: 1 nota + 1 AR.
 
 > **Cancelamento (Demanda 1, migration `0012_invoice_cancel_fields`):** `cancelled_at`
 > e `cancellation_reason` auditam o cancelamento com estorno. São **distintos** de
 > `deleted_at` (soft delete) — o cancelamento mantém a NF visível com `status = cancelada`.
 > Nenhuma tabela nova foi necessária: os estornos reusam `financial_movements`,
-> `stock_movements` e `stock_items` (item AVARIADO).
+> `stock_movements` e `stock_items` (item AVARIADO). A partir da D9.0 o motor cancela
+> **1 nota + todas as AR** da venda (antes iterava N notas pelo `sale_id`).
 
 #### `invoice_items`
 Itens da fatura (CASCADE).
@@ -413,10 +425,17 @@ Contas a pagar. Status: `em_aberto → paga → cancelada`.
 Contas a receber. Status: `em_aberto → quitado | parcialmente_pago → cancelada`.
 O cancelamento por inadimplência marca `clients.is_delinquent = TRUE`.
 
+A partir da **Demanda 9.0**, a `accounts_receivable` **é a parcela** da venda: numa
+venda parcelada Nx há N linhas com o mesmo `invoice_id` (a nota única) e mesmo
+`sale_id`, `installment_number` 1..N e `installment_total` N. O bloco de cobrança da
+nota é a lista de AR dela (ver nota em `invoices`). Numa venda à vista há 1 AR (1/1).
+
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
-| `installment_number` | `INTEGER` NULL | Número desta parcela |
-| `installment_total` | `INTEGER` NULL | Total de parcelas |
+| `invoice_id` | FK `invoices.id` NULL (SET NULL) | Nota única da venda (todas as parcelas da venda apontam para ela) |
+| `sale_id` | FK `sales.id` NULL (SET NULL) | Venda de origem |
+| `installment_number` | `INTEGER` NULL | Número desta parcela (1..N) |
+| `installment_total` | `INTEGER` NULL | Total de parcelas (N) |
 | `payment_method` | ENUM `payment_method` NULL | Forma de pagamento utilizada |
 
 ---

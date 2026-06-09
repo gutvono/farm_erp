@@ -264,35 +264,45 @@ INSERT INTO plot_activities (id, plot_id, activity_type, activity_date, labor_ty
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 10. SALES (2)
--- Venda 1: Cliente 1, 10 especial + 20 superior = R$ 22.000 (entregue)
--- Venda 2: Cliente 2, 15 superior + 30 tradicional = R$ 23.250 (realizada)
+-- 10. SALES (3)
+-- Venda 1: Cliente 1, 10 especial + 20 superior = R$ 22.000 (entregue, à vista)
+-- Venda 2: Cliente 2, 15 superior + 30 tradicional = R$ 23.250 (realizada, à vista)
+-- Venda 3: Cliente 1, 5 superior = R$ 3.000 (realizada, PARCELADA 3x)
+--   Modelo D9.0: venda parcelada = 1 nota (total cheio) + N accounts_receivable
+--   (parcelas). As 3 parcelas vivem na AR, todas apontando para a NF-0003.
 -- -----------------------------------------------------------------------------
-INSERT INTO sales (id, client_id, status, total_amount, sold_at, delivered_at, notes) VALUES
-('99999999-9999-9999-9999-999999999001', '22222222-2222-2222-2222-222222222001', 'entregue',  22000.00, '2026-02-20 10:00:00-03', '2026-02-22 15:00:00-03', 'Venda entregue e paga'),
-('99999999-9999-9999-9999-999999999002', '22222222-2222-2222-2222-222222222002', 'realizada', 23250.00, '2026-03-15 11:30:00-03', NULL,                      'Venda em aberto, aguardando pagamento')
+INSERT INTO sales (id, client_id, status, total_amount, sold_at, delivered_at, notes, installments, first_due_date, installment_interval_days, payment_method) VALUES
+('99999999-9999-9999-9999-999999999001', '22222222-2222-2222-2222-222222222001', 'entregue',  22000.00, '2026-02-20 10:00:00-03', '2026-02-22 15:00:00-03', 'Venda entregue e paga',                1, NULL,         30, 'a_vista'),
+('99999999-9999-9999-9999-999999999002', '22222222-2222-2222-2222-222222222002', 'realizada', 23250.00, '2026-03-15 11:30:00-03', NULL,                      'Venda em aberto, aguardando pagamento', 1, NULL,         30, 'a_vista'),
+('99999999-9999-9999-9999-999999999003', '22222222-2222-2222-2222-222222222001', 'realizada',  3000.00, '2026-04-10 09:00:00-03', NULL,                      'Venda parcelada 3x (1 nota + 3 parcelas)', 3, '2026-05-10', 30, 'parcelado')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO sale_items (id, sale_id, stock_item_id, description, quantity, unit_price, subtotal) VALUES
 ('99999999-9999-9999-9999-999999999011', '99999999-9999-9999-9999-999999999001', '55555555-5555-5555-5555-555555555001', 'Café Especial - 10 sacas',    10.000, 1000.00, 10000.00),
 ('99999999-9999-9999-9999-999999999012', '99999999-9999-9999-9999-999999999001', '55555555-5555-5555-5555-555555555002', 'Café Superior - 20 sacas',    20.000,  600.00, 12000.00),
 ('99999999-9999-9999-9999-999999999021', '99999999-9999-9999-9999-999999999002', '55555555-5555-5555-5555-555555555002', 'Café Superior - 15 sacas',    15.000,  650.00,  9750.00),
-('99999999-9999-9999-9999-999999999022', '99999999-9999-9999-9999-999999999002', '55555555-5555-5555-5555-555555555003', 'Café Tradicional - 30 sacas', 30.000,  450.00, 13500.00)
+('99999999-9999-9999-9999-999999999022', '99999999-9999-9999-9999-999999999002', '55555555-5555-5555-5555-555555555003', 'Café Tradicional - 30 sacas', 30.000,  450.00, 13500.00),
+('99999999-9999-9999-9999-999999999031', '99999999-9999-9999-9999-999999999003', '55555555-5555-5555-5555-555555555002', 'Café Superior - 5 sacas',      5.000,  600.00,  3000.00)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 11. INVOICES (2) - uma por venda
+-- 11. INVOICES (3) - UMA nota por venda (inclusive a parcelada: 1 nota, total cheio)
+-- NF-0003 cobre a venda parcelada 3x: total cheio R$ 3.000, status 'emitida' (nem
+-- todas as parcelas quitadas), itens UMA vez. installment_*/parent_invoice_id ficam
+-- NULL no fluxo de venda — a parcela vive na accounts_receivable (modelo D9.0).
 -- -----------------------------------------------------------------------------
 INSERT INTO invoices (id, number, client_id, sale_id, issue_date, due_date, total_amount, status, notes) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'NF-0001', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999001', '2026-02-20', '2026-02-25', 22000.00, 'paga',    'Fatura paga em 2026-02-25'),
-('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'NF-0002', '22222222-2222-2222-2222-222222222002', '99999999-9999-9999-9999-999999999002', '2026-03-15', '2026-04-15', 23250.00, 'emitida', 'Aguardando recebimento')
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'NF-0002', '22222222-2222-2222-2222-222222222002', '99999999-9999-9999-9999-999999999002', '2026-03-15', '2026-04-15', 23250.00, 'emitida', 'Aguardando recebimento'),
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'NF-0003', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999003', '2026-04-10', '2026-05-10',  3000.00, 'emitida', 'Venda parcelada 3x - bloco de parcelas na AR (AR-0004/0005/0006)')
 ON CONFLICT (id) DO NOTHING;
 
 INSERT INTO invoice_items (id, invoice_id, description, quantity, unit_price, subtotal) VALUES
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0011', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'Café Especial - 10 sacas',    10.000, 1000.00, 10000.00),
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0012', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'Café Superior - 20 sacas',    20.000,  600.00, 12000.00),
 ('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0021', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Café Superior - 15 sacas',    15.000,  650.00,  9750.00),
-('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0022', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Café Tradicional - 30 sacas', 30.000,  450.00, 13500.00)
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0022', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Café Tradicional - 30 sacas', 30.000,  450.00, 13500.00),
+('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0031', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'Café Superior - 5 sacas',      5.000,  600.00,  3000.00)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -305,13 +315,20 @@ INSERT INTO accounts_payable (id, number, supplier_id, purchase_order_id, descri
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
--- 13. ACCOUNTS RECEIVABLE (3)
--- AR-0001: Venda 1 quitada. AR-0002: Venda 2 em aberto. AR-0003: Dona Rita cancelada.
+-- 13. ACCOUNTS RECEIVABLE (6)
+-- AR-0001: Venda 1 quitada (à vista). AR-0002: Venda 2 em aberto (à vista).
+-- AR-0003: Dona Rita cancelada.
+-- AR-0004/0005/0006: as 3 PARCELAS da Venda 3 (parcelada 3x) — todas com o mesmo
+--   invoice_id (NF-0003) e sale_id; parcela 1 quitada, 2 e 3 em aberto. Modelo
+--   D9.0: a parcela vive aqui na AR (installment_number/total), não em N notas.
 -- -----------------------------------------------------------------------------
-INSERT INTO accounts_receivable (id, number, client_id, sale_id, invoice_id, description, amount, amount_received, due_date, received_at, status, notes) VALUES
-('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001', 'AR-0001', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'Recebimento da Venda NF-0001',      22000.00, 22000.00, '2026-02-25', '2026-02-25 14:30:00-03', 'quitado',   NULL),
-('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0002', 'AR-0002', '22222222-2222-2222-2222-222222222002', '99999999-9999-9999-9999-999999999002', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Recebimento da Venda NF-0002',      23250.00,     0.00, '2026-04-15', NULL,                     'em_aberto', NULL),
-('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0003', 'AR-0003', '22222222-2222-2222-2222-222222222003', NULL,                                   NULL,                                   'Conta cancelada - inadimplência',   1500.00,     0.00, '2026-03-10', NULL,                     'cancelada', 'Cliente marcado como inadimplente')
+INSERT INTO accounts_receivable (id, number, client_id, sale_id, invoice_id, description, amount, amount_received, due_date, received_at, status, installment_number, installment_total, payment_method, notes) VALUES
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0001', 'AR-0001', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999001', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0001', 'Recebimento da Venda NF-0001',      22000.00, 22000.00, '2026-02-25', '2026-02-25 14:30:00-03', 'quitado',   1, 1, 'a_vista',   NULL),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0002', 'AR-0002', '22222222-2222-2222-2222-222222222002', '99999999-9999-9999-9999-999999999002', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0002', 'Recebimento da Venda NF-0002',      23250.00,     0.00, '2026-04-15', NULL,                     'em_aberto', 1, 1, 'a_vista',   NULL),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0003', 'AR-0003', '22222222-2222-2222-2222-222222222003', NULL,                                   NULL,                                   'Conta cancelada - inadimplência',   1500.00,     0.00, '2026-03-10', NULL,                     'cancelada', 1, 1, 'a_vista',   'Cliente marcado como inadimplente'),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0004', 'AR-0004', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999003', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'Venda NF-0003 - parcela 1/3',        1000.00,  1000.00, '2026-05-10', '2026-05-10 14:00:00-03', 'quitado',   1, 3, 'parcelado', NULL),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0005', 'AR-0005', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999003', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'Venda NF-0003 - parcela 2/3',        1000.00,     0.00, '2026-06-09', NULL,                     'em_aberto', 2, 3, 'parcelado', NULL),
+('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbb0006', 'AR-0006', '22222222-2222-2222-2222-222222222001', '99999999-9999-9999-9999-999999999003', 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaa0003', 'Venda NF-0003 - parcela 3/3',        1000.00,     0.00, '2026-07-09', NULL,                     'em_aberto', 3, 3, 'parcelado', NULL)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

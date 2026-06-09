@@ -232,13 +232,20 @@ Executado em sequência no `service.create_sale()`:
    em `amount=0` / `AJUSTE` — a receita é registrada apenas no recebimento da
    Conta a Receber.
 
-4. **Fatura(s)** — depende de `installments`:
-   - **`installments <= 1` (à vista, default — fluxo inalterado):** uma única fatura via `faturamento_service.criar_fatura(...)` com `invoice_type="venda"`, `due_date = today + 30d`.
-   - **`installments >= 2` (parcelado):** N faturas via `faturamento_service.criar_faturas_parceladas(...)`, uma por parcela. `total_amount` é dividido igualmente; a última parcela absorve o resíduo de centavos. Cada fatura recebe `installment_number`, `installment_total` e `parent_invoice_id` apontando para a primeira (a primeira tem `parent_invoice_id = None`). Vencimentos = `first_due_date + n * installment_interval_days`.
+4. **1 Nota Fiscal (Demanda 9.0)** — **sempre uma** nota de venda via
+   `faturamento_service.criar_fatura(...)`, com o **total cheio** e os itens **uma vez**
+   (`invoice_type="venda"`), emitida **no ato da venda** (invariante de timing). Não há mais
+   `criar_faturas_parceladas` nem N notas. Retorna a nota; o `invoice.id` liga as parcelas.
 
-5. **Conta(s) a Receber**:
-   - **À vista:** uma conta com `due_date = today + 30d`.
-   - **Parcelado:** uma conta por parcela, cada uma vinculada à sua fatura (`invoice_id`), com `installment_number`, `installment_total` e `due_date` espelhando o vencimento da fatura.
+5. **Conta(s) a Receber = as parcelas** — todas apontando `invoice_id` para a **nota única**:
+   - **À vista (`installments <= 1`):** 1 AR com o total, `due_date = first_due_date` ou
+     `today + 30d`.
+   - **Parcelado (`installments >= 2`):** N AR (parcelas). `total_amount` dividido em
+     `base_share` iguais; a **última parcela absorve o centavo residual** (soma fecha exata).
+     Cada AR recebe `installment_number` (1-based), `installment_total`, `payment_method` e
+     `due_date = first_due_date + n * installment_interval_days`. A divisão é feita no
+     Comercial (`_calcular_vencimentos` migrou do Faturamento na 9.0).
+   - As parcelas vivem **só na AR**; `invoice.installment_*`/`parent_invoice_id` ficam mortos.
 
 6. **NF de Transporte** (somente se `shipping_cost > 0`) — via `faturamento_service.criar_nota_transporte(...)` com `sale_id`, `client_id`, sempre à vista (1 item, `quantity=1`, `unit_price=shipping_cost`), independente de a venda ser parcelada. Emitida após a(s) fatura(s) de itens.
 

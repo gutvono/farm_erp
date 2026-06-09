@@ -443,6 +443,15 @@ def list_receivables(db: Session, **filters) -> list[AccountReceivable]:
     return fin_repo.list_receivables(db, **filters)
 
 
+def get_receivables_by_invoice(
+    db: Session, invoice_id: UUID
+) -> list[AccountReceivable]:
+    """AR (parcelas) ligadas a uma nota por `invoice_id`. Ponto de integração
+    para o Faturamento montar o bloco de parcelas da nota (Demanda 9.0) sem
+    acessar o repository do Financeiro diretamente."""
+    return fin_repo.list_receivables_by_refs(db, invoice_id=invoice_id)
+
+
 def list_receivables_paginated(
     db: Session,
     *,
