@@ -47,99 +47,146 @@ export function HoleritePDF({ entry, period, employee }: HoleritePDFProps) {
       const cpf = employee?.cpf ?? "—"
       const role = employee?.position_name ?? "—"
 
-      // Cabeçalho
-      doc.setFontSize(18)
+      doc.setFillColor(16, 185, 129)
+      doc.roundedRect(20, 12, 16, 16, 3, 3, "F")
+      doc.setTextColor(255, 255, 255)
       doc.setFont("helvetica", "bold")
-      doc.text("Coffee Farm ERP", 105, 20, { align: "center" })
-      doc.setFontSize(14)
-      doc.text("Holerite", 105, 28, { align: "center" })
+      doc.setFontSize(9)
+      doc.text("CF", 28, 22, { align: "center" })
 
-      doc.setLineWidth(0.5)
-      doc.line(20, 32, 190, 32)
-
-      // Período
-      doc.setFontSize(11)
-      doc.setFont("helvetica", "bold")
-      doc.text("Período:", 20, 42)
+      doc.setTextColor(15, 23, 42)
+      doc.setFontSize(13)
+      doc.text("Coffee Farm ERP", 40, 18)
       doc.setFont("helvetica", "normal")
-      doc.text(`${monthLabel} / ${period.reference_year}`, 50, 42)
-
-      // Funcionário
-      doc.setFont("helvetica", "bold")
-      doc.text("Funcionário:", 20, 52)
-      doc.setFont("helvetica", "normal")
-      doc.text(entry.employee_name, 50, 52)
+      doc.setFontSize(9)
+      doc.text("Folha de pagamento", 40, 25)
 
       doc.setFont("helvetica", "bold")
-      doc.text("CPF:", 20, 60)
+      doc.setFontSize(16)
+      doc.text("Holerite", 190, 18, { align: "right" })
       doc.setFont("helvetica", "normal")
-      doc.text(cpf, 50, 60)
+      doc.setFontSize(10)
+      doc.text(`Competência: ${monthLabel} / ${period.reference_year}`, 190, 25, {
+        align: "right",
+      })
 
+      doc.setLineWidth(0.4)
+      doc.setDrawColor(203, 213, 225)
+      doc.line(20, 34, 190, 34)
+
+      doc.setFontSize(10)
+      doc.setTextColor(15, 23, 42)
       doc.setFont("helvetica", "bold")
-      doc.text("Cargo:", 20, 68)
+      doc.text("Funcionário", 20, 44)
+      doc.text("CPF", 20, 52)
+      doc.text("Cargo", 112, 44)
+      doc.text("Contrato", 112, 52)
       doc.setFont("helvetica", "normal")
-      doc.text(role, 50, 68)
+      doc.text(entry.employee_name, 48, 44)
+      doc.text(cpf, 48, 52)
+      doc.text(role, 136, 44)
+      doc.text(CONTRACT_LABEL[entry.contract_type] ?? entry.contract_type, 136, 52)
 
+      const rows =
+        entry.items.length > 0
+          ? entry.items
+          : [
+              {
+                event_description: "Salário base",
+                event_type: "provento",
+                affects_net: true,
+                amount: entry.base_salary,
+              },
+              {
+                event_description: "Horas extras",
+                event_type: "provento",
+                affects_net: true,
+                amount: entry.overtime_amount,
+              },
+              {
+                event_description: "Descontos",
+                event_type: "desconto",
+                affects_net: true,
+                amount: entry.deductions,
+              },
+            ]
+
+      const xDescription = 22
+      const xEarnings = 116
+      const xBenefits = 153
+      const xDeductions = 188
+
+      doc.setFillColor(241, 245, 249)
+      doc.rect(20, 64, 170, 10, "F")
       doc.setFont("helvetica", "bold")
-      doc.text("Contrato:", 20, 76)
-      doc.setFont("helvetica", "normal")
-      doc.text(CONTRACT_LABEL[entry.contract_type] ?? entry.contract_type, 50, 76)
-
-      // Tabela
-      doc.line(20, 84, 190, 84)
-      doc.setFont("helvetica", "bold")
-      doc.text("Descrição", 22, 92)
-      doc.text("Valor (R$)", 188, 92, { align: "right" })
-      doc.line(20, 96, 190, 96)
+      doc.setFontSize(9)
+      doc.text("Descrição", xDescription, 70)
+      doc.text("Proventos", xEarnings, 70, { align: "right" })
+      doc.text("Benefícios", xBenefits, 70, { align: "right" })
+      doc.text("Descontos", xDeductions, 70, { align: "right" })
 
       doc.setFont("helvetica", "normal")
-      let y = 104
-      if (entry.items.length > 0) {
-        for (const item of entry.items) {
-          const isDiscount = item.event_type === "desconto"
-          const isInformative = item.event_type === "informativo" || !item.affects_net
-          const prefix = isDiscount ? "- " : isInformative ? "" : "+ "
-          const suffix = isInformative ? " (informativo)" : ""
+      let y = 82
+      for (const item of rows) {
+        if (item.amount <= 0) continue
+        const isEarning = item.event_type === "provento" && item.affects_net
+        const isDiscount = item.event_type === "desconto" && item.affects_net
+        const isBenefit = item.event_type === "informativo" || !item.affects_net
 
-          doc.text(`${item.event_description}${suffix}`, 22, y)
-          doc.text(`${prefix}${formatCurrency(item.amount)}`, 188, y, {
-            align: "right",
-          })
-          y += 8
-        }
-      } else {
-        doc.text("Salário base", 22, y)
-        doc.text(formatCurrency(entry.base_salary), 188, y, { align: "right" })
-
-        y += 8
-        doc.text("Horas extras", 22, y)
-        doc.text(`+ ${formatCurrency(entry.overtime_amount)}`, 188, y, { align: "right" })
-
-        y += 8
-        doc.text("Descontos", 22, y)
-        doc.text(`- ${formatCurrency(entry.deductions)}`, 188, y, { align: "right" })
-        y += 8
+        const description = doc.splitTextToSize(item.event_description, 78)
+        doc.setTextColor(15, 23, 42)
+        doc.text(description, xDescription, y)
+        doc.setTextColor(22, 101, 52)
+        doc.text(isEarning ? formatCurrency(item.amount) : "-", xEarnings, y, {
+          align: "right",
+        })
+        doc.setTextColor(29, 78, 216)
+        doc.text(isBenefit ? formatCurrency(item.amount) : "-", xBenefits, y, {
+          align: "right",
+        })
+        doc.setTextColor(185, 28, 28)
+        doc.text(isDiscount ? formatCurrency(item.amount) : "-", xDeductions, y, {
+          align: "right",
+        })
+        y += Math.max(7, description.length * 5)
       }
 
-      y += 4
+      y += 2
+      doc.setDrawColor(203, 213, 225)
       doc.line(20, y, 190, y)
       y += 8
       doc.setFont("helvetica", "bold")
-      doc.setFontSize(12)
-      doc.text("Total líquido", 22, y)
-      doc.text(formatCurrency(entry.total_amount), 188, y, { align: "right" })
+      doc.setTextColor(15, 23, 42)
+      doc.text("Subtotais", xDescription, y)
+      doc.setTextColor(22, 101, 52)
+      doc.text(formatCurrency(entry.total_earnings), xEarnings, y, { align: "right" })
+      doc.setTextColor(29, 78, 216)
+      doc.text(formatCurrency(entry.total_informative), xBenefits, y, { align: "right" })
+      doc.setTextColor(185, 28, 28)
+      doc.text(formatCurrency(entry.total_deductions), xDeductions, y, {
+        align: "right",
+      })
 
-      // Pagamento
+      y += 12
+      doc.setTextColor(15, 23, 42)
+      doc.setFontSize(11)
+      doc.text("Total líquido (Proventos - Descontos)", xDescription, y)
+      doc.text(formatCurrency(entry.total_amount), xDeductions, y, { align: "right" })
+      y += 8
+      doc.setFont("helvetica", "normal")
+      doc.setFontSize(10)
+      doc.text("Total de benefícios", xDescription, y)
+      doc.text(formatCurrency(entry.total_informative), xDeductions, y, {
+        align: "right",
+      })
+
       if (entry.paid_at) {
-        y += 14
-        doc.setFontSize(11)
-        doc.setFont("helvetica", "normal")
+        y += 12
         doc.text(`Pago em: ${formatDateTime(entry.paid_at)}`, 20, y)
       }
 
-      // Rodapé
       doc.setFontSize(9)
-      doc.setTextColor(120)
+      doc.setTextColor(100)
       doc.text(`Documento gerado em ${formatDate(new Date().toISOString())}`, 105, 280, {
         align: "center",
       })

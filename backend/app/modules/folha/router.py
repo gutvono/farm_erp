@@ -124,6 +124,11 @@ def create_employee(
     email: Optional[str] = Form(default=None),
     phone: Optional[str] = Form(default=None),
     termination_cost_override: Optional[Decimal] = Form(default=None),
+    transport_voucher_cost: Optional[Decimal] = Form(default=None, ge=0),
+    meal_voucher_value: Optional[Decimal] = Form(default=None, ge=0),
+    pharmacy_voucher_value: Optional[Decimal] = Form(default=None, ge=0),
+    life_insurance_value: Optional[Decimal] = Form(default=None, ge=0),
+    dependents_count: int = Form(default=0, ge=0),
     photo_file: Optional[UploadFile] = File(default=None),
     db: Session = Depends(get_db),
     _: User = Depends(get_current_user),
@@ -140,6 +145,11 @@ def create_employee(
         admission_date=admission_date,
         photo_file=photo_file,
         termination_cost_override=termination_cost_override,
+        transport_voucher_cost=transport_voucher_cost,
+        meal_voucher_value=meal_voucher_value,
+        pharmacy_voucher_value=pharmacy_voucher_value,
+        life_insurance_value=life_insurance_value,
+        dependents_count=dependents_count,
     )
     return success(
         "Funcionário criado com sucesso",
@@ -158,6 +168,20 @@ def get_employee(
         "Funcionário obtido com sucesso",
         folha_service.serialize_employee(employee),
     )
+
+
+@router.get(
+    "/funcionarios/{employee_id}/holerites", response_model=SuccessResponse
+)
+def list_employee_payslips(
+    employee_id: UUID,
+    year: Optional[int] = None,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    payslips = folha_service.list_employee_payslips(db, employee_id, year)
+    data = [folha_service.serialize_employee_payslip(p) for p in payslips]
+    return success("Holerites do funcionário listados com sucesso", data)
 
 
 @router.put("/funcionarios/{employee_id}", response_model=SuccessResponse)

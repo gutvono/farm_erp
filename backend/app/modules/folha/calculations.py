@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from datetime import time
+import calendar
+from datetime import date, time
 from decimal import Decimal, ROUND_HALF_UP
 from typing import Iterable, Mapping, Sequence
 
@@ -27,6 +28,39 @@ DEFAULT_INSS_TABLE: tuple[dict[str, Decimal], ...] = (
         "lower": Decimal("4354.27"),
         "upper": Decimal("8475.55"),
         "rate": Decimal("14"),
+    },
+)
+DEPENDENT_DEDUCTION = Decimal("189.59")
+DEFAULT_IRRF_TABLE: tuple[dict[str, Decimal | None], ...] = (
+    {
+        "lower": Decimal("0.00"),
+        "upper": Decimal("2259.20"),
+        "rate": Decimal("0"),
+        "deduction": Decimal("0.00"),
+    },
+    {
+        "lower": Decimal("2259.20"),
+        "upper": Decimal("2826.65"),
+        "rate": Decimal("7.5"),
+        "deduction": Decimal("169.44"),
+    },
+    {
+        "lower": Decimal("2826.65"),
+        "upper": Decimal("3751.05"),
+        "rate": Decimal("15"),
+        "deduction": Decimal("381.44"),
+    },
+    {
+        "lower": Decimal("3751.05"),
+        "upper": Decimal("4664.68"),
+        "rate": Decimal("22.5"),
+        "deduction": Decimal("662.77"),
+    },
+    {
+        "lower": Decimal("4664.68"),
+        "upper": None,
+        "rate": Decimal("27.5"),
+        "deduction": Decimal("896.00"),
     },
 )
 
@@ -150,6 +184,35 @@ def calculate_inss(
     return _money(inss)
 
 
+def calculate_irrf(
+    taxable_base: Decimal | int | float | str,
+    inss_amount: Decimal | int | float | str,
+    dependents: int = 0,
+    table: Iterable[Mapping[str, Decimal | None]] | None = None,
+) -> Decimal:
+    taxable_base_dec = _decimal(taxable_base)
+    inss_amount_dec = _decimal(inss_amount)
+    _require_non_negative("taxable_base", taxable_base_dec)
+    _require_non_negative("inss_amount", inss_amount_dec)
+    if dependents < 0:
+        raise ValueError("dependents must be greater than or equal to zero")
+
+    base = taxable_base_dec - inss_amount_dec - (DEPENDENT_DEDUCTION * dependents)
+    base = max(Decimal("0"), base)
+
+    for bracket in table or DEFAULT_IRRF_TABLE:
+        lower = _decimal(bracket["lower"])
+        upper_raw = bracket["upper"]
+        upper = None if upper_raw is None else _decimal(upper_raw)
+        rate = _decimal(bracket["rate"])
+        deduction = _decimal(bracket["deduction"])
+        if base > lower and (upper is None or base <= upper):
+            tax = (base * rate / Decimal("100")) - deduction
+            return max(Decimal("0"), _money(tax))
+
+    return Decimal("0.00")
+
+
 def calculate_fgts(
     base_amount: Decimal | int | float | str,
     percentage: Decimal | int | float | str = Decimal("8"),
@@ -172,3 +235,32 @@ def calculate_transport_voucher(
 
     legal_cap = base_salary_dec * Decimal("0.06")
     return _money(min(real_transport_cost_dec, legal_cap))
+
+
+def calculate_proportional_salary(
+    base_salary: Decimal | int | float | str,
+    hire_date: date,
+    termination_date: date | None,
+    month: int,
+    year: int,
+) -> Decimal:
+    base_salary_dec = _decimal(base_salary)
+    _require_non_negative("base_salary", base_salary_dec)
+
+    days_in_month = calendar.monthrange(year, month)[1]
+    period_start = date(year, month, 1)
+    period_end = date(year, month, days_in_month)
+
+    if hire_date > period_end:
+        return Decimal("0.00")
+    if termination_date and termination_date < period_start:
+        return Decimal("0.00")
+
+    start_date = max(period_start, hire_date)
+    end_date = min(period_end, termination_date) if termination_date else period_end
+    if end_date < start_date:
+        return Decimal("0.00")
+
+    worked_days = (end_date - start_date).days + 1
+    factor = Decimal(worked_days) / Decimal(days_in_month)
+    return _money(base_salary_dec * factor)

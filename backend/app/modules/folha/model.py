@@ -78,6 +78,11 @@ class Employee(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
     hire_date = Column(Date, nullable=False)
     termination_date = Column(Date, nullable=True)
     termination_cost_override = Column(Numeric(12, 2), nullable=True)
+    transport_voucher_cost = Column(Numeric(12, 2), nullable=True)
+    meal_voucher_value = Column(Numeric(12, 2), nullable=True)
+    pharmacy_voucher_value = Column(Numeric(12, 2), nullable=True)
+    life_insurance_value = Column(Numeric(12, 2), nullable=True)
+    dependents_count = Column(Integer, nullable=False, default=0, server_default="0")
     photo_path = Column(String(500), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True, index=True)
 

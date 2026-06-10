@@ -1,12 +1,16 @@
 from decimal import Decimal
+from datetime import date
+from types import SimpleNamespace
 
 import pytest
 
 from app.modules.folha.calculations import (
     calculate_fgts,
     calculate_inss,
+    calculate_irrf,
     calculate_night_shift,
     calculate_overtime,
+    calculate_proportional_salary,
     calculate_transport_voucher,
 )
 
@@ -68,3 +72,71 @@ def test_night_shift_rural_crossing_day_boundary() -> None:
 def test_negative_values_are_rejected() -> None:
     with pytest.raises(ValueError):
         calculate_fgts(Decimal("-1.00"))
+
+
+def test_irrf_exempt_bracket_returns_zero() -> None:
+    assert calculate_irrf(Decimal("2259.20"), Decimal("0.00")) == Decimal("0.00")
+
+
+@pytest.mark.parametrize(
+    ("taxable_base", "expected"),
+    [
+        (Decimal("2500.00"), Decimal("18.06")),
+        (Decimal("3000.00"), Decimal("68.56")),
+        (Decimal("4000.00"), Decimal("237.23")),
+        (Decimal("5000.00"), Decimal("479.00")),
+    ],
+)
+def test_irrf_brackets(taxable_base: Decimal, expected: Decimal) -> None:
+    assert calculate_irrf(taxable_base, Decimal("0.00")) == expected
+
+
+def test_irrf_subtracts_inss_and_dependents() -> None:
+    assert calculate_irrf(
+        Decimal("5000.00"),
+        Decimal("500.00"),
+        dependents=2,
+    ) == Decimal("264.41")
+
+
+def employee(base_salary: str, hire_date: date, termination_date: date | None = None):
+    return SimpleNamespace(
+        base_salary=Decimal(base_salary),
+        hire_date=hire_date,
+        termination_date=termination_date,
+    )
+
+
+def test_proportional_salary_full_month_when_admitted_on_first_day() -> None:
+    emp = employee("2800.00", date(2026, 2, 1))
+    assert calculate_proportional_salary(
+        emp.base_salary, emp.hire_date, emp.termination_date, 2, 2026
+    ) == Decimal("2800.00")
+
+
+def test_proportional_salary_mid_month_admission() -> None:
+    emp = employee("2800.00", date(2026, 2, 16))
+    assert calculate_proportional_salary(
+        emp.base_salary, emp.hire_date, emp.termination_date, 2, 2026
+    ) == Decimal("1300.00")
+
+
+def test_proportional_salary_termination_in_month() -> None:
+    emp = employee("3100.00", date(2024, 1, 1), date(2026, 3, 10))
+    assert calculate_proportional_salary(
+        emp.base_salary, emp.hire_date, emp.termination_date, 3, 2026
+    ) == Decimal("1000.00")
+
+
+def test_proportional_salary_admission_and_termination_same_month() -> None:
+    emp = employee("3000.00", date(2026, 4, 10), date(2026, 4, 20))
+    assert calculate_proportional_salary(
+        emp.base_salary, emp.hire_date, emp.termination_date, 4, 2026
+    ) == Decimal("1100.00")
+
+
+def test_proportional_salary_zero_when_admitted_after_competency() -> None:
+    emp = employee("3000.00", date(2026, 5, 1))
+    assert calculate_proportional_salary(
+        emp.base_salary, emp.hire_date, emp.termination_date, 4, 2026
+    ) == Decimal("0.00")

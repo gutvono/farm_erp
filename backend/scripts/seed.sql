@@ -87,16 +87,23 @@ ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- 4b. EMPLOYEES (8: 3 CLT + 3 PJ + 2 Temp) — cargo via position_id (role legado: NULL)
+--     Colunas de benefício/dependentes (Demanda Folha): transport_voucher_cost,
+--     meal_voucher_value, pharmacy_voucher_value, life_insurance_value,
+--     dependents_count. Exemplos preenchidos nos CLT e temporários.
 -- -----------------------------------------------------------------------------
-INSERT INTO employees (id, name, document, email, phone, position_id, contract_type, base_salary, hire_date, is_active) VALUES
-('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', '99999999-9999-9999-9999-999999990001', 'clt',         6000.00, '2020-03-01', TRUE),
-('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', '99999999-9999-9999-9999-999999990002', 'clt',         3500.00, '2021-06-15', TRUE),
-('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', '99999999-9999-9999-9999-999999990003', 'clt',         2200.00, '2022-09-10', TRUE),
-('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', '99999999-9999-9999-9999-999999990004', 'pj',          5500.00, '2023-02-01', TRUE),
-('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', '99999999-9999-9999-9999-999999990005', 'pj',          4000.00, '2023-08-15', TRUE),
-('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', '99999999-9999-9999-9999-999999990006', 'pj',          4500.00, '2022-01-10', TRUE),
-('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', '99999999-9999-9999-9999-999999990007', 'temporario',  1800.00, '2026-02-01', TRUE),
-('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', '99999999-9999-9999-9999-999999990008', 'temporario',  1800.00, '2026-02-01', TRUE)
+INSERT INTO employees (
+  id, name, document, email, phone, position_id, contract_type, base_salary, hire_date,
+  transport_voucher_cost, meal_voucher_value, pharmacy_voucher_value,
+  life_insurance_value, dependents_count, is_active
+) VALUES
+('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', '99999999-9999-9999-9999-999999990001', 'clt',         6000.00, '2020-03-01', 320.00, 650.00,  80.00, 45.00, 2, TRUE),
+('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', '99999999-9999-9999-9999-999999990002', 'clt',         3500.00, '2021-06-15', 280.00, 500.00,   NULL, 45.00, 1, TRUE),
+('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', '99999999-9999-9999-9999-999999990003', 'clt',         2200.00, '2022-09-10', 220.00, 420.00,   NULL, 35.00, 0, TRUE),
+('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', '99999999-9999-9999-9999-999999990004', 'pj',          5500.00, '2023-02-01', NULL,   NULL,     NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', '99999999-9999-9999-9999-999999990005', 'pj',          4000.00, '2023-08-15', NULL,   NULL,     NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', '99999999-9999-9999-9999-999999990006', 'pj',          4500.00, '2022-01-10', NULL,   NULL,     NULL, NULL,  1, TRUE),
+('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', '99999999-9999-9999-9999-999999990007', 'temporario',  1800.00, '2026-02-01', 180.00, 350.00,   NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', '99999999-9999-9999-9999-999999990008', 'temporario',  1800.00, '2026-02-01', 180.00, 350.00,   NULL, NULL,  0, TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -111,7 +118,11 @@ INSERT INTO payroll_events (
 ('dededede-dede-dede-dede-dededede0004', 'INSS',              'desconto',    'inss',              TRUE,  TRUE,  TRUE),
 ('dededede-dede-dede-dede-dededede0005', 'Vale transporte',   'desconto',    'transport_voucher', TRUE,  TRUE,  TRUE),
 ('dededede-dede-dede-dede-dededede0006', 'FGTS',              'informativo', 'fgts',              TRUE,  FALSE, TRUE),
-('dededede-dede-dede-dede-dededede0007', 'Descontos manuais', 'desconto',    'manual',            FALSE, TRUE,  TRUE)
+('dededede-dede-dede-dede-dededede0007', 'Descontos manuais', 'desconto',    'manual',            FALSE, TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0008', 'Vale refeição',     'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0009', 'Vale farmácia',     'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0010', 'Seguro de vida',    'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0011', 'IRRF',              'desconto',    'irrf',              TRUE,  TRUE,  TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -534,7 +545,7 @@ ON CONFLICT (id) DO NOTHING;
 --   2 contas a pagar (1 paga, 1 em aberto)
 --   3 contas a receber (1 quitada, 1 em aberto, 1 cancelada)
 --   3 períodos de folha, 24 lançamentos
---   7 eventos de folha
+--   11 eventos de folha
 --   17 movimentações de estoque
 --   27 movimentações financeiras (24 originais + 3 registros R$0 da Cotação 1)
 --   3 notificações

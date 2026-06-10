@@ -41,6 +41,7 @@ const CALC_LABEL: Record<PayrollCalculationType, string> = {
   inss: "INSS",
   fgts: "FGTS",
   transport_voucher: "Vale-transporte",
+  irrf: "IRRF",
 }
 
 interface EntryEditFormProps {
@@ -253,7 +254,7 @@ export function EntryEditForm({
           <div>
             <h3 className="font-semibold text-slate-800">Calculos automaticos</h3>
             <p className="text-xs text-slate-500">
-              INSS e vale-transporte reduzem o liquido. FGTS fica informativo.
+              INSS, IRRF e vale-transporte reduzem o liquido. FGTS fica informativo.
             </p>
           </div>
 
@@ -269,6 +270,7 @@ export function EntryEditForm({
                 }
               >
                 <option value="inss">INSS</option>
+                <option value="irrf">IRRF</option>
                 <option value="fgts">FGTS</option>
                 <option value="transport_voucher">Vale-transporte</option>
                 <option value="overtime">Hora extra</option>

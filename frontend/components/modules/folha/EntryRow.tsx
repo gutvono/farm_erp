@@ -101,6 +101,9 @@ export function EntryRow({ entry, period, employee, onChanged }: EntryRowProps) 
         <TableCell className="text-right text-red-700">
           {entry.deductions > 0 ? `- ${formatCurrency(entry.deductions)}` : "—"}
         </TableCell>
+        <TableCell className="text-right text-blue-700">
+          {entry.total_informative > 0 ? formatCurrency(entry.total_informative) : "—"}
+        </TableCell>
         <TableCell className="text-right font-bold text-slate-900">
           {formatCurrency(entry.total_amount)}
         </TableCell>

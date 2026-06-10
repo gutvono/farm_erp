@@ -14,8 +14,10 @@ from app.modules.folha import repository as folha_repo
 from app.modules.folha.calculations import (
     calculate_fgts,
     calculate_inss,
+    calculate_irrf,
     calculate_night_shift,
     calculate_overtime,
+    calculate_proportional_salary,
     calculate_transport_voucher,
 )
 from app.modules.folha.model import (
@@ -37,6 +39,7 @@ from app.modules.folha.schemas import (
     PayrollEntryItemOut,
     PayrollEntryOut,
     PayrollEventOut,
+    EmployeePayslipOut,
     PayrollManualItemUpsert,
     PayrollPaymentRequestEntryOut,
     PayrollPaymentRequestOut,
@@ -218,6 +221,249 @@ def _entry_remuneration_base(entry: PayrollEntry) -> Decimal:
     return Decimal(str(entry.base_salary)) + Decimal(str(entry.extras_value))
 
 
+def _current_competency() -> tuple[int, int]:
+    today = date.today()
+    return today.year, today.month
+
+
+def _is_future_competency(month: int, year: int) -> bool:
+    current_year, current_month = _current_competency()
+    return (year, month) > (current_year, current_month)
+
+
+def _proportional_base_salary(
+    employee: Employee,
+    month: int,
+    year: int,
+) -> Decimal:
+    return calculate_proportional_salary(
+        employee.base_salary,
+        employee.hire_date,
+        employee.termination_date,
+        month,
+        year,
+    )
+
+
+def _positive_decimal(value: object) -> Decimal:
+    if value is None:
+        return Decimal("0")
+    return Decimal(str(value))
+
+
+def _entry_taxable_earnings(db: Session, entry: PayrollEntry) -> Decimal:
+    items = folha_repo.list_items_by_entry(db, entry.id)
+    if not items:
+        return _entry_remuneration_base(entry)
+
+    total = Decimal("0")
+    for item in items:
+        event = item.event
+        if (
+            event
+            and event.affects_net
+            and event.event_type == PayrollEventType.PROVENTO
+        ):
+            total += Decimal(str(item.amount))
+    return total
+
+
+def _get_inss_amount(
+    db: Session,
+    entry: PayrollEntry,
+    taxable_base: Decimal,
+) -> Decimal:
+    inss_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.INSS
+    )
+    if inss_event:
+        inss_item = folha_repo.get_entry_item_by_event(
+            db,
+            entry_id=entry.id,
+            event_id=inss_event.id,
+        )
+        if inss_item:
+            return Decimal(str(inss_item.amount))
+    return calculate_inss(taxable_base)
+
+
+def _upsert_automatic_item(
+    db: Session,
+    *,
+    entry: PayrollEntry,
+    event: PayrollEvent,
+    amount: Decimal,
+    calculation_base: Optional[Decimal] = None,
+    quantity: Optional[Decimal] = None,
+    percentage: Optional[Decimal] = None,
+    metadata: Optional[dict[str, str]] = None,
+) -> None:
+    folha_repo.upsert_entry_item(
+        db,
+        entry_id=entry.id,
+        event_id=event.id,
+        amount=amount,
+        calculation_base=calculation_base,
+        quantity=quantity,
+        percentage=percentage,
+        metadata=metadata or {},
+        source=PayrollItemSource.AUTOMATIC,
+    )
+
+
+def _delete_entry_item_for_event(
+    db: Session,
+    *,
+    entry: PayrollEntry,
+    event: Optional[PayrollEvent],
+) -> None:
+    if event:
+        folha_repo.delete_entry_item_by_event(
+            db,
+            entry_id=entry.id,
+            event_id=event.id,
+        )
+
+
+def recompute_statutory_items(
+    db: Session,
+    entry: PayrollEntry,
+    employee: Employee,
+) -> PayrollEntry:
+    taxable_base = _entry_taxable_earnings(db, entry)
+
+    inss_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.INSS
+    )
+    if inss_event:
+        inss = calculate_inss(taxable_base)
+        _upsert_automatic_item(
+            db,
+            entry=entry,
+            event=inss_event,
+            amount=inss,
+            calculation_base=taxable_base,
+            metadata={"origin": "statutory_recompute"},
+        )
+    else:
+        inss = calculate_inss(taxable_base)
+
+    irrf_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.IRRF
+    )
+    dependents = int(getattr(employee, "dependents_count", 0) or 0)
+    irrf = calculate_irrf(taxable_base, inss, dependents)
+    if irrf_event and irrf > 0:
+        _upsert_automatic_item(
+            db,
+            entry=entry,
+            event=irrf_event,
+            amount=irrf,
+            calculation_base=taxable_base,
+            metadata={
+                "origin": "statutory_recompute",
+                "inss": str(inss),
+                "dependents": str(dependents),
+            },
+        )
+    elif irrf_event:
+        _delete_entry_item_for_event(db, entry=entry, event=irrf_event)
+
+    fgts_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.FGTS
+    )
+    if fgts_event:
+        _upsert_automatic_item(
+            db,
+            entry=entry,
+            event=fgts_event,
+            amount=calculate_fgts(taxable_base),
+            calculation_base=taxable_base,
+            percentage=Decimal("8"),
+            metadata={"origin": "statutory_recompute"},
+        )
+
+    transport_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.TRANSPORT_VOUCHER
+    )
+    transport_cost = _positive_decimal(getattr(employee, "transport_voucher_cost", None))
+    if transport_event and transport_cost > 0:
+        _upsert_automatic_item(
+            db,
+            entry=entry,
+            event=transport_event,
+            amount=calculate_transport_voucher(entry.base_salary, transport_cost),
+            calculation_base=Decimal(str(entry.base_salary)),
+            metadata={
+                "origin": "employee_config",
+                "real_transport_cost": str(transport_cost),
+            },
+        )
+    elif transport_event:
+        _delete_entry_item_for_event(db, entry=entry, event=transport_event)
+
+    return folha_repo.recalculate_entry_totals(db, entry.id) or entry
+
+
+def _apply_fixed_benefit_items(
+    db: Session,
+    entry: PayrollEntry,
+    employee: Employee,
+) -> None:
+    benefit_fields = (
+        (folha_repo.MEAL_VOUCHER_EVENT_DESCRIPTION, "meal_voucher_value"),
+        (folha_repo.PHARMACY_VOUCHER_EVENT_DESCRIPTION, "pharmacy_voucher_value"),
+        (folha_repo.LIFE_INSURANCE_EVENT_DESCRIPTION, "life_insurance_value"),
+    )
+    for event_description, field_name in benefit_fields:
+        event = folha_repo.get_event_by_description(db, event_description)
+        amount = _positive_decimal(getattr(employee, field_name, None))
+        if event and amount > 0:
+            _upsert_automatic_item(
+                db,
+                entry=entry,
+                event=event,
+                amount=amount,
+                calculation_base=amount,
+                metadata={"origin": "employee_config", "field": field_name},
+            )
+        elif event:
+            _delete_entry_item_for_event(db, entry=entry, event=event)
+
+
+def _apply_automatic_items(
+    db: Session,
+    entry: PayrollEntry,
+    employee: Employee,
+) -> PayrollEntry:
+    folha_repo.ensure_entry_legacy_items(db, entry)
+    _apply_fixed_benefit_items(db, entry, employee)
+    return recompute_statutory_items(db, entry, employee)
+
+
+def apply_informative_items_for_entry(
+    db: Session,
+    entry: PayrollEntry,
+    employee: Employee,
+) -> None:
+    folha_repo.ensure_entry_legacy_items(db, entry)
+    _apply_fixed_benefit_items(db, entry, employee)
+    taxable_base = _entry_taxable_earnings(db, entry)
+    fgts_event = folha_repo.get_event_by_calculation_type(
+        db, PayrollCalculationType.FGTS
+    )
+    if fgts_event:
+        _upsert_automatic_item(
+            db,
+            entry=entry,
+            event=fgts_event,
+            amount=calculate_fgts(taxable_base),
+            calculation_base=taxable_base,
+            percentage=Decimal("8"),
+            metadata={"origin": "backfill_informative_only"},
+        )
+
+
 # ---------------------------------------------------------------------------
 # Cargos (Job Positions)
 # ---------------------------------------------------------------------------
@@ -303,6 +549,11 @@ def create_employee(
     admission_date: date,
     photo_file: Optional[UploadFile] = None,
     termination_cost_override: Optional[Decimal] = None,
+    transport_voucher_cost: Optional[Decimal] = None,
+    meal_voucher_value: Optional[Decimal] = None,
+    pharmacy_voucher_value: Optional[Decimal] = None,
+    life_insurance_value: Optional[Decimal] = None,
+    dependents_count: int = 0,
 ) -> Employee:
     existing = folha_repo.get_employee_by_cpf(db, cpf)
     if existing:
@@ -334,6 +585,11 @@ def create_employee(
         admission_date=admission_date,
         photo_path=photo_path,
         termination_cost_override=termination_cost_override,
+        transport_voucher_cost=transport_voucher_cost,
+        meal_voucher_value=meal_voucher_value,
+        pharmacy_voucher_value=pharmacy_voucher_value,
+        life_insurance_value=life_insurance_value,
+        dependents_count=dependents_count,
     )
 
 
@@ -434,6 +690,12 @@ def terminate_employee(db: Session, employee_id: UUID) -> Employee:
 def create_or_get_period(
     db: Session, *, reference_month: int, reference_year: int
 ) -> PayrollPeriod:
+    if _is_future_competency(reference_month, reference_year):
+        raise HTTPException(
+            status_code=400,
+            detail="Não é possível abrir a folha de uma competência futura",
+        )
+
     existing = folha_repo.get_period_by_month_year(
         db, reference_month, reference_year
     )
@@ -446,12 +708,20 @@ def create_or_get_period(
 
     active_employees = folha_repo.list_active_employees(db)
     for employee in active_employees:
-        folha_repo.create_entry(
+        base_salary = _proportional_base_salary(
+            employee,
+            reference_month,
+            reference_year,
+        )
+        if base_salary <= 0:
+            continue
+        entry = folha_repo.create_entry(
             db,
             period_id=period.id,
             employee_id=employee.id,
-            base_salary=Decimal(str(employee.base_salary)),
+            base_salary=base_salary,
         )
+        _apply_automatic_items(db, entry, employee)
 
     # Reload period after multiple entry commits
     reloaded = folha_repo.get_period(db, period.id)
@@ -461,7 +731,14 @@ def create_or_get_period(
 def list_periods(
     db: Session, *, skip: int = 0, limit: int = 100
 ) -> list[PayrollPeriod]:
-    return folha_repo.list_periods(db, skip=skip, limit=limit)
+    current_year, current_month = _current_competency()
+    return folha_repo.list_periods(
+        db,
+        skip=skip,
+        limit=limit,
+        max_year=current_year,
+        max_month=current_month,
+    )
 
 
 def get_period(db: Session, period_id: UUID) -> PayrollPeriod:
@@ -506,6 +783,31 @@ def list_entry_items(db: Session, entry_id: UUID) -> list[PayrollEntryItem]:
     return folha_repo.list_items_by_entry(db, entry_id)
 
 
+def list_employee_payslips(
+    db: Session,
+    employee_id: UUID,
+    year: Optional[int] = None,
+) -> list[EmployeePayslipOut]:
+    employee = folha_repo.get_employee_any(db, employee_id)
+    if not employee:
+        raise HTTPException(status_code=404, detail="Funcionário não encontrado")
+
+    entries = folha_repo.list_entries_by_employee(db, employee_id, year=year)
+    payslips: list[EmployeePayslipOut] = []
+    for entry in entries:
+        period = entry.period
+        entry_out = _entry_out(db, entry)
+        payslips.append(
+            EmployeePayslipOut(
+                **entry_out.model_dump(),
+                reference_month=period.competency_month,
+                reference_year=period.competency_year,
+                period_status=period.status,
+            )
+        )
+    return payslips
+
+
 def recalculate_entry(db: Session, entry_id: UUID) -> PayrollEntry:
     entry = _get_entry_or_404(db, entry_id)
     folha_repo.ensure_entry_legacy_items(db, entry)
@@ -518,12 +820,13 @@ def _time_label(value) -> str:
 
 
 def _calculation_preview(
+    db: Session,
     entry: PayrollEntry,
     event: PayrollEvent,
     request: PayrollAutoCalculationRequest,
 ) -> PayrollCalculationPreview:
     base_salary = Decimal(str(entry.base_salary))
-    remuneration_base = _entry_remuneration_base(entry)
+    taxable_base = _entry_taxable_earnings(db, entry)
     metadata: dict[str, str] = {}
     calculation_base: Decimal
     quantity: Optional[Decimal] = None
@@ -561,13 +864,24 @@ def _calculation_preview(
         }
 
     elif request.calculation_type == PayrollCalculationType.INSS:
-        calculation_base = _decimal(request.base_amount, remuneration_base)
+        calculation_base = _decimal(request.base_amount, taxable_base)
         amount = calculate_inss(calculation_base)
 
     elif request.calculation_type == PayrollCalculationType.FGTS:
-        calculation_base = _decimal(request.base_amount, remuneration_base)
+        calculation_base = _decimal(request.base_amount, taxable_base)
         percentage = _decimal(request.percentage, Decimal("8"))
         amount = calculate_fgts(calculation_base, percentage)
+
+    elif request.calculation_type == PayrollCalculationType.IRRF:
+        calculation_base = _decimal(request.base_amount, taxable_base)
+        employee = folha_repo.get_employee_any(db, entry.employee_id)
+        dependents = int(getattr(employee, "dependents_count", 0) or 0)
+        inss = _get_inss_amount(db, entry, calculation_base)
+        amount = calculate_irrf(calculation_base, inss, dependents)
+        metadata = {
+            "inss": str(inss),
+            "dependents": str(dependents),
+        }
 
     elif request.calculation_type == PayrollCalculationType.TRANSPORT_VOUCHER:
         if request.real_transport_cost is None:
@@ -609,7 +923,7 @@ def preview_calculation(
     entry = _get_entry_or_404(db, entry_id)
     event = _resolve_calculation_event(db, request)
     try:
-        return _calculation_preview(entry, event, request)
+        return _calculation_preview(db, entry, event, request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
@@ -624,22 +938,38 @@ def apply_calculation(
     folha_repo.ensure_entry_legacy_items(db, entry)
     event = _resolve_calculation_event(db, request)
     try:
-        preview = _calculation_preview(entry, event, request)
+        preview = _calculation_preview(db, entry, event, request)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
-    folha_repo.upsert_entry_item(
-        db,
-        entry_id=entry.id,
-        event_id=event.id,
-        amount=preview.amount,
-        calculation_base=preview.calculation_base,
-        quantity=preview.quantity,
-        percentage=preview.percentage,
-        metadata=preview.metadata,
-        source=PayrollItemSource.AUTOMATIC,
-    )
-    return folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    if request.calculation_type == PayrollCalculationType.IRRF and preview.amount <= 0:
+        folha_repo.delete_entry_item_by_event(
+            db,
+            entry_id=entry.id,
+            event_id=event.id,
+        )
+    else:
+        folha_repo.upsert_entry_item(
+            db,
+            entry_id=entry.id,
+            event_id=event.id,
+            amount=preview.amount,
+            calculation_base=preview.calculation_base,
+            quantity=preview.quantity,
+            percentage=preview.percentage,
+            metadata=preview.metadata,
+            source=PayrollItemSource.AUTOMATIC,
+        )
+
+    recalculated = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    if request.calculation_type in {
+        PayrollCalculationType.OVERTIME,
+        PayrollCalculationType.NIGHT_SHIFT,
+    }:
+        employee = folha_repo.get_employee_any(db, entry.employee_id)
+        if employee:
+            return recompute_statutory_items(db, recalculated, employee)
+    return recalculated
 
 
 def upsert_manual_item(
@@ -672,7 +1002,11 @@ def upsert_manual_item(
         metadata=body.metadata,
         source=PayrollItemSource.MANUAL,
     )
-    return folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    recalculated = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    employee = folha_repo.get_employee_any(db, entry.employee_id)
+    if employee:
+        return recompute_statutory_items(db, recalculated, employee)
+    return recalculated
 
 
 def delete_entry_item(db: Session, entry_id: UUID, item_id: UUID) -> PayrollEntry:
@@ -686,8 +1020,18 @@ def delete_entry_item(db: Session, entry_id: UUID, item_id: UUID) -> PayrollEntr
             status_code=400,
             detail="Item de salario base nao pode ser removido",
         )
+    should_recompute = bool(
+        item.event
+        and item.event.calculation_type
+        in {PayrollCalculationType.OVERTIME, PayrollCalculationType.NIGHT_SHIFT}
+    )
     folha_repo.delete_entry_item(db, item_id)
-    return folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    recalculated = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    if should_recompute:
+        employee = folha_repo.get_employee_any(db, entry.employee_id)
+        if employee:
+            return recompute_statutory_items(db, recalculated, employee)
+    return recalculated
 
 
 def update_entry(
@@ -756,7 +1100,11 @@ def update_entry(
             metadata={"origin": "legacy_patch"},
         )
 
-    return folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    recalculated = folha_repo.recalculate_entry_totals(db, entry.id) or entry
+    employee = folha_repo.get_employee_any(db, entry.employee_id)
+    if employee:
+        return recompute_statutory_items(db, recalculated, employee)
+    return recalculated
 
 
 # ---------------------------------------------------------------------------
@@ -945,6 +1293,10 @@ def serialize_period(db: Session, period: PayrollPeriod) -> dict:
 
 def serialize_entry(db: Session, entry: PayrollEntry) -> dict:
     return _entry_out(db, entry).model_dump(mode="json")
+
+
+def serialize_employee_payslip(payslip: EmployeePayslipOut) -> dict:
+    return payslip.model_dump(mode="json")
 
 
 def serialize_event(event: PayrollEvent) -> dict:
