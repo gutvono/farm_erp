@@ -375,7 +375,7 @@ ON CONFLICT (id) DO NOTHING;
 -- -----------------------------------------------------------------------------
 -- 14b. PAYROLL ENTRY ITEMS (detalhamento dos holerites — substitui o backfill manual)
 -- Valores coerentes com app/modules/folha/calculations.py (tabelas INSS/IRRF 2024,
--- FGTS 8%, vale transporte limitado a 6% do salário). Períodos pagos (01/02) recebem
+-- FGTS 8 por cento, vale transporte limitado a 6 por cento do salário). Períodos pagos (01/02) recebem
 -- apenas itens informativos + legados (líquido preservado); o período aberto (03)
 -- recebe o cálculo estatutário completo (INSS/IRRF/transporte abatem o líquido).
 -- source: automatic = gerado pelo sistema, manual = lançamento legado.
