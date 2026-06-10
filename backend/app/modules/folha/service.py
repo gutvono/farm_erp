@@ -441,29 +441,6 @@ def _apply_automatic_items(
     return recompute_statutory_items(db, entry, employee)
 
 
-def apply_informative_items_for_entry(
-    db: Session,
-    entry: PayrollEntry,
-    employee: Employee,
-) -> None:
-    folha_repo.ensure_entry_legacy_items(db, entry)
-    _apply_fixed_benefit_items(db, entry, employee)
-    taxable_base = _entry_taxable_earnings(db, entry)
-    fgts_event = folha_repo.get_event_by_calculation_type(
-        db, PayrollCalculationType.FGTS
-    )
-    if fgts_event:
-        _upsert_automatic_item(
-            db,
-            entry=entry,
-            event=fgts_event,
-            amount=calculate_fgts(taxable_base),
-            calculation_base=taxable_base,
-            percentage=Decimal("8"),
-            metadata={"origin": "backfill_informative_only"},
-        )
-
-
 # ---------------------------------------------------------------------------
 # Cargos (Job Positions)
 # ---------------------------------------------------------------------------

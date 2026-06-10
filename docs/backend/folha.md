@@ -466,9 +466,22 @@ Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQ
 - `0023` insere o evento automático `IRRF` em migration separada, respeitando a regra do PostgreSQL para `ALTER TYPE ... ADD VALUE` (o valor novo não pode ser usado na mesma transação em que foi criado).
 - Downgrade remove colunas/eventos; a remoção do valor do enum é no-op.
 
-## Backfill
+## Detalhamento dos holerites (payroll_entry_items)
 
-`scripts/backfill_payroll_items.py` atualiza holerites existentes de forma idempotente. Por padrão recalcula apenas entries `pendente` em período `aberta`; holerites pagos/fechados recebem somente informativos (FGTS/benefícios), preservando `net_amount` e movimentos financeiros. Use `--include-paid` apenas se o PO decidir recalcular históricos já pagos.
+O detalhamento dos holerites semeados (linhas de INSS/IRRF/FGTS/Vale transporte/benefícios)
+vive direto em `scripts/seed.sql` (bloco `14b. PAYROLL ENTRY ITEMS`), com valores coerentes
+com `app/modules/folha/calculations.py`. Não há script de backfill: como o banco é truncado e
+re-semeado a cada deploy (`entrypoint.sh` → `seed_only.py`), os itens são recriados junto com o
+restante do seed. Convenção dos itens semeados:
+
+- **Períodos pagos (01/02):** itens legados (salário base, horas extras, descontos manuais) +
+  benefícios informativos + FGTS informativo. INSS/IRRF/Vale transporte **não** são lançados,
+  preservando o `net_amount` já pago e os movimentos financeiros.
+- **Período aberto (03):** cálculo estatutário completo — INSS, IRRF (quando a base tributa),
+  FGTS e Vale transporte. `net_amount`/`deductions_value` da entry refletem esses descontos.
+
+Holerites criados pela aplicação (cadastro de funcionário / geração de período) recebem os mesmos
+itens automaticamente via `_apply_automatic_items`.
 
 > **Convenção:** `alembic_version.version_num` é `VARCHAR(32)` — o `revision id` de cada migration deve ter no máximo 32 caracteres (por isso `0008_fix_payroll_desc_index` e não o nome completo do arquivo).
 
