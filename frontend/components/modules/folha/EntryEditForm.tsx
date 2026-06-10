@@ -59,6 +59,10 @@ export function EntryEditForm({
 }: EntryEditFormProps) {
   const [loading, setLoading] = useState(false)
   const [calcLoading, setCalcLoading] = useState(false)
+  // Cópia local do holerite: atualizada a cada cálculo/remoção aplicada, para o
+  // modal refletir as mudanças dinamicamente sem fechar nem depender do reload
+  // da tabela (que desmontaria o Dialog).
+  const [localEntry, setLocalEntry] = useState<PayrollEntry | null>(entry)
   const [calculationType, setCalculationType] =
     useState<PayrollCalculationType>("inss")
   const [quantity, setQuantity] = useState("1")
@@ -85,20 +89,24 @@ export function EntryEditForm({
 
   useEffect(() => {
     if (open && entry) {
+      setLocalEntry(entry)
       reset({
         overtime_amount: entry.overtime_amount,
         deductions: entry.deductions,
       })
       setPreview(null)
     }
-  }, [open, entry, reset])
+    // Sincroniza apenas na abertura ou quando muda o holerite selecionado (id);
+    // mutações internas mantêm o localEntry vindo da resposta da API.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, entry?.id, reset])
 
   useEffect(() => {
     setPreview(null)
   }, [calculationType, quantity, percentage, transportCost, startTime, endTime, rule])
 
-  if (!entry) return null
-  const currentEntry = entry
+  if (!localEntry) return null
+  const currentEntry = localEntry
 
   const previewTotal =
     currentEntry.base_salary + (Number(overtime) || 0) - (Number(deductions) || 0)
@@ -128,13 +136,13 @@ export function EntryEditForm({
   async function onSubmit(data: FormData) {
     setLoading(true)
     try {
-      await updateEntry(currentEntry.id, {
+      const updated = await updateEntry(currentEntry.id, {
         overtime_amount: data.overtime_amount,
         deductions: data.deductions,
       })
+      setLocalEntry(updated)
       toast.success("Holerite atualizado")
       onSuccess()
-      onOpenChange(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Erro ao atualizar holerite")
     } finally {
@@ -160,7 +168,15 @@ export function EntryEditForm({
   async function handleApplyCalculation() {
     setCalcLoading(true)
     try {
-      await aplicarCalculoFolha(currentEntry.id, buildCalculationPayload())
+      const updated = await aplicarCalculoFolha(
+        currentEntry.id,
+        buildCalculationPayload()
+      )
+      setLocalEntry(updated)
+      reset({
+        overtime_amount: updated.overtime_amount,
+        deductions: updated.deductions,
+      })
       toast.success("Calculo aplicado ao holerite")
       setPreview(null)
       onSuccess()
@@ -174,7 +190,12 @@ export function EntryEditForm({
   async function handleDeleteItem(itemId: string) {
     setCalcLoading(true)
     try {
-      await deleteEntryItem(currentEntry.id, itemId)
+      const updated = await deleteEntryItem(currentEntry.id, itemId)
+      setLocalEntry(updated)
+      reset({
+        overtime_amount: updated.overtime_amount,
+        deductions: updated.deductions,
+      })
       toast.success("Item removido")
       onSuccess()
     } catch (err) {

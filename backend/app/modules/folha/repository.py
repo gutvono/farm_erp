@@ -516,6 +516,21 @@ def list_periods(
     return periods
 
 
+def list_open_periods(db: Session) -> list[PayrollPeriod]:
+    """Períodos de folha ainda abertos (status aberta, não excluídos)."""
+    periods = (
+        db.query(PayrollPeriod)
+        .filter(
+            PayrollPeriod.deleted_at.is_(None),
+            PayrollPeriod.status == PayrollPeriodStatus.ABERTA,
+        )
+        .all()
+    )
+    for p in periods:
+        _ = p.entries
+    return periods
+
+
 def get_period(db: Session, period_id: UUID) -> Optional[PayrollPeriod]:
     period = (
         db.query(PayrollPeriod)

@@ -3,6 +3,7 @@
 import { useState } from "react"
 import { FileText } from "lucide-react"
 import { toast } from "sonner"
+import type { jsPDF as JsPDFDoc } from "jspdf"
 import { Button } from "@/components/ui/button"
 import { Employee, PayrollEntry, PayrollPeriod } from "@/types/index"
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils"
@@ -34,6 +35,63 @@ function sanitize(name: string): string {
     .toLowerCase()
 }
 
+/**
+ * Desenha a logo do sistema (mesmo trator do menu principal — lucide "tractor")
+ * direto no PDF usando primitivas vetoriais do jsPDF. Evita a rasterização de
+ * SVG via canvas (frágil/assíncrona no navegador). As coordenadas seguem o
+ * viewBox 0..24 do ícone original, escaladas para `size` (mm) a partir de
+ * (ox, oy). Os pequenos arcos de cantos arredondados são aproximados por
+ * segmentos retos — imperceptível neste tamanho.
+ */
+function drawTractorLogo(
+  doc: JsPDFDoc,
+  ox: number,
+  oy: number,
+  size: number
+): void {
+  const s = size / 24
+  const P = (px: number, py: number): [number, number] => [
+    ox + px * s,
+    oy + py * s,
+  ]
+
+  doc.setDrawColor(5, 150, 105) // emerald-600
+  doc.setFillColor(5, 150, 105)
+  doc.setLineWidth(Math.max(0.35, 1.3 * s))
+  doc.setLineJoin("round")
+  doc.setLineCap("round")
+
+  const poly = (pts: Array<[number, number]>) => {
+    for (let i = 0; i < pts.length - 1; i++) {
+      const [x1, y1] = P(pts[i][0], pts[i][1])
+      const [x2, y2] = P(pts[i + 1][0], pts[i + 1][1])
+      doc.line(x1, y1, x2, y2)
+    }
+  }
+
+  // Capô/corpo do trator
+  poly([
+    [10, 11],
+    [21, 11.9],
+    [21.8, 13.0],
+    [21.135, 17.158],
+    [20.147, 18.0],
+    [20, 18],
+  ])
+  poly([[16, 18], [11, 18]]) // barra inferior do corpo
+  poly([[18, 5], [17, 6], [17, 11.573]]) // escapamento
+  poly([[3, 4], [11.129, 4], [12.119, 4.863], [13, 11.246]]) // teto da cabine
+  poly([[4, 11], [4, 4]]) // coluna esquerda da cabine
+  poly([[8, 10.1], [8, 4]]) // coluna direita da cabine
+
+  // Rodas
+  const [bwx, bwy] = P(7, 15)
+  doc.circle(bwx, bwy, 5 * s, "S") // roda traseira
+  const [swx, swy] = P(18, 18)
+  doc.circle(swx, swy, 2 * s, "S") // roda dianteira
+  doc.circle(bwx, bwy, Math.max(0.3, 0.45 * s), "F") // cubo da roda traseira
+}
+
 export function HoleritePDF({ entry, period, employee }: HoleritePDFProps) {
   const [loading, setLoading] = useState(false)
 
@@ -47,12 +105,7 @@ export function HoleritePDF({ entry, period, employee }: HoleritePDFProps) {
       const cpf = employee?.cpf ?? "—"
       const role = employee?.position_name ?? "—"
 
-      doc.setFillColor(16, 185, 129)
-      doc.roundedRect(20, 12, 16, 16, 3, 3, "F")
-      doc.setTextColor(255, 255, 255)
-      doc.setFont("helvetica", "bold")
-      doc.setFontSize(9)
-      doc.text("CF", 28, 22, { align: "center" })
+      drawTractorLogo(doc, 19, 10, 18)
 
       doc.setTextColor(15, 23, 42)
       doc.setFontSize(13)

@@ -173,6 +173,34 @@ export default function FolhaPage() {
     loadHistory()
   }, [loadHistory])
 
+  const historySummary = useMemo(() => {
+    if (historyPayslips.length === 0) return null
+    const count = historyPayslips.length
+    const totalLiquido = historyPayslips.reduce((s, p) => s + p.total_amount, 0)
+    const totalProventos = historyPayslips.reduce((s, p) => s + p.total_earnings, 0)
+    const totalDescontos = historyPayslips.reduce((s, p) => s + p.total_deductions, 0)
+    const totalBeneficios = historyPayslips.reduce(
+      (s, p) => s + p.total_informative,
+      0
+    )
+    const paidCount = historyPayslips.filter((p) => p.status === "pago").length
+    const maior = historyPayslips.reduce(
+      (max, p) => (p.total_amount > max.total_amount ? p : max),
+      historyPayslips[0]
+    )
+    return {
+      count,
+      paidCount,
+      totalLiquido,
+      totalProventos,
+      totalDescontos,
+      totalBeneficios,
+      mediaLiquida: totalLiquido / count,
+      maiorLiquido: maior.total_amount,
+      maiorMes: MONTHS[maior.reference_month - 1],
+    }
+  }, [historyPayslips])
+
   function periodFromPayslip(payslip: EmployeePayslip): PayrollPeriod {
     return {
       id: payslip.payroll_period_id,
@@ -372,6 +400,61 @@ export default function FolhaPage() {
                 />
               </div>
             </div>
+
+            {historySummary && (
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">
+                      Líquido acumulado · {historyYear}
+                    </p>
+                    <p className="text-xl font-bold text-slate-900">
+                      {formatCurrency(historySummary.totalLiquido)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {historySummary.count} holerite
+                      {historySummary.count !== 1 ? "s" : ""} ·{" "}
+                      {historySummary.paidCount} pago
+                      {historySummary.paidCount !== 1 ? "s" : ""}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Média líquida mensal</p>
+                    <p className="text-xl font-bold text-emerald-700">
+                      {formatCurrency(historySummary.mediaLiquida)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Maior: {formatCurrency(historySummary.maiorLiquido)} (
+                      {historySummary.maiorMes})
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Proventos · Descontos</p>
+                    <p className="text-lg font-bold text-green-700">
+                      {formatCurrency(historySummary.totalProventos)}
+                    </p>
+                    <p className="text-sm font-semibold text-red-700">
+                      - {formatCurrency(historySummary.totalDescontos)}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Benefícios acumulados</p>
+                    <p className="text-xl font-bold text-blue-700">
+                      {formatCurrency(historySummary.totalBeneficios)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      FGTS, vale-refeição, seguro de vida e afins
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
 
             {!historyEmployeeId ? (
               <div className="py-12 text-center text-slate-400">

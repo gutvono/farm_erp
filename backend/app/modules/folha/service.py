@@ -573,7 +573,7 @@ def create_employee(
     if photo_file is not None and photo_file.filename:
         photo_path = _save_photo(photo_file)
 
-    return folha_repo.create_employee(
+    employee = folha_repo.create_employee(
         db,
         name=name,
         cpf=cpf,
@@ -591,6 +591,36 @@ def create_employee(
         life_insurance_value=life_insurance_value,
         dependents_count=dependents_count,
     )
+    # Folha parcial automática: ao cadastrar, o funcionário já entra nos períodos
+    # de folha em aberto com o salário proporcional à data de admissão.
+    _ensure_entries_in_open_periods(db, employee)
+    return employee
+
+
+def _ensure_entries_in_open_periods(db: Session, employee: Employee) -> None:
+    """Gera o holerite (folha parcial) do funcionário em todo período aberto.
+
+    Usado ao cadastrar um funcionário no meio da competência: ele passa a
+    aparecer na folha do mês em vigência com salário proporcional aos dias
+    trabalhados, já com os itens automáticos (INSS, FGTS, benefícios, etc.).
+    """
+    for period in folha_repo.list_open_periods(db):
+        if _is_future_competency(period.competency_month, period.competency_year):
+            continue
+        if folha_repo.get_entry_by_period_employee(db, period.id, employee.id):
+            continue
+        base_salary = _proportional_base_salary(
+            employee, period.competency_month, period.competency_year
+        )
+        if base_salary <= 0:
+            continue
+        entry = folha_repo.create_entry(
+            db,
+            period_id=period.id,
+            employee_id=employee.id,
+            base_salary=base_salary,
+        )
+        _apply_automatic_items(db, entry, employee)
 
 
 def list_employees(
@@ -761,6 +791,25 @@ def close_period(db: Session, period_id: UUID) -> PayrollPeriod:
                 "Todos os holerites precisam estar pagos antes de fechar."
             ),
         )
+    return folha_repo.close_period(db, period_id)
+
+
+def close_period_if_all_paid(
+    db: Session, period_id: UUID
+) -> Optional[PayrollPeriod]:
+    """Fecha o período automaticamente quando todos os holerites foram pagos.
+
+    Chamado pelo Financeiro após aprovar um pagamento de folha: se não restar
+    nenhum holerite pendente/aguardando, o período é encerrado sem ação manual.
+    Silencioso — retorna ``None`` quando ainda há holerites a pagar.
+    """
+    period = folha_repo.get_period(db, period_id)
+    if not period or period.status != PayrollPeriodStatus.ABERTA:
+        return None
+    if not period.entries:
+        return None
+    if any(e.status != PayrollEntryStatus.PAGO for e in period.entries):
+        return None
     return folha_repo.close_period(db, period_id)
 
 
@@ -943,10 +992,13 @@ def apply_calculation(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     if request.calculation_type == PayrollCalculationType.IRRF and preview.amount <= 0:
-        folha_repo.delete_entry_item_by_event(
-            db,
-            entry_id=entry.id,
-            event_id=event.id,
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Este funcionário é isento de IRRF: a base de cálculo "
+                f"(R$ {Decimal(str(preview.calculation_base)):.2f}) não atinge a "
+                "faixa de tributação do imposto de renda."
+            ),
         )
     else:
         folha_repo.upsert_entry_item(
