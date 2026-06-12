@@ -27,6 +27,7 @@ from app.modules.financeiro.schemas import (
     CashFlowItem,
     CashFlowOut,
     DefaulterItem,
+    EncargoOut,
     FinancialMovementCreate,
     FinancialMovementOut,
     PixPaymentInfo,
@@ -443,6 +444,27 @@ def list_receivables(db: Session, **filters) -> list[AccountReceivable]:
     return fin_repo.list_receivables(db, **filters)
 
 
+def get_receivables_by_invoice(
+    db: Session, invoice_id: UUID
+) -> list[AccountReceivable]:
+    """AR (parcelas) ligadas a uma nota por `invoice_id`. Ponto de integração
+    para o Faturamento montar o bloco de parcelas da nota (Demanda 9.0) sem
+    acessar o repository do Financeiro diretamente."""
+    return fin_repo.list_receivables_by_refs(db, invoice_id=invoice_id)
+
+
+def get_client_ids_with_overdue(db: Session) -> set[UUID]:
+    """Conjunto de client_ids com ≥1 parcela vencida (inadimplência DERIVADA,
+    Demanda 9.A). UMA query — usado pelo Comercial para anotar a lista de
+    clientes sem N+1."""
+    return fin_repo.get_client_ids_with_overdue(db, date.today())
+
+
+def client_has_overdue(db: Session, client_id: UUID) -> bool:
+    """True se o cliente tem ≥1 parcela vencida (inadimplência derivada)."""
+    return fin_repo.client_has_overdue(db, client_id, date.today())
+
+
 def list_receivables_paginated(
     db: Session,
     *,
@@ -529,6 +551,66 @@ def update_receivable(
     return receivable
 
 
+def _receivable_is_overdue(receivable: AccountReceivable, today: date) -> bool:
+    """Parcela vencida (Demanda 9.B/9.A): venc. < hoje, saldo em aberto e não
+    cancelada. Mesma definição do `AccountReceivableOut.is_overdue`."""
+    if receivable.status == AccountReceivableStatus.CANCELADA:
+        return False
+    if Decimal(receivable.amount_received) >= Decimal(receivable.amount):
+        return False
+    return receivable.due_date < today
+
+
+def _quantize(value: Decimal) -> Decimal:
+    return Decimal(value).quantize(Decimal("0.01"))
+
+
+def calcular_encargo(db: Session, receivable: AccountReceivable) -> EncargoOut:
+    """Pré-calcula o encargo por atraso sobre o **saldo** da parcela vencida
+    (Demanda 9.B). Parcela não vencida → tudo 0.
+
+    - multa = saldo × multa_atraso_percent/100 (uma vez);
+    - juros = saldo × (juros_mora_mensal_percent/100 / 30) × dias_atraso (simples).
+
+    As taxas vêm de Configurações (default 2/1 se ausentes).
+    """
+    from app.modules.configuracoes import service as config_service
+
+    saldo = Decimal(receivable.amount) - Decimal(receivable.amount_received)
+    today = date.today()
+    if not _receivable_is_overdue(receivable, today):
+        zero = Decimal("0.00")
+        return EncargoOut(
+            receivable_id=receivable.id,
+            number=receivable.number,
+            saldo=_quantize(saldo),
+            dias_atraso=0,
+            multa=zero,
+            juros=zero,
+            total=zero,
+        )
+
+    dias_atraso = (today - receivable.due_date).days
+    taxas = config_service.get_encargos(db)
+    multa = saldo * (Decimal(taxas.multa_atraso_percent) / Decimal("100"))
+    juros = (
+        saldo
+        * (Decimal(taxas.juros_mora_mensal_percent) / Decimal("100") / Decimal("30"))
+        * Decimal(dias_atraso)
+    )
+    multa = _quantize(multa)
+    juros = _quantize(juros)
+    return EncargoOut(
+        receivable_id=receivable.id,
+        number=receivable.number,
+        saldo=_quantize(saldo),
+        dias_atraso=dias_atraso,
+        multa=multa,
+        juros=juros,
+        total=_quantize(multa + juros),
+    )
+
+
 def receive_payment(
     db: Session,
     receivable_id: UUID,
@@ -536,6 +618,7 @@ def receive_payment(
     amount: Decimal,
     received_at: Optional[datetime] = None,
     notes: Optional[str] = None,
+    encargo: Optional[Decimal] = None,
 ) -> AccountReceivable:
     receivable = get_receivable(db, receivable_id)
     if receivable.status in (
@@ -557,9 +640,17 @@ def receive_payment(
             detail=f"Valor excede o saldo devedor (restante: {remaining})",
         )
 
+    # Encargo por atraso (Demanda 9.B): o encargo NÃO entra no principal — a
+    # parcela quita pelo `amount` (lógica inalterada). Pré-calcula ANTES de mexer
+    # no saldo (a fórmula usa o saldo da parcela vencida). Só é cobrado na baixa
+    # que QUITA uma parcela vencida; em pagamento parcial não há encargo.
+    was_overdue = _receivable_is_overdue(receivable, date.today())
+    encargo_calc = calcular_encargo(db, receivable) if was_overdue else None
+
     now = received_at or datetime.now(timezone.utc)
     receivable.amount_received = Decimal(receivable.amount_received) + amount
-    if receivable.amount_received >= receivable.amount:
+    quita = receivable.amount_received >= receivable.amount
+    if quita:
         receivable.status = AccountReceivableStatus.QUITADO
         receivable.received_at = now
     else:
@@ -568,6 +659,7 @@ def receive_payment(
         receivable.notes = notes
     fin_repo.save(db, receivable)
 
+    # Movimento do PRINCIPAL (inalterado).
     registrar_movimento(
         db,
         movement_type=MovementType.ENTRADA,
@@ -578,6 +670,41 @@ def receive_payment(
         reference_id=receivable.id,
         occurred_at=now,
     )
+
+    # Movimento SEPARADO do encargo (receita financeira), só ao quitar parcela
+    # vencida. `encargo` override (inclusive 0 = perdão) tem precedência; senão,
+    # usa o total pré-calculado.
+    if quita and was_overdue:
+        encargo_value = encargo if encargo is not None else encargo_calc.total
+        encargo_value = _quantize(Decimal(encargo_value))
+        if encargo_value > 0:
+            parcela_label = (
+                f" (parcela {receivable.installment_number}/"
+                f"{receivable.installment_total})"
+                if receivable.installment_number
+                else ""
+            )
+            registrar_movimento(
+                db,
+                movement_type=MovementType.ENTRADA,
+                category=FinancialCategory.JUROS_MULTA,
+                amount=encargo_value,
+                description=(
+                    f"Juros/multa por atraso — {receivable.number}{parcela_label}"
+                ),
+                source_module="financeiro",
+                reference_id=receivable.id,
+                occurred_at=now,
+            )
+
+    # Status da nota = paga, persistido, quando a última parcela é quitada (9.B).
+    if quita and receivable.invoice_id is not None:
+        from app.modules.faturamento import service as faturamento_service
+
+        faturamento_service.marcar_fatura_paga_se_quitada(
+            db, receivable.invoice_id
+        )
+
     return receivable
 
 
@@ -791,13 +918,27 @@ def _normalize_method(value) -> Optional[str]:
 
 
 def list_defaulters(db: Session) -> list[DefaulterItem]:
+    # Inadimplência EFETIVA (Demanda 9.A) = manual (override D7) OU vencida
+    # (derivada). Manual: AR marcada (status cancelada) de cliente com flag.
+    # Vencida: parcela em aberto, due_date < hoje, não cancelada.
+    from sqlalchemy import and_, or_
+
+    today = date.today()
+    manual_cond = and_(
+        AccountReceivable.status == AccountReceivableStatus.CANCELADA,
+        Client.is_delinquent.is_(True),
+    )
+    overdue_cond = and_(
+        AccountReceivable.status != AccountReceivableStatus.CANCELADA,
+        AccountReceivable.amount_received < AccountReceivable.amount,
+        AccountReceivable.due_date < today,
+    )
     receivables = (
         db.query(AccountReceivable, Client)
         .join(Client, Client.id == AccountReceivable.client_id)
         .filter(
-            AccountReceivable.status == AccountReceivableStatus.CANCELADA,
             AccountReceivable.deleted_at.is_(None),
-            Client.is_delinquent.is_(True),
+            or_(manual_cond, overdue_cond),
         )
         .order_by(AccountReceivable.due_date.asc())
         .all()

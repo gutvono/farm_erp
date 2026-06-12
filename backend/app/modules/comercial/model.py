@@ -58,6 +58,11 @@ class Sale(UUIDMixin, TimestampMixin, SoftDeleteMixin, Base):
         index=True,
     )
     total_amount = Column(Numeric(12, 2), nullable=False, default=0)
+    # Desconto de cabeçalho (Demanda 9.C): percentual informado na venda e o valor
+    # em R$ resultante. total_amount já é o LÍQUIDO (subtotal − discount_amount); o
+    # preço unitário dos itens permanece intacto (desconto sobre o total, não por item).
+    discount_percent = Column(Numeric(5, 2), nullable=False, default=0)
+    discount_amount = Column(Numeric(12, 2), nullable=False, default=0)
     shipping_cost = Column(Numeric(12, 2), nullable=True, default=0)
     sold_at = Column(DateTime(timezone=True), nullable=False)
     delivered_at = Column(DateTime(timezone=True), nullable=True)

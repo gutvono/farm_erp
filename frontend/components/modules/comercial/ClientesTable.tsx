@@ -39,6 +39,18 @@ function composeAddress(client: Client): string {
   return client.address ?? ""
 }
 
+/**
+ * Distingue a ORIGEM da inadimplência efetiva (Demanda 9.A) para o tooltip do
+ * badge: marcação manual (D7), parcela vencida (derivada) ou ambas.
+ */
+function delinquentTitle(client: Client): string {
+  if (client.is_delinquent && client.has_overdue) {
+    return "Inadimplente: marcado manualmente e com parcela vencida"
+  }
+  if (client.is_delinquent) return "Inadimplente: marcado manualmente"
+  return "Inadimplente: possui parcela vencida"
+}
+
 /** Ações por cliente (editar + excluir) com estado próprio de exclusão. */
 function ClienteActions({
   client,
@@ -134,8 +146,13 @@ export function ClientesTable({
         <div className="min-w-0">
           <div className="flex items-center gap-2">
             <span className="font-medium text-slate-800">{c.name}</span>
-            {c.is_delinquent && (
-              <Badge className="bg-red-100 text-red-700">Inadimplente</Badge>
+            {c.is_delinquent_effective && (
+              <Badge
+                className="bg-red-100 text-red-700"
+                title={delinquentTitle(c)}
+              >
+                Inadimplente
+              </Badge>
             )}
           </div>
           {c.document && <p className="text-xs text-slate-500">{c.document}</p>}

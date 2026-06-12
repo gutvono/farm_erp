@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import { toast } from "sonner"
 import {
   Sheet,
@@ -24,10 +24,16 @@ import {
   AlertDialogTitle,
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { AccountsReceivable, BoletoPaymentInfo, PixPaymentInfo } from "@/types/index"
+import {
+  AccountsReceivable,
+  BoletoPaymentInfo,
+  EncargoBreakdown,
+  PixPaymentInfo,
+} from "@/types/index"
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils"
 import {
   getBoletoReceber,
+  getEncargo,
   getPixReceber,
   marcarInadimplente,
   receberConta,
@@ -74,6 +80,41 @@ export function ContaReceivableDetail({
   const [boletoOpen, setBoletoOpen] = useState(false)
   const [boletoInfo, setBoletoInfo] = useState<BoletoPaymentInfo | null>(null)
   const [boletoLoading, setBoletoLoading] = useState(false)
+  const [encargo, setEncargo] = useState<EncargoBreakdown | null>(null)
+  const [encargoLoading, setEncargoLoading] = useState(false)
+  const [encargoOverride, setEncargoOverride] = useState("")
+
+  const isOverdue = !!conta?.is_overdue
+  const contaId = conta?.id
+
+  // Busca o encargo por atraso (Demanda 9.B) só para parcela vencida, ao abrir.
+  // O encargo só é cobrado na baixa que QUITA a parcela — o cálculo é exibido
+  // como referência e default editável do override.
+  useEffect(() => {
+    if (!open || !contaId || !isOverdue) {
+      setEncargo(null)
+      setEncargoOverride("")
+      return
+    }
+    let active = true
+    setEncargoLoading(true)
+    getEncargo(contaId)
+      .then((data) => {
+        if (!active) return
+        setEncargo(data)
+        setEncargoOverride(data.total.toFixed(2))
+      })
+      .catch((err) => {
+        if (!active) return
+        toast.error(err instanceof Error ? err.message : "Erro ao calcular encargo por atraso")
+      })
+      .finally(() => {
+        if (active) setEncargoLoading(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, contaId, isOverdue])
 
   if (!conta) return null
 
@@ -82,6 +123,25 @@ export function ContaReceivableDetail({
     conta.status === "em_aberto" || conta.status === "parcialmente_pago"
   const canMarkDefaulter = canReceive
   const canRevert = conta.status === "cancelada"
+
+  const typedValue = Number(receivedValue)
+  // Quitação total = valor digitado cobre o saldo devedor (tolerância de centavo).
+  const isFullPayment =
+    Number.isFinite(typedValue) &&
+    typedValue > 0 &&
+    Math.abs(typedValue - outstanding) < 0.005
+  // Encargo só se aplica na quitação total de parcela vencida.
+  const encargoApplies = conta.is_overdue && isFullPayment
+  const encargoOverrideValue = Number(encargoOverride)
+  const encargoOverrideValid =
+    Number.isFinite(encargoOverrideValue) && encargoOverrideValue >= 0
+
+  // Valor de encargo a enviar numa baixa que quita uma parcela vencida; `undefined`
+  // nos demais casos (não vencida, ou pagamento parcial) — o backend não cobra encargo.
+  function encargoArgFor(fullPayment: boolean): number | undefined {
+    if (!conta?.is_overdue || !fullPayment) return undefined
+    return encargoOverrideValid ? encargoOverrideValue : undefined
+  }
 
   async function handleReceive() {
     if (!conta) return
@@ -96,9 +156,14 @@ export function ContaReceivableDetail({
       )
       return
     }
+    const fullPayment = Math.abs(value - outstanding) < 0.005
+    if (conta.is_overdue && fullPayment && !encargoOverrideValid) {
+      toast.error("Informe um encargo válido (0 ou maior)")
+      return
+    }
     setReceiving(true)
     try {
-      await receberConta(conta.id, value)
+      await receberConta(conta.id, value, encargoArgFor(fullPayment))
       toast.success("Recebimento registrado")
       setReceivedValue("")
       onChanged()
@@ -176,7 +241,8 @@ export function ContaReceivableDetail({
     if (value <= 0) return
     setReceiving(true)
     try {
-      await receberConta(conta.id, value)
+      // PIX/Boleto quitam o saldo total → encargo (override do cálculo) na parcela vencida.
+      await receberConta(conta.id, value, encargoArgFor(true))
       toast.success("Recebimento confirmado")
       onChanged()
       onOpenChange(false)
@@ -257,17 +323,91 @@ export function ContaReceivableDetail({
           )}
 
           {canReceive && (
-            <div className="mt-6 space-y-2 rounded-lg border border-slate-200 p-4">
-              <Label htmlFor="received-value">Valor recebido (R$)</Label>
-              <Input
-                id="received-value"
-                type="number"
-                step="0.01"
-                min="0"
-                value={receivedValue}
-                onChange={(e) => setReceivedValue(e.target.value)}
-                placeholder="0.00"
-              />
+            <div className="mt-6 space-y-3 rounded-lg border border-slate-200 p-4">
+              <div className="space-y-2">
+                <Label htmlFor="received-value">Valor recebido (R$)</Label>
+                <Input
+                  id="received-value"
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={receivedValue}
+                  onChange={(e) => setReceivedValue(e.target.value)}
+                  placeholder="0.00"
+                />
+                {isOverdue && (
+                  <p className="text-xs text-slate-400">
+                    Digite o saldo devedor ({formatCurrency(outstanding)}) para quitar e
+                    aplicar o encargo por atraso. Pagamento parcial não gera encargo.
+                  </p>
+                )}
+              </div>
+
+              {/* Encargo por atraso (Demanda 9.B): só na quitação total de parcela vencida. */}
+              {encargoApplies && (
+                <div className="space-y-2 rounded-md bg-amber-50 p-3 text-xs">
+                  <p className="font-semibold text-amber-800">
+                    Parcela vencida há {encargo?.dias_atraso ?? conta.days_overdue} dia(s) — encargo
+                    cobrado à parte do principal.
+                  </p>
+                  {encargoLoading ? (
+                    <p className="text-amber-700">Calculando encargo...</p>
+                  ) : (
+                    <div className="space-y-1 text-amber-800">
+                      <div className="flex justify-between">
+                        <span>Multa</span>
+                        <span>{formatCurrency(encargo?.multa ?? 0)}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Juros de mora</span>
+                        <span>{formatCurrency(encargo?.juros ?? 0)}</span>
+                      </div>
+                      <div className="flex justify-between border-t border-amber-200 pt-1 font-medium">
+                        <span>Encargo calculado</span>
+                        <span>{formatCurrency(encargo?.total ?? 0)}</span>
+                      </div>
+                    </div>
+                  )}
+                  <div className="space-y-1 pt-1">
+                    <Label htmlFor="encargo-override" className="text-amber-800">
+                      Encargo a cobrar (R$)
+                    </Label>
+                    <Input
+                      id="encargo-override"
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={encargoOverride}
+                      onChange={(e) => setEncargoOverride(e.target.value)}
+                      placeholder="0.00"
+                    />
+                    <p className="text-amber-700">
+                      Editável; informe <strong>0</strong> para perdoar o encargo.
+                    </p>
+                  </div>
+                  <div className="flex justify-between border-t border-amber-200 pt-2 font-semibold text-amber-900">
+                    <span>Total a receber</span>
+                    <span>
+                      {formatCurrency(
+                        outstanding + (encargoOverrideValid ? encargoOverrideValue : 0)
+                      )}
+                    </span>
+                  </div>
+                  <p className="text-amber-700">
+                    Recebimento {formatCurrency(outstanding)} (principal) + Encargo{" "}
+                    {formatCurrency(encargoOverrideValid ? encargoOverrideValue : 0)} — lançados
+                    em movimentos separados.
+                  </p>
+                </div>
+              )}
+
+              {isOverdue && isFullPayment === false && typedValue > 0 && (
+                <p className="text-xs text-slate-500">
+                  Pagamento parcial: o encargo por atraso será cobrado apenas na quitação total
+                  da parcela.
+                </p>
+              )}
+
               <Button
                 onClick={handleReceive}
                 disabled={receiving}

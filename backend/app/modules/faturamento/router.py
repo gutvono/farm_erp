@@ -11,7 +11,6 @@ from app.modules.faturamento import service as fat_service
 from app.modules.faturamento.schemas import (
     InvoiceCancel,
     InvoiceCreate,
-    InvoiceOut,
     InvoiceStatusUpdate,
 )
 from app.shared.enums import InvoiceStatus
@@ -21,9 +20,9 @@ router = APIRouter()
 
 
 def _serialize(invoice, db: Session) -> dict:
-    from app.modules.faturamento.service import _get_client_name
-    client_name = _get_client_name(db, invoice.client_id)
-    return InvoiceOut.from_model(invoice, client_name).model_dump(mode="json")
+    # Serialização única no Service: inclui o bloco de parcelas (AR) e o status
+    # derivado da nota (Demanda 9.0).
+    return fat_service.serialize_invoice(db, invoice).model_dump(mode="json")
 
 
 @router.get("/faturas", response_model=SuccessResponse)

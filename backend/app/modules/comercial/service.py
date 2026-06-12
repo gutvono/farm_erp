@@ -48,6 +48,18 @@ def _get_sale_or_404(db: Session, sale_id: UUID) -> Sale:
     return sale
 
 
+def _calcular_vencimentos(
+    first_due_date: date, installments: int, interval_days: int
+) -> list[date]:
+    """Vencimentos das N parcelas: primeira em ``first_due_date``, as demais a
+    cada ``interval_days``. (Migrado do Faturamento na Demanda 9.0 — agora dirige
+    as contas a receber, não notas.)"""
+    return [
+        first_due_date + timedelta(days=interval_days * idx)
+        for idx in range(installments)
+    ]
+
+
 def _validate_document_or_400(document: Optional[str]) -> None:
     """Documento é opcional; se informado, precisa ser CPF ou CNPJ válido.
 
@@ -63,6 +75,15 @@ def _validate_document_or_400(document: Optional[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def serialize_client(db: Session, client: Client) -> ClientOut:
+    """Serializa um cliente com a inadimplência derivada (Demanda 9.A): consulta
+    o Financeiro (`client_has_overdue`) e deriva `has_overdue` +
+    `is_delinquent_effective`. Para listas, use a anotação em lote em
+    ``list_clients`` (evita N+1)."""
+    has_overdue = fin_service.client_has_overdue(db, client.id)
+    return ClientOut.from_model(client, has_overdue)
+
+
 def create_client(db: Session, data: ClientCreate) -> Client:
     _validate_document_or_400(data.document)
     return comercial_repo.create_client(db, data)
@@ -74,10 +95,17 @@ def list_clients(
     params: PageParams,
     is_delinquent: Optional[bool] = None,
 ) -> Page[ClientOut]:
+    # Inadimplência derivada (UMA query, sem N+1): o set de client_ids com
+    # parcela vencida vem do Financeiro e é reusado para (1) o filtro EFETIVO
+    # quando is_delinquent=true (Demanda 9.B) e (2) anotar cada ClientOut.
+    overdue_ids = fin_service.get_client_ids_with_overdue(db)
     clients, total = comercial_repo.list_clients(
-        db, params=params, is_delinquent=is_delinquent
+        db,
+        params=params,
+        is_delinquent=is_delinquent,
+        effective_overdue_ids=list(overdue_ids) if is_delinquent else None,
     )
-    items = [ClientOut.model_validate(c) for c in clients]
+    items = [ClientOut.from_model(c, c.id in overdue_ids) for c in clients]
     return Page.create(items=items, total=total, params=params)
 
 
@@ -164,56 +192,59 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
     else:
         payment_method_value = payment_method_raw
 
-    if installments <= 1:
-        # 5. Create invoice (flow à vista — unchanged)
-        faturamento_service.criar_fatura(
-            db,
-            sale_id=sale.id,
-            client_id=sale.client_id,
-            items=sale.items,
-            total_amount=Decimal(sale.total_amount),
-            source_module="comercial",
-        )
+    # 5. Emit the SINGLE sale invoice (full total, items once) — emitida no ATO
+    # da venda (invariante de timing preservado: NF antes de qualquer
+    # recebimento). criar_fatura já registra o movimento R$0 "fatura emitida".
+    total = Decimal(sale.total_amount)
+    invoice = faturamento_service.criar_fatura(
+        db,
+        sale_id=sale.id,
+        client_id=sale.client_id,
+        items=sale.items,
+        total_amount=total,
+        source_module="comercial",
+    )
 
-        # 6. Create account receivable (due in 30 days)
+    # 6. Create the receivable(s) — 1 (à vista) ou N parcelas (Nx), TODAS
+    # apontando invoice_id para a nota única. As parcelas vivem só na AR
+    # (Demanda 9.0: 1 nota + N AR; não há mais N notas). Vencimentos futuros.
+    if installments <= 1:
+        due_date = sale.first_due_date or (date.today() + timedelta(days=30))
         fin_service.criar_conta_receber(
             db,
             client_id=sale.client_id,
             description=f"Venda — {client.name}",
-            amount=Decimal(sale.total_amount),
-            due_date=date.today() + timedelta(days=30),
+            amount=total,
+            due_date=due_date,
             source_module="comercial",
-            reference_id=sale.id,
+            sale_id=sale.id,
+            invoice_id=invoice.id,
             payment_method=payment_method_value,
         )
     else:
-        # 5. Create parceled invoices (one per installment)
-        invoices = faturamento_service.criar_faturas_parceladas(
-            db,
-            sale_id=sale.id,
-            client_id=sale.client_id,
-            items=sale.items,
-            total_amount=Decimal(sale.total_amount),
-            installments=installments,
-            first_due_date=sale.first_due_date,
-            installment_interval_days=sale.installment_interval_days or 30,
+        # Divisão dos valores: base_share igual; a última parcela absorve o
+        # centavo residual. (Lógica migrada do antigo criar_faturas_parceladas.)
+        base_share = (total / Decimal(installments)).quantize(Decimal("0.01"))
+        last_share = total - base_share * (installments - 1)
+        due_dates = _calcular_vencimentos(
+            sale.first_due_date,
+            installments,
+            sale.installment_interval_days or 30,
         )
-
-        # 6. One receivable per installment, linked to its invoice
-        for invoice in invoices:
+        for idx in range(installments):
+            amount = last_share if idx == installments - 1 else base_share
             fin_service.criar_conta_receber(
                 db,
                 client_id=sale.client_id,
                 description=(
-                    f"Venda — {client.name} "
-                    f"(parcela {invoice.installment_number}/{installments})"
+                    f"Venda — {client.name} (parcela {idx + 1}/{installments})"
                 ),
-                amount=Decimal(str(invoice.total_amount)),
-                due_date=invoice.due_date,
+                amount=amount,
+                due_date=due_dates[idx],
                 source_module="comercial",
                 sale_id=sale.id,
                 invoice_id=invoice.id,
-                installment_number=invoice.installment_number,
+                installment_number=idx + 1,
                 installment_total=installments,
                 payment_method=payment_method_value,
             )

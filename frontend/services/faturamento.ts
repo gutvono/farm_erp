@@ -1,5 +1,13 @@
 import { apiFetch } from "@/lib/api"
-import { ApiResponse, Invoice, InvoiceItem, InvoiceStatus } from "@/types/index"
+import {
+  ApiResponse,
+  Invoice,
+  InvoiceItem,
+  InvoiceParcela,
+  InvoiceStatus,
+  PaymentMethod,
+  ReceivableStatus,
+} from "@/types/index"
 
 function toNumber(value: unknown): number {
   if (typeof value === "number") return value
@@ -25,6 +33,32 @@ function parseInvoiceItem(raw: RawInvoiceItem): InvoiceItem {
   }
 }
 
+interface RawInvoiceParcela {
+  id: string
+  number: string
+  installment_number: number
+  installment_total: number
+  due_date: string
+  amount: string | number
+  amount_received: string | number
+  status: ReceivableStatus
+  payment_method: PaymentMethod | null
+}
+
+function parseInvoiceParcela(raw: RawInvoiceParcela): InvoiceParcela {
+  return {
+    id: raw.id,
+    number: raw.number,
+    installment_number: raw.installment_number,
+    installment_total: raw.installment_total,
+    due_date: raw.due_date,
+    amount: toNumber(raw.amount),
+    amount_received: toNumber(raw.amount_received),
+    status: raw.status,
+    payment_method: raw.payment_method ?? null,
+  }
+}
+
 interface RawInvoice {
   id: string
   number: string
@@ -33,6 +67,8 @@ interface RawInvoice {
   client_name: string
   status: InvoiceStatus
   total_amount: string | number
+  subtotal: string | number
+  discount_amount: string | number
   issue_date: string
   due_date: string | null
   notes: string | null
@@ -43,6 +79,7 @@ interface RawInvoice {
   cancelled_at: string | null
   cancellation_reason: string | null
   items: RawInvoiceItem[]
+  parcelas: RawInvoiceParcela[] | null
   created_at: string
   updated_at: string
 }
@@ -56,6 +93,8 @@ function parseInvoice(raw: RawInvoice): Invoice {
     client_name: raw.client_name,
     status: raw.status,
     total_amount: toNumber(raw.total_amount),
+    subtotal: toNumber(raw.subtotal),
+    discount_amount: toNumber(raw.discount_amount),
     issue_date: raw.issue_date,
     due_date: raw.due_date,
     notes: raw.notes,
@@ -66,6 +105,7 @@ function parseInvoice(raw: RawInvoice): Invoice {
     cancelled_at: raw.cancelled_at ?? null,
     cancellation_reason: raw.cancellation_reason ?? null,
     items: (raw.items ?? []).map(parseInvoiceItem),
+    parcelas: (raw.parcelas ?? []).map(parseInvoiceParcela),
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }

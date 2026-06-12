@@ -63,11 +63,23 @@ class ClientOut(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     is_delinquent: bool
+    # Inadimplência derivada (Demanda 9.A): `has_overdue` = tem ≥1 parcela
+    # vencida (calculado na leitura). `is_delinquent_effective` = flag manual
+    # (override D7) OU vencida. `is_delinquent` (manual) é preservado.
+    has_overdue: bool = False
+    is_delinquent_effective: bool = False
     notes: Optional[str] = None
     created_at: datetime
     updated_at: datetime
 
     model_config = ConfigDict(from_attributes=True)
+
+    @classmethod
+    def from_model(cls, client, has_overdue: bool = False) -> "ClientOut":
+        out = cls.model_validate(client)
+        out.has_overdue = has_overdue
+        out.is_delinquent_effective = bool(client.is_delinquent) or has_overdue
+        return out
 
 
 # ---------------------------------------------------------------------------
@@ -121,6 +133,10 @@ class SaleCreate(BaseModel):
     installment_interval_days: int = Field(default=30, ge=1)
     payment_method: PaymentMethod = PaymentMethod.A_VISTA
     shipping_cost: Optional[Decimal] = Field(default=None, ge=0)
+    # Desconto de cabeçalho (Demanda 9.C): percentual sobre o subtotal dos itens.
+    # O preço unitário/tabela de cada item permanece intacto; o desconto é aplicado
+    # no total da venda (não por item). Só %, 0–100.
+    discount_percent: Decimal = Field(default=0, ge=0, le=100)
 
     @model_validator(mode="after")
     def _validate_installments(self) -> "SaleCreate":
@@ -141,6 +157,13 @@ class SaleOut(BaseModel):
     client_name: str
     status: SaleStatus
     total_amount: Decimal
+    # Desconto de cabeçalho (Demanda 9.C). `items_subtotal` é o subtotal BRUTO
+    # dos itens (soma a preço de tabela), exposto para que NF e front montem
+    # Subtotal → Desconto → Total líquido sem recomputar. `total_amount` já é o
+    # LÍQUIDO (items_subtotal − discount_amount + frete).
+    items_subtotal: Decimal = Decimal("0")
+    discount_percent: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
     shipping_cost: Decimal = Decimal("0")
     sold_at: datetime
     delivered_at: Optional[datetime] = None
@@ -170,6 +193,11 @@ class SaleOut(BaseModel):
             client_name=sale.client.name if sale.client else "",
             status=sale.status,
             total_amount=sale.total_amount,
+            items_subtotal=sum(
+                (Decimal(str(i.subtotal)) for i in sale.items), Decimal("0")
+            ),
+            discount_percent=Decimal(str(sale.discount_percent or 0)),
+            discount_amount=Decimal(str(sale.discount_amount or 0)),
             shipping_cost=Decimal(str(sale.shipping_cost or 0)),
             sold_at=sale.sold_at,
             delivered_at=sale.delivered_at,

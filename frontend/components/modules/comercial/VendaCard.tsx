@@ -115,8 +115,8 @@ export function VendaCard({ sale, onChanged }: VendaCardProps) {
     <>
       <Card className="border-slate-200">
         <CardHeader className="pb-3">
-          <div className="flex items-start justify-between gap-3">
-            <div className="flex-1 min-w-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex-1 min-w-[200px]">
               <div className="flex items-center gap-2 flex-wrap">
                 <span className="font-semibold text-slate-800">{sale.client_name}</span>
                 <Badge className={STATUS_COLORS[sale.status]}>

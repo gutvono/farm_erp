@@ -436,6 +436,39 @@ def list_receivables_paginated(
     )
 
 
+def _overdue_filter(today: date):
+    """Predicado SQL de 'parcela vencida' (Demanda 9.A): vencida há tempo, com
+    saldo em aberto e não cancelada. Quitada (amount_received >= amount) ou
+    cancelada nunca é vencida."""
+    return [
+        AccountReceivable.deleted_at.is_(None),
+        AccountReceivable.status != AccountReceivableStatus.CANCELADA,
+        AccountReceivable.amount_received < AccountReceivable.amount,
+        AccountReceivable.due_date < today,
+    ]
+
+
+def get_client_ids_with_overdue(db: Session, today: date) -> set[UUID]:
+    """UMA query: client_ids com ≥1 conta a receber vencida. Usado para anotar a
+    lista de clientes sem N+1."""
+    rows = (
+        db.query(AccountReceivable.client_id)
+        .filter(*_overdue_filter(today))
+        .distinct()
+        .all()
+    )
+    return {row[0] for row in rows}
+
+
+def client_has_overdue(db: Session, client_id: UUID, today: date) -> bool:
+    """True se o cliente tem ≥1 conta a receber vencida (parcela em aberto)."""
+    return db.query(
+        db.query(AccountReceivable)
+        .filter(AccountReceivable.client_id == client_id, *_overdue_filter(today))
+        .exists()
+    ).scalar()
+
+
 def list_receivables_by_refs(
     db: Session,
     *,

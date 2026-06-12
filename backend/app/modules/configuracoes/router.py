@@ -9,6 +9,7 @@ from app.modules.auth.router import get_current_user
 from app.modules.configuracoes import service as config_service
 from app.modules.configuracoes.schemas import (
     CategoryRolesUpdate,
+    EncargosUpdate,
     HarvestDestinationsUpdate,
     StockCategoryCreate,
     StockCategoryOut,
@@ -137,4 +138,29 @@ def update_harvest_destinations(
     return success(
         "Destinos da colheita atualizados com sucesso",
         destinations.model_dump(mode="json"),
+    )
+
+
+@router.get("/encargos", response_model=SuccessResponse)
+def get_encargos(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    encargos = config_service.get_encargos(db)
+    return success(
+        "Taxas de encargo obtidas com sucesso",
+        encargos.model_dump(mode="json"),
+    )
+
+
+@router.put("/encargos", response_model=SuccessResponse)
+def update_encargos(
+    body: EncargosUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    encargos = config_service.update_encargos(db, body)
+    return success(
+        "Taxas de encargo atualizadas com sucesso",
+        encargos.model_dump(mode="json"),
     )

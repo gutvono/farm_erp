@@ -39,6 +39,8 @@ interface RawClient {
   state: string | null
   notes: string | null
   is_delinquent: boolean
+  has_overdue?: boolean
+  is_delinquent_effective?: boolean
   created_at: string
   updated_at: string
 }
@@ -60,6 +62,8 @@ function parseClient(raw: RawClient): Client {
     state: raw.state ?? null,
     notes: raw.notes,
     is_delinquent: raw.is_delinquent,
+    has_overdue: raw.has_overdue ?? false,
+    is_delinquent_effective: raw.is_delinquent_effective ?? raw.is_delinquent,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -104,6 +108,9 @@ interface RawSale {
   client_name: string
   status: SaleStatus
   total_amount: string | number
+  items_subtotal: string | number
+  discount_percent: string | number
+  discount_amount: string | number
   notes: string | null
   sold_at: string
   delivered_at: string | null
@@ -123,6 +130,9 @@ function parseSale(raw: RawSale): Sale {
     client_name: raw.client_name,
     status: raw.status,
     total_amount: toNumber(raw.total_amount),
+    items_subtotal: toNumber(raw.items_subtotal),
+    discount_percent: toNumber(raw.discount_percent),
+    discount_amount: toNumber(raw.discount_amount),
     notes: raw.notes,
     sold_at: raw.sold_at,
     delivered_at: raw.delivered_at,
@@ -269,21 +279,14 @@ export async function createVenda(data: {
   first_due_date?: string
   installment_interval_days?: number
   shipping_cost?: number
+  /** Desconto de cabeçalho (% sobre o subtotal dos itens), default 0 — Demanda 9.C. */
+  discount_percent?: number
   items: { stock_item_id: string; quantity: number; unit_price: number }[]
 }): Promise<Sale> {
   const response = await apiFetch<ApiResponse<RawSale>>("/api/comercial/vendas", {
     method: "POST",
     body: JSON.stringify(data),
   })
-  // TODO BACKEND DEV: o endpoint POST /api/comercial/vendas deve aceitar o campo opcional
-  // shipping_cost (number >= 0). Quando presente e > 0, o service de backend deve:
-  // 1. Persistir shipping_cost na tabela sales (nova coluna NUMERIC(12,2), default 0)
-  // 2. Incluir shipping_cost no total_amount da venda OU rastreá-lo separadamente (decisão do dev)
-  // 3. Chamar fat_service.criar_nota_transporte(db, sale_id, shipping_cost) — função nova no
-  //    faturamento service — que cria uma Invoice com invoice_type="transporte", client_id=sale.client_id,
-  //    sale_id=sale.id, 1 item com description="Custo de transporte", quantity=1,
-  //    unit_price=shipping_cost. NF sempre à vista (não parcelada), mesmo que a venda seja parcelada.
-  // 4. Registrar financial_movement ENTRADA/VENDA separado para o transporte (amount=0, rastreabilidade)
   return parseSale(response.data)
 }
 

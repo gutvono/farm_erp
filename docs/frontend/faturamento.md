@@ -12,6 +12,8 @@ do sistema: as de **venda** (emitidas para clientes) e as de **compra**
 
 - consultar e filtrar notas por status;
 - abrir o **PDF** de qualquer nota fiscal;
+- ver o **bloco de parcelas (cobrança)** de uma venda — agora cada venda é **uma única
+  nota** com **N parcelas** (antes eram N notas separadas);
 - **marcar uma fatura de venda como paga**;
 - **cancelar uma nota fiscal** (com os efeitos corretos no estoque e no financeiro);
 - ver **apenas as notas de uma compra específica**, quando chega por meio do botão
@@ -101,6 +103,40 @@ se ainda **não** foi paga, o sistema apenas **cancela a(s) conta(s) a pagar em 
 O sistema diferencia transporte **de compra** de transporte **de venda** pela
 referência registrada na própria nota (ordem de compra × venda).
 
+### 1.7 Ver as parcelas (cobrança) de uma venda
+
+> **Mudança (Demanda 9):** uma venda parcelada deixou de virar **N notas** e passou a ser
+> **uma única nota fiscal com N parcelas**. Na lista, portanto, a venda aparece como **1 só
+> card** — não há mais uma linha por parcela.
+
+1. Expanda a nota (seta ˅). Abaixo dos itens aparece o bloco **"Parcelas"**.
+2. A tabela lista **cada parcela**: número (ex.: `2/3`), **vencimento**, **valor**,
+   **recebido** e **status** (Em aberto / Parcial / Quitada / Cancelada).
+3. Notas **à vista** mostram **uma única parcela**; notas **parceladas** trazem um selo
+   roxo **"Parcelada N×"** no topo do card.
+4. O **status da nota** continua sendo **um só** (Emitida/Paga/Cancelada) e é **derivado**:
+   a nota só vira **Paga** quando **todas** as parcelas estão quitadas — nunca por parcela.
+5. O **PDF** da nota traz o **total cheio** e uma **tabela com todas as parcelas**
+   (nº / vencimento / valor / status).
+
+[SCREENSHOT: nota de venda parcelada expandida, mostrando o selo "Parcelada 3×" e a tabela de Parcelas (1 quitada, 2 em aberto)]
+
+### 1.8 Nota fiscal com desconto (Demanda 9.C)
+
+Quando a venda teve **desconto** (campo Desconto (%) no formulário de venda), a nota fiscal
+mostra a **linha de desconto** — tanto no card expandido quanto no **PDF**:
+
+1. Expanda a nota: abaixo dos itens, antes do total, aparecem **Subtotal** (itens a preço
+   de tabela) e **Desconto** (em verde, o valor abatido); o total passa a se chamar
+   **"Total líquido"**.
+2. No **PDF**, o bloco de totais imprime **Subtotal → Desconto → Total líquido** (e segue
+   com os impostos e o **TOTAL NF-e**, que é o líquido).
+3. As **parcelas** (cobrança) já derivam do **total líquido** — somam o valor com desconto.
+4. Notas **sem desconto** mantêm o layout anterior (só **Total**), sem nenhuma linha de
+   desconto.
+
+[SCREENSHOT: NF de venda expandida com a linha de Desconto e "Total líquido"]
+
 ---
 
 ## 2. Tipos de Nota Fiscal e seus badges
@@ -120,8 +156,9 @@ Outros indicadores no card:
 
 - **"Fornecedor notificado"** (✓ verde) — quando a nota de devolução registra a
   notificação ao fornecedor.
-- **"Parcelada"** / **"Gerada automaticamente"** — para faturas de venda.
-- Faturas parceladas exibem no título: `INV-XXXX — Parcela X/Y`.
+- **"Parcelada N×"** (roxo) — quando a venda tem mais de uma parcela (Demanda 9). O número
+  e o vencimento de **cada** parcela aparecem no **bloco de Parcelas** (seção 1.7), não mais
+  no título da nota. Vendas à vista (1 parcela) podem exibir **"Gerada automaticamente"**.
 
 [SCREENSHOT: vários cards lado a lado mostrando os badges Venda, Recebimento, Devolução, Transporte e Serviço]
 
@@ -211,10 +248,32 @@ e **devolução** usam o layout fiscal completo (NCM/CFOP/impostos). Notas de
 (descrição + total, sem CFOP de mercadoria): títulos "NOTA FISCAL DE TRANSPORTE" e
 "NOTA FISCAL DE SERVIÇO".
 
+Quando a nota tem parcelas (`invoice.parcelas.length > 0`), o PDF imprime, ao final, um
+bloco **"PARCELAS"** com a tabela completa (nº / vencimento / valor / status) e o **total
+cheio** da nota. Substituiu o antigo bloco "DUPLICATAS" de **uma** parcela (que assumia o
+modelo de N notas e o "1 de N").
+
+Quando `invoice.discount_amount > 0` (Demanda 9.C), o bloco de totais (PDF e card
+expandido) renderiza **Subtotal (`invoice.subtotal`) → Desconto (`invoice.discount_amount`)
+→ Total líquido (`invoice.total_amount`)**. Sem desconto, mantém só o **Total**.
+
 ### Tipos (`types/index.ts`)
 
 ```typescript
 type InvoiceStatus = "emitida" | "paga" | "cancelada"
+
+// Bloco de cobrança (Demanda 9.0): cada parcela é uma conta a receber ligada à nota.
+interface InvoiceParcela {
+  id: string
+  number: string
+  installment_number: number
+  installment_total: number
+  due_date: string
+  amount: number                  // Decimal → number no parse
+  amount_received: number         // Decimal → number no parse
+  status: ReceivableStatus        // "em_aberto" | "quitado" | "parcialmente_pago" | "cancelada"
+  payment_method: PaymentMethod | null
+}
 
 interface Invoice {
   id: string
@@ -222,18 +281,21 @@ interface Invoice {
   sale_id: string | null          // null = não originada de venda
   client_id: string | null        // null = NF sem cliente (compras, inclui serviço)
   client_name: string
-  status: InvoiceStatus
-  total_amount: number
+  status: InvoiceStatus           // DERIVADO: emitida→paga só quando TODAS as parcelas quitadas
+  total_amount: number            // total LÍQUIDO (já com desconto)
+  subtotal: number                // Σ itens a preço de tabela (bruto) — Demanda 9.C
+  discount_amount: number         // desconto (R$) da venda vinculada; 0 sem desconto — Demanda 9.C
   issue_date: string
   due_date: string | null
   notes: string | null
   invoice_type: string            // "venda" | "recebimento" | "devolucao" | "transporte" | "servico"
-  installment_number: number | null
-  installment_total: number | null
+  installment_number: number | null  // sempre null no fluxo de venda (Demanda 9.0) — use `parcelas`
+  installment_total: number | null   // idem
   parent_invoice_id: string | null
   cancelled_at: string | null
   cancellation_reason: string | null
   items: InvoiceItem[]
+  parcelas: InvoiceParcela[]      // [] para notas sem cobrança; à vista costuma ter 1
   created_at: string
   updated_at: string
 }
@@ -241,3 +303,8 @@ interface Invoice {
 
 `invoice_type` permanece `string` no tipo `Invoice` (cobre `servico`); a união
 estrita `NfType` (que inclui `servico`) é interna ao `FaturaCard`.
+
+**Demanda 9.0 — 1 nota + N parcelas:** os campos `installment_number/installment_total`
+**da nota** ficam `null` no fluxo de venda; o parcelamento vive no bloco `parcelas` (as
+contas a receber). O `FaturaCard` mostra o selo "Parcelada N×" e a tabela de parcelas no
+detalhe, e o PDF imprime a tabela "PARCELAS". O `status` da nota é derivado pelo backend.

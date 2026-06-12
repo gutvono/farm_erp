@@ -56,6 +56,7 @@ class FinancialCategory(str, enum.Enum):
     RECEBIMENTO = "recebimento"
     PAGAMENTO = "pagamento"
     SALDO_INICIAL = "saldo_inicial"
+    JUROS_MULTA = "juros_multa"
     OUTRO = "outro"
 
 

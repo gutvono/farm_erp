@@ -314,10 +314,25 @@ def receive_payment(
         amount=body.amount,
         received_at=body.received_at,
         notes=body.notes,
+        encargo=body.encargo,
     )
     return success(
         "Pagamento registrado com sucesso",
         AccountReceivableOut.model_validate(receivable).model_dump(mode="json"),
+    )
+
+
+@router.get("/contas-receber/{receivable_id}/encargo", response_model=SuccessResponse)
+def get_receivable_encargo(
+    receivable_id: UUID,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    receivable = fin_service.get_receivable(db, receivable_id)
+    encargo = fin_service.calcular_encargo(db, receivable)
+    return success(
+        "Encargo calculado com sucesso",
+        encargo.model_dump(mode="json"),
     )
 
 

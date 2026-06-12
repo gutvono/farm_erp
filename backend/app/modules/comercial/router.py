@@ -50,7 +50,7 @@ def create_client(
     client = comercial_service.create_client(db, body)
     return success(
         "Cliente criado com sucesso",
-        ClientOut.model_validate(client).model_dump(mode="json"),
+        comercial_service.serialize_client(db, client).model_dump(mode="json"),
     )
 
 
@@ -63,7 +63,7 @@ def get_client(
     client = comercial_service.get_client(db, client_id)
     return success(
         "Cliente obtido com sucesso",
-        ClientOut.model_validate(client).model_dump(mode="json"),
+        comercial_service.serialize_client(db, client).model_dump(mode="json"),
     )
 
 
@@ -77,7 +77,7 @@ def update_client(
     client = comercial_service.update_client(db, client_id, body)
     return success(
         "Cliente atualizado com sucesso",
-        ClientOut.model_validate(client).model_dump(mode="json"),
+        comercial_service.serialize_client(db, client).model_dump(mode="json"),
     )
 
 
@@ -88,7 +88,7 @@ def set_client_delinquent(
     _: User = Depends(get_current_user),
 ) -> SuccessResponse:
     client = comercial_service.update_client_delinquent(db, client_id, True)
-    return success("Cliente marcado como inadimplente", ClientOut.model_validate(client).model_dump(mode="json"))
+    return success("Cliente marcado como inadimplente", comercial_service.serialize_client(db, client).model_dump(mode="json"))
 
 
 @router.put("/clientes/{client_id}/reverter-inadimplencia", response_model=SuccessResponse)
@@ -100,7 +100,7 @@ def revert_client_delinquent(
     client = comercial_service.update_client_delinquent(db, client_id, False)
     return success(
         "Inadimplência revertida com sucesso",
-        ClientOut.model_validate(client).model_dump(mode="json"),
+        comercial_service.serialize_client(db, client).model_dump(mode="json"),
     )
 
 

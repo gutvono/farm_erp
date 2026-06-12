@@ -34,7 +34,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { cancelarFatura, updateFaturaStatus } from "@/services/faturamento"
-import { Invoice, InvoiceStatus } from "@/types/index"
+import { Invoice, InvoiceStatus, ReceivableStatus } from "@/types/index"
 import { formatCurrency, formatDate, formatDateTime } from "@/lib/utils"
 
 const CANCEL_SUCCESS_MESSAGE = "Nota fiscal cancelada com sucesso"
@@ -70,6 +70,21 @@ const STATUS_LABELS: Record<InvoiceStatus, string> = {
 const STATUS_COLORS: Record<InvoiceStatus, string> = {
   emitida: "bg-blue-100 text-blue-800",
   paga: "bg-green-100 text-green-800",
+  cancelada: "bg-slate-100 text-slate-600",
+}
+
+// Status de cada PARCELA (conta a receber) — bloco de cobrança da Demanda 9.0.
+const PARCELA_STATUS_LABELS: Record<ReceivableStatus, string> = {
+  em_aberto: "Em aberto",
+  parcialmente_pago: "Parcial",
+  quitado: "Quitada",
+  cancelada: "Cancelada",
+}
+
+const PARCELA_STATUS_COLORS: Record<ReceivableStatus, string> = {
+  em_aberto: "bg-blue-100 text-blue-800",
+  parcialmente_pago: "bg-amber-100 text-amber-800",
+  quitado: "bg-green-100 text-green-800",
   cancelada: "bg-slate-100 text-slate-600",
 }
 
@@ -320,9 +335,23 @@ async function generatePdf(invoice: Invoice, nfType: NfType) {
 
   // Totals
   doc.setFont("helvetica", "bold")
-  doc.text("Subtotal mercadoria:", 120, y, { align: "right" })
-  doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
-  y += 5
+  if (invoice.discount_amount > 0) {
+    // Desconto de cabeçalho (Demanda 9.C): Subtotal bruto → Desconto → Total líquido.
+    doc.text("Subtotal:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.subtotal), 150, y, { align: "right" })
+    y += 5
+    doc.setFont("helvetica", "normal")
+    doc.text("Desconto:", 120, y, { align: "right" })
+    doc.text(`- ${formatCurrency(invoice.discount_amount)}`, 150, y, { align: "right" })
+    y += 5
+    doc.text("Total líquido:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
+    y += 5
+  } else {
+    doc.text("Subtotal mercadoria:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
+    y += 5
+  }
   doc.setFont("helvetica", "normal")
   doc.text("ICMS:", 120, y, { align: "right" })
   doc.text(formatCurrency(totalIcms), 150, y, { align: "right" })
@@ -334,20 +363,33 @@ async function generatePdf(invoice: Invoice, nfType: NfType) {
   doc.text("TOTAL NF-e:", 120, y, { align: "right" })
   doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
 
-  // Duplicatas (installments)
-  if (invoice.installment_number !== null && invoice.installment_total !== null) {
+  // Bloco de cobrança / parcelas (Demanda 9.0): a venda parcelada é 1 nota +
+  // N parcelas (contas a receber). Renderiza a tabela completa das parcelas
+  // (nº / vencimento / valor / status) — o total cheio já saiu acima.
+  if (invoice.parcelas.length > 0) {
     y += 10
     doc.setFont("helvetica", "bold")
     doc.setFontSize(9)
-    doc.text("DUPLICATAS", 15, y)
+    doc.text("PARCELAS", 15, y)
     y += 3
     doc.line(15, y, 195, y)
     y += 5
-    doc.setFont("helvetica", "normal")
     doc.setFontSize(8)
-    doc.text(`Parcela ${invoice.installment_number}/${invoice.installment_total}`, 15, y)
-    if (invoice.due_date) doc.text(`Vencimento: ${formatDate(invoice.due_date)}`, 80, y)
-    doc.text(`Valor: ${formatCurrency(invoice.total_amount)}`, 150, y)
+    doc.text("Parcela", 15, y)
+    doc.text("Vencimento", 70, y)
+    doc.text("Valor", 140, y, { align: "right" })
+    doc.text("Status", 195, y, { align: "right" })
+    y += 2
+    doc.line(15, y, 195, y)
+    y += 5
+    doc.setFont("helvetica", "normal")
+    for (const p of invoice.parcelas) {
+      doc.text(`${p.installment_number}/${p.installment_total}`, 15, y)
+      doc.text(formatDate(p.due_date), 70, y)
+      doc.text(formatCurrency(p.amount), 140, y, { align: "right" })
+      doc.text(PARCELA_STATUS_LABELS[p.status], 195, y, { align: "right" })
+      y += 5
+    }
   }
 
   doc.save(`${invoice.number}.pdf`)
@@ -384,12 +426,13 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
       : CANCEL_DESCRIPTIONS[nfType ?? "venda"]
   const fornecedorNotificado = invoice.notes?.includes("Fornecedor notificado") ?? false
 
-  const isParcelada =
-    invoice.installment_number !== null && invoice.installment_total !== null
-
-  const headerNumber = isParcelada
-    ? `${invoice.number} — Parcela ${invoice.installment_number}/${invoice.installment_total}`
-    : invoice.number
+  // Demanda 9.0: a venda parcelada virou 1 nota + N parcelas (bloco de cobrança
+  // = contas a receber). O número da nota não carrega mais "Parcela X/N"; o
+  // parcelamento aparece no bloco de parcelas e num selo "Parcelada N×".
+  const parcelas = invoice.parcelas
+  const isParcelada = parcelas.length > 1
+  const installmentTotal = parcelas[0]?.installment_total ?? parcelas.length
+  const headerNumber = invoice.number
 
   async function confirmStatusChange() {
     if (!pendingStatus) return
@@ -491,9 +534,15 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                   </Badge>
                 )}
 
-                {invoice.sale_id && !isNfFiscal && (
+                {isParcelada && (
+                  <Badge className="bg-purple-50 text-purple-700 border border-purple-200">
+                    Parcelada {installmentTotal}×
+                  </Badge>
+                )}
+
+                {invoice.sale_id && !isNfFiscal && !isParcelada && (
                   <Badge variant="outline" className="text-xs">
-                    {isParcelada ? "Parcelada" : "Gerada automaticamente"}
+                    Gerada automaticamente
                   </Badge>
                 )}
               </div>
@@ -596,7 +645,7 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
         </CardHeader>
 
         {expanded && (
-          <CardContent className="pt-0">
+          <CardContent className="pt-0 space-y-4">
             <Table>
               <TableHeader>
                 <TableRow>
@@ -619,9 +668,29 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                     </TableCell>
                   </TableRow>
                 ))}
+                {invoice.discount_amount > 0 && (
+                  <>
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-slate-600">
+                        Subtotal
+                      </TableCell>
+                      <TableCell className="text-right text-slate-600">
+                        {formatCurrency(invoice.subtotal)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-emerald-700">
+                        Desconto
+                      </TableCell>
+                      <TableCell className="text-right text-emerald-700">
+                        - {formatCurrency(invoice.discount_amount)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
                 <TableRow>
                   <TableCell colSpan={3} className="text-right font-semibold">
-                    Total
+                    {invoice.discount_amount > 0 ? "Total líquido" : "Total"}
                   </TableCell>
                   <TableCell className="text-right font-bold text-slate-900">
                     {formatCurrency(invoice.total_amount)}
@@ -629,6 +698,48 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                 </TableRow>
               </TableBody>
             </Table>
+
+            {/* Bloco de cobrança (Demanda 9.0): parcelas da nota (contas a
+                receber). À vista normalmente tem 1 parcela; parcelada tem N. */}
+            {parcelas.length > 0 && (
+              <div>
+                <p className="text-sm font-semibold text-slate-700 mb-1">
+                  Parcelas{isParcelada ? ` (${installmentTotal}×)` : ""}
+                </p>
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Parcela</TableHead>
+                      <TableHead>Vencimento</TableHead>
+                      <TableHead className="text-right">Valor</TableHead>
+                      <TableHead className="text-right">Recebido</TableHead>
+                      <TableHead className="text-right">Status</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {parcelas.map((p) => (
+                      <TableRow key={p.id}>
+                        <TableCell>
+                          {p.installment_number}/{p.installment_total}
+                        </TableCell>
+                        <TableCell>{formatDate(p.due_date)}</TableCell>
+                        <TableCell className="text-right">
+                          {formatCurrency(p.amount)}
+                        </TableCell>
+                        <TableCell className="text-right text-slate-600">
+                          {formatCurrency(p.amount_received)}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <Badge className={PARCELA_STATUS_COLORS[p.status]}>
+                            {PARCELA_STATUS_LABELS[p.status]}
+                          </Badge>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </CardContent>
         )}
       </Card>

@@ -1,5 +1,6 @@
 "use client"
 
+import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -78,7 +79,17 @@ export function ContasReceberTable({
       label: "Vencimento",
       sortable: true,
       render: (c) => (
-        <span className="text-sm text-slate-600">{formatDate(c.due_date)}</span>
+        <div className="flex flex-col gap-0.5">
+          <span className="text-sm text-slate-600">{formatDate(c.due_date)}</span>
+          {c.is_overdue && (
+            <span className="flex items-center gap-1">
+              <Badge className="bg-red-100 text-red-700">Vencida</Badge>
+              <span className="text-xs text-red-600">
+                há {c.days_overdue} dia{c.days_overdue !== 1 ? "s" : ""}
+              </span>
+            </span>
+          )}
+        </div>
       ),
     },
     {
@@ -120,7 +131,7 @@ export function ContasReceberTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Vence de</Label>
+          <Label className="text-xs text-slate-500">Data início</Label>
           <Input
             type="date"
             value={filters.due_after ?? ""}
@@ -132,7 +143,7 @@ export function ContasReceberTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Vence até</Label>
+          <Label className="text-xs text-slate-500">Data fim</Label>
           <Input
             type="date"
             value={filters.due_before ?? ""}

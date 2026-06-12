@@ -73,19 +73,77 @@ envelope inalterados.
 ```
 
 ### InvoiceOut
-- Inclui `client_name`, `number`, `issue_date`, `due_date`, itens com `subtotal`
+- Inclui `client_name`, `number`, `issue_date`, `due_date`, itens com `subtotal`.
+- **Cabeçalho de valores (Demanda 9.C):** `subtotal` (Σ itens a preço de tabela),
+  `discount_amount` (desconto de cabeçalho **lido da venda vinculada** — `sales.discount_amount`)
+  e `total_amount` (total líquido). Permite à NF/PDF exibir **Subtotal → Desconto → Total
+  líquido**. Para nota **sem venda** (transporte/serviço/folha/manual) ou **venda sem
+  desconto**, `discount_amount = 0` e `subtotal = total_amount`. Ver "Desconto de cabeçalho"
+  abaixo.
+- **`parcelas` (Demanda 9.0):** o **bloco de cobrança** da nota — lista das contas a
+  receber (`accounts_receivable`) ligadas à nota por `invoice_id`. Cada parcela:
+  `id`, `number`, `installment_number`, `installment_total`, `due_date`, `amount`,
+  `amount_received`, `status`, `payment_method`. AR canceladas são omitidas. Para notas
+  sem AR (transporte/serviço/etc.) o bloco vem **vazio**.
+- **`status` é derivado** (ver "Status derivado das parcelas" abaixo) — não reflete
+  cegamente `invoices.status`.
+
+## Modelo 1 NF + N parcelas (Demanda 9.0)
+
+A venda **parcelada** deixou de cunhar **N notas** (uma por parcela, itens duplicados,
+encadeadas por `parent_invoice_id`). Agora toda venda gera **1 nota de venda** (total cheio,
+itens uma vez) e as **parcelas vivem só na `accounts_receivable`** (N AR, todas com
+`invoice_id` = a nota única, `installment_number/total` na AR). À vista = 1 nota + 1 AR.
+
+- A divisão de valores/vencimentos é feita no `comercial.create_sale` (dirige as AR), não
+  mais no Faturamento. `base_share` igual; a última parcela absorve o centavo residual.
+- `invoice.installment_number/installment_total/parent_invoice_id` ficam **NULL/mortos** no
+  fluxo de venda (mantidos nullable; **não** setados, **não** dropados nesta etapa).
+- A NF de transporte (frete) continua emitida à parte quando há `shipping_cost > 0`.
 
 ## Regras de Negócio
 
 ### Status e Transições
 
 ```
-emitida → paga     (status final)
+emitida → paga      (derivado das parcelas — ver abaixo)
 emitida → cancelada (status final)
 ```
 
-- `paga` e `cancelada` são **status finais** — tentativa de alterar retorna `400`
-- Soft delete apenas em faturas com status `emitida`
+- `cancelada` é **status final** — tentativa de alterar retorna `400`.
+- Soft delete apenas em faturas com status `emitida`.
+
+### Status derivado das parcelas (Demanda 9.0)
+
+A nota de venda **nasce `emitida`** no ato da venda e é considerada **`paga` quando TODAS as
+suas parcelas (AR) estiverem `quitado`** — **nunca por parcela**. O cálculo é **derivado na
+leitura** (`InvoiceOut.from_model` + `service.serialize_invoice`, que consulta as AR da nota
+via `financeiro_service.get_receivables_by_invoice`); o campo `invoices.status` no banco
+permanece `emitida` (não é reescrito a cada baixa). `cancelada` é preservado e tem
+precedência. Notas sem AR mantêm o status do banco.
+
+> **Limitação conhecida:** como o status "paga" é derivado e **não** persistido, o filtro
+> `GET /faturas?status=paga` (que usa a coluna do banco) **não** retorna notas de venda
+> quitadas-por-derivação. Aceitável na 9.0 (decisão "derivar na leitura"); revisitar se o
+> filtro por status virar requisito.
+
+### Desconto de cabeçalho na NF (Demanda 9.C)
+
+A NF de venda passa a exibir **Subtotal → Desconto → Total líquido**. A **fonte única** do
+desconto é a **venda vinculada** (`invoices.sale_id → sales.discount_amount`); a tabela
+`invoices` **não** ganhou coluna de desconto (evita duplicar `sales.discount_amount`).
+
+No `serialize_invoice` (ponto único de serialização):
+- `subtotal` = Σ dos `subtotal` dos itens da nota (preço de tabela);
+- `discount_amount` = `sales.discount_amount` da venda vinculada (helper `_get_sale_discount`);
+- `total_amount` = total líquido já gravado na nota (`subtotal − desconto`, + frete quando há).
+
+Tratamento de bordas → `discount_amount = 0`: nota **sem venda** (`sale_id IS NULL` —
+transporte/serviço/folha/manual) ou venda **sem desconto**. O desconto **nunca** é derivado por
+subtração `Σitens − total`: isso quebraria com frete, pois a NF de venda inclui o `shipping_cost`
+no `total_amount` (e o frete ainda tem NF de transporte própria — débito técnico pré-existente,
+fora do escopo da 9.C). O `notes` semeado na NF-0004 explicando o desconto é **cosmético** — não
+é fonte de dado.
 
 ### Ao Marcar como Paga
 ```python
@@ -113,55 +171,45 @@ fin_service.registrar_movimento(
 )
 ```
 
-## Função Pública — `criar_fatura` (venda à vista)
+## Função Pública — `criar_fatura` (toda venda: à vista E parcelada)
 
-Chamada pelo Comercial quando `installments <= 1`. **Fluxo inalterado** em relação à versão anterior, exceto pela atribuição explícita `invoice_type="venda"`.
+Chamada pelo Comercial em **toda** venda (Demanda 9.0 — não há mais caminho de N notas).
+Emite **uma** nota de venda com o **total cheio** e os itens **uma vez**.
 
 ```python
 from app.modules.faturamento import service as fat_service
 
-fat_service.criar_fatura(
+invoice = fat_service.criar_fatura(
     db,
     sale_id=sale.id,
     client_id=sale.client_id,
     items=sale.items,           # SaleItem ORM objects
-    total_amount=sale.total_amount,
+    total_amount=sale.total_amount,   # total cheio (à vista ou parcelado)
     source_module="comercial",
 )
 ```
 
 Internamente:
-1. Resolve nomes dos itens via `StockItem` (buscado por `stock_item_id`)
-2. Cria `Invoice` + `InvoiceItem` com `number` auto-gerado, `issue_date = today()`, `due_date = today + 30d`, `invoice_type="venda"`
-3. Registra movimentação financeira `ENTRADA/VENDA, amount=0` — rastreabilidade de emissão
+1. Resolve nomes dos itens via `StockItem` (buscado por `stock_item_id`).
+2. Cria `Invoice` + `InvoiceItem` com `number` auto-gerado, `issue_date = today()`,
+   `due_date = today + 30d`, `invoice_type="venda"`.
+3. Registra movimentação financeira `ENTRADA/VENDA, amount=0` (rastreabilidade de emissão) —
+   **uma vez**.
 
-## Função Pública — `criar_faturas_parceladas` (venda parcelada)
+Retorna o `Invoice` criado; o Comercial usa o `invoice.id` para ligar as parcelas (AR).
 
-Chamada pelo Comercial quando `installments >= 2`. Gera **uma fatura por parcela**.
+> **Removido na Demanda 9.0:** `criar_faturas_parceladas` (cunhava N notas, uma por parcela,
+> com itens duplicados e `parent_invoice_id`). O split de valores/vencimentos passou a
+> **dirigir as AR** no `comercial.create_sale` (helper `_calcular_vencimentos` migrou para o
+> Comercial). Não existe mais caminho que cria N notas de venda.
 
-```python
-fat_service.criar_faturas_parceladas(
-    db,
-    sale_id=sale.id,
-    client_id=sale.client_id,
-    items=sale.items,
-    total_amount=sale.total_amount,
-    installments=3,
-    first_due_date=date(2026, 6, 1),
-    installment_interval_days=30,
-)
-```
+## Função Pública — `serialize_invoice(db, invoice) → InvoiceOut`
 
-Regras:
-- `total_amount` é dividido igualmente pelo número de parcelas. A **última parcela** absorve o resíduo de centavos para garantir que a soma feche exatamente.
-- Os vencimentos seguem `first_due_date + n * installment_interval_days`.
-- Cada fatura recebe `installment_number` (1-based) e `installment_total`.
-- `parent_invoice_id` aponta para a **primeira** fatura da cadeia (a primeira tem `parent_invoice_id = None`).
-- Todas com `invoice_type="venda"`.
-- Para cada fatura, registra um `financial_movement` `ENTRADA/VENDA, amount=0` para rastreabilidade.
-
-## Helper interno — `_calcular_vencimentos(first_due_date, installments, interval_days)`
-Retorna uma lista de `date` com os vencimentos sucessivos. Usado por `criar_faturas_parceladas` e potencialmente por outros fluxos que sigam o mesmo critério.
+Ponto único de serialização (usado pelo router). Busca as parcelas da nota
+(`financeiro_service.get_receivables_by_invoice`, omitindo as canceladas) e monta o
+`InvoiceOut` com o **bloco `parcelas`**, o **status derivado** e o **desconto de cabeçalho**
+(`subtotal`/`discount_amount`, lido da venda vinculada via `_get_sale_discount` — ver
+"Desconto de cabeçalho na NF").
 
 ## Fatura Manual vs. Automática
 
@@ -286,7 +334,7 @@ idempotência** — re-cancelar é bloqueado, então nenhum efeito é estornado 
 
 | Tipo | Efeito ao cancelar |
 |------|--------------------|
-| **`venda`** | Ponta a ponta (D4): (a) devolve cada item da venda ao estoque via `estoque_service.registrar_entrada` com **`unit_cost=0`** (entrada gera ajuste R$0, **sem** movimento de "compra" e **sem** alterar o CMP — o lado financeiro fica nas contas a receber); `reference_id` da movimentação = `sale.id`. (b) `sales.status = cancelada` (via `comercial_service.mark_sale_cancelled` — setter interno; ver nota abaixo). (c) **Todas** as `accounts_receivable` da venda → `cancelada`; para `amount_received > 0`, gera estorno `SAIDA/AJUSTE` com a descrição `"Estorno cancelamento NF {number}"`. (d) **Toda a cadeia** de NFs com o mesmo `sale_id` (parcelas + NF de transporte da venda) é marcada `cancelada`; a NF de transporte da venda tem o frete estornado (`SAIDA/AJUSTE`). Cancelar **qualquer** parcela cancela a venda inteira. |
+| **`venda`** | Ponta a ponta (D4): (a) devolve cada item da venda ao estoque via `estoque_service.registrar_entrada` com **`unit_cost=0`** (entrada gera ajuste R$0, **sem** movimento de "compra" e **sem** alterar o CMP — o lado financeiro fica nas contas a receber); `reference_id` da movimentação = `sale.id`. (b) `sales.status = cancelada` (via `comercial_service.mark_sale_cancelled` — setter interno; ver nota abaixo). (c) **Todas** as `accounts_receivable` da venda → `cancelada`; para `amount_received > 0`, gera estorno `SAIDA/AJUSTE` com a descrição `"Estorno cancelamento NF {number}"`. (d) as NFs da venda com o mesmo `sale_id` são marcadas `cancelada` — desde a **Demanda 9.0** isso é **1 nota de venda** (+ a NF de transporte se houver frete, com estorno do frete `SAIDA/AJUSTE`), não mais N notas. As parcelas (AR) já foram canceladas no passo (c), pelo `sale_id`. |
 | **`recebimento`** | (a) Estoque: **sempre** remove as `quantity_accepted` (resolve `order_id` no `notes` → `purchase_order_receipts/items` → `registrar_saida` com `unit_cost=0`, `reference_id = invoice.id`). (b) Financeiro: `_reverter_financeiro_ordem_compra` — **antes de pagar** só cancela as contas a pagar em aberto (sem estorno); **depois de pago** estorna `ENTRADA/AJUSTE` do **valor pago** (uma única vez por ordem). |
 | **`transporte`** | NF de **compra** (`order_id` no `notes`): o frete está embutido na(s) conta(s) a pagar da ordem → usa `_reverter_financeiro_ordem_compra` (mesmo princípio do recebimento, idempotente — não duplica se a NF de recebimento da mesma ordem também for cancelada). NF de **venda** (`sale_id`): estorno do frete `SAIDA/AJUSTE` = `total_amount`. Descrição `"Estorno NF transporte {number}"`. Sem efeito de estoque. |
 | **`servico`** | Sem estoque. Financeiro via `_reverter_financeiro_ordem_compra`: **antes de pagar** cancela a conta a pagar em aberto; **depois de pago** estorna `ENTRADA/AJUSTE` do valor pago (uma única vez). |

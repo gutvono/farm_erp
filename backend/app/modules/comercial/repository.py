@@ -55,12 +55,25 @@ def list_clients(
     *,
     params: PageParams,
     is_delinquent: Optional[bool] = None,
+    effective_overdue_ids: Optional[list[UUID]] = None,
 ) -> tuple[list[Client], int]:
     """Lista clientes ativos, paginado. Filtro `is_delinquent`; `search` por
-    nome OU documento; `order_by` allowlist: name (default), created_at."""
+    nome OU documento; `order_by` allowlist: name (default), created_at.
+
+    Quando `is_delinquent` é True, o filtro é a inadimplência **efetiva**
+    (Demanda 9.B): `is_delinquent` (manual) OU `id ∈ effective_overdue_ids`
+    (clientes com parcela vencida, calculado pelo Financeiro)."""
     query = db.query(Client).filter(Client.deleted_at.is_(None))
-    if is_delinquent is not None:
-        query = query.filter(Client.is_delinquent == is_delinquent)
+    if is_delinquent is True:
+        # Inadimplência EFETIVA: manual OU vencida (Demanda 9.B).
+        manual = Client.is_delinquent.is_(True)
+        if effective_overdue_ids:
+            query = query.filter(or_(manual, Client.id.in_(effective_overdue_ids)))
+        else:
+            query = query.filter(manual)
+    elif is_delinquent is False:
+        # Comportamento atual (não-efetivo): apenas o flag manual.
+        query = query.filter(Client.is_delinquent.is_(False))
     if params.search:
         like = f"%{params.search}%"
         query = query.filter(
@@ -129,11 +142,20 @@ def create_sale(db: Session, data: SaleCreate) -> Sale:
         for item in data.items
     )
     shipping = Decimal(str(data.shipping_cost or 0))
-    total_amount = items_total + shipping
+    # Desconto de cabeçalho (Demanda 9.C): % sobre o subtotal dos itens, em R$
+    # quantizado a 0.01. total_amount é o LÍQUIDO (subtotal − desconto + frete);
+    # o unit_price/subtotal dos itens NÃO muda (preço de tabela preservado).
+    discount_percent = Decimal(str(data.discount_percent or 0))
+    discount_amount = (items_total * discount_percent / Decimal("100")).quantize(
+        Decimal("0.01")
+    )
+    total_amount = items_total - discount_amount + shipping
 
     sale = Sale(
         client_id=data.client_id,
         total_amount=total_amount,
+        discount_percent=discount_percent,
+        discount_amount=discount_amount,
         shipping_cost=shipping,
         sold_at=sold_at,
         notes=data.notes,

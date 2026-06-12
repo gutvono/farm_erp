@@ -138,8 +138,27 @@ export interface AccountsReceivable {
   installment_number: number | null
   installment_total: number | null
   payment_method: PaymentMethod | null
+  /** Parcela vencida (em aberto/parcial com `due_date` < hoje) — Demanda 9.A. */
+  is_overdue: boolean
+  /** Dias de atraso desde o vencimento (0 quando não vencida). */
+  days_overdue: number
   created_at: string
   updated_at: string
+}
+
+/**
+ * Breakdown do encargo por atraso na baixa de uma parcela vencida (Demanda 9.B).
+ * Tudo `0` quando a parcela não está vencida. Multa fixa (uma vez) + juros de
+ * mora pro-rata pelos dias de atraso, calculados sobre o saldo devedor.
+ */
+export interface EncargoBreakdown {
+  receivable_id: string
+  number: string
+  saldo: number
+  dias_atraso: number
+  multa: number
+  juros: number
+  total: number
 }
 
 export interface Balance {
@@ -251,6 +270,16 @@ export interface HarvestDestinations {
   industria_item_id: string | null
   embalagem_item_id: string | null
   descarte_item_id: string | null
+}
+
+/**
+ * Taxas de encargo por atraso (percentuais), editáveis em Configurações (Demanda 9.B).
+ * `multa_atraso_percent`: multa fixa aplicada uma vez na quitação de parcela vencida.
+ * `juros_mora_mensal_percent`: juros de mora ao mês, aplicados pro-rata pelos dias de atraso.
+ */
+export interface EncargosTaxas {
+  multa_atraso_percent: number
+  juros_mora_mensal_percent: number
 }
 
 // ── COMPRAS ──────────────────────────────────────────────────────────────────
@@ -428,7 +457,12 @@ export interface Client {
   city: string | null
   state: string | null
   notes: string | null
+  /** Flag manual de inadimplência (override — Demanda 7). Preservado. */
   is_delinquent: boolean
+  /** Tem ≥1 parcela (conta a receber) vencida — derivado na leitura (Demanda 9.A). */
+  has_overdue: boolean
+  /** Inadimplência EFETIVA = manual (`is_delinquent`) OU vencida (`has_overdue`). */
+  is_delinquent_effective: boolean
   created_at: string
   updated_at: string
 }
@@ -451,6 +485,12 @@ export interface Sale {
   client_name: string
   status: SaleStatus
   total_amount: number
+  /** Subtotal BRUTO dos itens (Σ a preço de tabela), antes do desconto — Demanda 9.C. */
+  items_subtotal: number
+  /** Percentual de desconto de cabeçalho aplicado sobre `items_subtotal` (0–100). */
+  discount_percent: number
+  /** Valor (R$) do desconto = items_subtotal × discount_percent/100. */
+  discount_amount: number
   notes: string | null
   sold_at: string
   delivered_at: string | null
@@ -475,6 +515,23 @@ export interface InvoiceItem {
 
 export type InvoiceStatus = "emitida" | "paga" | "cancelada"
 
+/**
+ * Parcela (bloco de cobrança) de uma nota fiscal — Demanda 9.0. Cada parcela é
+ * uma conta a receber (`accounts_receivable`) ligada à nota. Uma venda parcelada
+ * passou a ser **1 nota + N parcelas** (espelha `InvoiceParcelaOut` do backend).
+ */
+export interface InvoiceParcela {
+  id: string
+  number: string
+  installment_number: number
+  installment_total: number
+  due_date: string
+  amount: number
+  amount_received: number
+  status: ReceivableStatus
+  payment_method: PaymentMethod | null
+}
+
 export interface Invoice {
   id: string
   number: string
@@ -483,6 +540,10 @@ export interface Invoice {
   client_name: string
   status: InvoiceStatus
   total_amount: number
+  /** Subtotal BRUTO dos itens (Σ a preço de tabela), antes do desconto — Demanda 9.C. */
+  subtotal: number
+  /** Desconto (R$) lido da venda vinculada; 0 para nota sem venda/sem desconto. */
+  discount_amount: number
   issue_date: string
   due_date: string | null
   notes: string | null
@@ -493,6 +554,8 @@ export interface Invoice {
   cancelled_at: string | null
   cancellation_reason: string | null
   items: InvoiceItem[]
+  /** Bloco de cobrança (Demanda 9.0): N parcelas (AR) da nota; [] para à vista. */
+  parcelas: InvoiceParcela[]
   created_at: string
   updated_at: string
 }

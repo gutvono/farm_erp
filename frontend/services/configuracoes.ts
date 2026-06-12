@@ -3,10 +3,17 @@ import { fetchPaginated } from "@/lib/pagination"
 import {
   ApiResponse,
   Category,
+  EncargosTaxas,
   HarvestDestinations,
   Paginated,
   SystemRole,
 } from "@/types/index"
+
+function toNumber(value: unknown): number {
+  if (typeof value === "number") return value
+  if (typeof value === "string") return Number(value)
+  return 0
+}
 
 // ── Categorias ────────────────────────────────────────────────────────────────
 
@@ -127,5 +134,36 @@ export async function updateDestinosColheita(data: {
     industria_item_id: response.data.industria_item_id ?? null,
     embalagem_item_id: response.data.embalagem_item_id ?? null,
     descarte_item_id: response.data.descarte_item_id ?? null,
+  }
+}
+
+// ── Encargos por atraso (Demanda 9.B) ─────────────────────────────────────────
+
+interface RawEncargos {
+  multa_atraso_percent: number | string
+  juros_mora_mensal_percent: number | string
+}
+
+export async function getEncargos(): Promise<EncargosTaxas> {
+  const response = await apiFetch<ApiResponse<RawEncargos>>(
+    "/api/configuracoes/encargos"
+  )
+  return {
+    multa_atraso_percent: toNumber(response.data.multa_atraso_percent),
+    juros_mora_mensal_percent: toNumber(response.data.juros_mora_mensal_percent),
+  }
+}
+
+export async function updateEncargos(data: {
+  multa_atraso_percent: number
+  juros_mora_mensal_percent: number
+}): Promise<EncargosTaxas> {
+  const response = await apiFetch<ApiResponse<RawEncargos>>(
+    "/api/configuracoes/encargos",
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return {
+    multa_atraso_percent: toNumber(response.data.multa_atraso_percent),
+    juros_mora_mensal_percent: toNumber(response.data.juros_mora_mensal_percent),
   }
 }
