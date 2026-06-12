@@ -37,13 +37,15 @@ A listagem usa a infra de paginação compartilhada (Demanda 0): `order_by` é v
 | `GET` | `/api/folha/funcionarios` | Lista funcionários **paginada `Page[EmployeeOut]`** (envelope cru; filtros `is_active`, `contract_type`; `search` nome/documento; `order_by`: `name` default; inválido→default, nunca 500; PK como tiebreaker) |
 | `POST` | `/api/folha/funcionarios` | Cria funcionário (multipart/form-data; foto opcional) |
 | `GET` | `/api/folha/funcionarios/{id}` | Detalhe do funcionário |
+| `GET` | `/api/folha/funcionarios/{id}/holerites?year=2026` | Histórico anual de holerites do funcionário, inclusive inativo |
 | `PUT` | `/api/folha/funcionarios/{id}` | Atualiza dados cadastrais (sem foto) |
 | `POST` | `/api/folha/funcionarios/{id}/demitir` | Demite funcionário, lança saída no Financeiro + conta a pagar |
 
-O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, **`position_id`** (UUID do cargo, no lugar do antigo `role`), `contract_type`, `admission_date`, **`base_salary` (opcional)**, `email` e `phone`, mais o arquivo opcional `photo_file` (somente `image/jpeg` ou `image/png`). 
+O endpoint de criação recebe `multipart/form-data` com campos `name`, `cpf`, **`position_id`** (UUID do cargo, no lugar do antigo `role`), `contract_type`, `admission_date`, **`base_salary` (opcional)**, `email`, `phone`, benefícios opcionais (`transport_voucher_cost`, `meal_voucher_value`, `pharmacy_voucher_value`, `life_insurance_value`) e `dependents_count`, mais o arquivo opcional `photo_file` (somente `image/jpeg` ou `image/png`).
 
 - **`position_id`** deve referenciar um cargo existente e **ativo** — caso contrário `404 "Cargo não encontrado"`.
 - **`base_salary` é opcional:** quando omitido, o funcionário nasce com o `base_salary` **sugerido pelo cargo**; quando enviado, o valor informado **prevalece** (o do cargo é só sugestão). Ex.: cargo "Colhedor" tem base 1800 → criar sem `base_salary` ⇒ funcionário com 1800; enviar 2000 ⇒ fica 2000.
+- **Benefícios/dependentes** (`transport_voucher_cost`, `meal_voucher_value`, `pharmacy_voucher_value`, `life_insurance_value`, `dependents_count`) são opcionais e alimentam o lançamento automático de itens na abertura do período (vale transporte como desconto; vale refeição/farmácia e seguro de vida como informativos) e o cálculo de IRRF (dependentes).
 
 A foto é gravada em `settings.upload_dir/employees/{uuid}_{filename}` e exposta no `EmployeeOut.photo_url` como `/uploads/{photo_path}`. Se nenhuma foto for enviada, `photo_url` retorna `null` e cabe ao front-end usar o fallback (silhueta default).
 
@@ -110,6 +112,11 @@ base_salary?: Decimal ≥ 0    # opcional: default = base_salary do cargo
 email?: string
 phone?: string
 termination_cost_override?: Decimal ≥ 0
+transport_voucher_cost?: Decimal ≥ 0
+meal_voucher_value?: Decimal ≥ 0
+pharmacy_voucher_value?: Decimal ≥ 0
+life_insurance_value?: Decimal ≥ 0
+dependents_count: int ≥ 0
 photo_file?: image/jpeg|image/png
 ```
 
@@ -128,6 +135,11 @@ photo_file?: image/jpeg|image/png
   "admission_date": "2020-03-01",
   "termination_date": null,
   "termination_cost_override": null,
+  "transport_voucher_cost": "320.00",
+  "meal_voucher_value": "650.00",
+  "pharmacy_voucher_value": "80.00",
+  "life_insurance_value": "45.00",
+  "dependents_count": 2,
   "photo_url": "/uploads/employees/abc_foto.jpg",
   "is_active": true,
   "created_at": "...",
@@ -150,7 +162,7 @@ photo_file?: image/jpeg|image/png
 ### PayrollAutoCalculationRequest
 ```json
 {
-  "calculation_type": "inss | fgts | transport_voucher | overtime | night_shift",
+  "calculation_type": "inss | irrf | fgts | transport_voucher | overtime | night_shift",
   "event_id": null,
   "base_amount": null,
   "quantity": 10,
@@ -223,7 +235,9 @@ TERMINATION_COST = {
 
 ### Períodos
 - `POST /periodos` é idempotente: se já existe período para `month/year`, retorna o existente (sem recriar entries).
-- Ao criar um novo período, o serviço cria uma `PayrollEntry` por funcionário **ativo** com `base_salary` atual, `overtime_amount=0`, `deductions=0`, `total_amount=base_salary`, `status=pendente`.
+- Competências futuras são bloqueadas com `400 "Não é possível abrir a folha de uma competência futura"` e a listagem oculta períodos futuros.
+- Ao criar um novo período, o serviço cria uma `PayrollEntry` por funcionário **ativo** com `base_salary` proporcional por dias corridos trabalhados no mês. Funcionários admitidos após a competência são ignorados.
+- A emissão da folha já aplica itens automáticos: INSS, FGTS, IRRF quando devido, vale transporte e benefícios configurados no funcionário (lançamento automático na abertura).
 - Fechar período exige que **todas** as entries estejam `pago`. Se houver alguma `pendente` **ou** `aguardando_aprovacao`, retorna `400 "Existem funcionários sem pagamento aprovado..."`.
 - Ao fechar, `total_amount` do período é recalculado somando `net_amount` de todas as entries e gravado; `closed_at` recebe `now()`.
 
@@ -243,7 +257,12 @@ pendente ──/solicitar-pagamento──▶ aguardando_aprovacao ──(Finance
 - `PATCH /entries/{id}` só funciona em período `aberta` **e** entry `pendente`. Bloqueios retornam `400`.
 - `total_amount` (coluna `net_amount` no model) é sempre calculado no serviço/repo; nunca aceita valor do cliente.
 - Itens detalhados ficam em `payroll_entry_items` e sempre referenciam um evento em `payroll_events`.
-- `provento`/`desconto` com `affects_net=true` aumentam/reduzem o líquido; `informativo`/`affects_net=false` não altera (ex.: FGTS).
+- `provento` com `affects_net=true` aumenta o líquido.
+- `desconto` com `affects_net=true` reduz o líquido.
+- `informativo` ou `affects_net=false` aparece no holerite, mas não altera o líquido. O FGTS usa esta regra.
+- Vale refeição, vale farmácia e seguro de vida são informativos; vale transporte é desconto limitado a `min(custo real, 6% do salário base da entry)`.
+- IRRF é calculado sobre `proventos tributáveis - INSS - dependentes × 189,59` e só é lançado quando o imposto é maior que zero.
+- Ao aplicar cálculos em um holerite legado, o serviço cria itens equivalentes para salário base, horas extras e descontos já agregados antes do recálculo.
 
 ### Solicitação de pagamento (Demanda 4 — o dinheiro só se move na aprovação)
 
@@ -299,6 +318,11 @@ A validação de saldo (`get_balance(db).saldo >= total`) acontece na **aprovaç
 | `hire_date` | DATE |
 | `termination_date` | DATE nullable |
 | `termination_cost_override` | NUMERIC(12,2) nullable |
+| `transport_voucher_cost` | NUMERIC(12,2) nullable |
+| `meal_voucher_value` | NUMERIC(12,2) nullable |
+| `pharmacy_voucher_value` | NUMERIC(12,2) nullable |
+| `life_insurance_value` | NUMERIC(12,2) nullable |
+| `dependents_count` | INTEGER NOT NULL DEFAULT 0 |
 | `photo_path` | VARCHAR(500) nullable (caminho relativo em `settings.upload_dir`) |
 | `is_active` | BOOLEAN default true, indexado |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
@@ -340,13 +364,13 @@ Unique constraint `uq_payroll_entry_period_employee (payroll_period_id, employee
 | `id` | UUID PK |
 | `description` | VARCHAR(255) unique |
 | `event_type` | enum (`provento`/`desconto`/`informativo`) |
-| `calculation_type` | enum (`manual`/`overtime`/`night_shift`/`inss`/`fgts`/`transport_voucher`) |
+| `calculation_type` | enum (`manual`/`overtime`/`night_shift`/`inss`/`irrf`/`fgts`/`transport_voucher`) |
 | `is_automatic` | BOOLEAN |
 | `affects_net` | BOOLEAN |
 | `is_active` | BOOLEAN |
 | `created_at`, `updated_at`, `deleted_at` | TIMESTAMPTZ |
 
-Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS, Vale transporte, FGTS e Descontos manuais.
+Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS, IRRF, Vale transporte, Vale refeição, Vale farmácia, Seguro de vida, FGTS e Descontos manuais.
 
 ### `payroll_entry_items`
 | Coluna | Tipo |
@@ -437,6 +461,28 @@ Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQ
 - Adiciona o valor `aguardando_aprovacao` ao enum `payroll_entry_status` (via `ALTER TYPE ... ADD VALUE` em `autocommit_block`).
 - Cria as tabelas `payroll_payment_requests` (soft delete) e `payroll_payment_request_entries` (junção). O Backend da Demanda 4 implementa o fluxo de solicitação/aprovação sobre elas (sem nova migration).
 
+`0022_folha_benefits` e `0023_folha_irrf_event` (**Melhorias da Folha**, encadeadas após `0021_client_address`):
+- `0022` adiciona colunas de benefícios/dependentes em `employees` (`transport_voucher_cost`, `meal_voucher_value`, `pharmacy_voucher_value`, `life_insurance_value`, `dependents_count`), adiciona o valor `irrf` ao enum `payroll_calculation_type` (em `autocommit_block`) e insere os eventos informativos de benefícios (Vale refeição, Vale farmácia, Seguro de vida).
+- `0023` insere o evento automático `IRRF` em migration separada, respeitando a regra do PostgreSQL para `ALTER TYPE ... ADD VALUE` (o valor novo não pode ser usado na mesma transação em que foi criado).
+- Downgrade remove colunas/eventos; a remoção do valor do enum é no-op.
+
+## Detalhamento dos holerites (payroll_entry_items)
+
+O detalhamento dos holerites semeados (linhas de INSS/IRRF/FGTS/Vale transporte/benefícios)
+vive direto em `scripts/seed.sql` (bloco `14b. PAYROLL ENTRY ITEMS`), com valores coerentes
+com `app/modules/folha/calculations.py`. Não há script de backfill: como o banco é truncado e
+re-semeado a cada deploy (`entrypoint.sh` → `seed_only.py`), os itens são recriados junto com o
+restante do seed. Convenção dos itens semeados:
+
+- **Períodos pagos (01/02):** itens legados (salário base, horas extras, descontos manuais) +
+  benefícios informativos + FGTS informativo. INSS/IRRF/Vale transporte **não** são lançados,
+  preservando o `net_amount` já pago e os movimentos financeiros.
+- **Período aberto (03):** cálculo estatutário completo — INSS, IRRF (quando a base tributa),
+  FGTS e Vale transporte. `net_amount`/`deductions_value` da entry refletem esses descontos.
+
+Holerites criados pela aplicação (cadastro de funcionário / geração de período) recebem os mesmos
+itens automaticamente via `_apply_automatic_items`.
+
 > **Convenção:** `alembic_version.version_num` é `VARCHAR(32)` — o `revision id` de cada migration deve ter no máximo 32 caracteres (por isso `0008_fix_payroll_desc_index` e não o nome completo do arquivo).
 
 ## Observações
@@ -445,4 +491,4 @@ Reversível via `downgrade()` (recria o índice não-unique + a constraint `UNIQ
 - Todas as respostas usam `SuccessResponse` do `app.shared.responses`.
 - Validação de entrada via Pydantic (`schemas.py`).
 - Após múltiplos `db.commit()` (ex.: `produzir_safra`, `pay_entry`, `terminate_employee`), as entidades são recarregadas via `repository.get_*` antes de retornar, evitando cache stale do SQLAlchemy.
-- Soft delete em `employees` significa que o funcionário demitido deixa de aparecer nas rotas de listagem/detalhe; o histórico permanece rastreável pelas movimentações do Financeiro (via `reference_id`).
+- Soft delete em `employees` mantém o histórico. A listagem padrão/detalhe ignoram soft-deleted, mas `GET /funcionarios?is_active=false` retorna inativos para alimentar histórico e PDFs.

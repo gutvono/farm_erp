@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Página única em três abas: **Folha do Mês** (gestão de períodos e holerites), **Funcionários** (cadastro com foto, demissão e edição) e **Cargos** (cadastro dos cargos da fazenda).
+Página única em quatro abas: **Folha do Mês** (gestão de períodos e holerites), **Funcionários** (cadastro com foto, benefícios/dependentes, demissão e edição), **Cargos** (cadastro dos cargos da fazenda) e **Folhas do funcionário** (histórico anual de holerites por funcionário, inclusive demitidos).
 
 > **Demanda 4 — pagar virou "solicitar pagamento".** Antes, "Pagar" tirava dinheiro direto da Conta Corrente. Agora, pagar um funcionário (individual ou em lote) **não move dinheiro**: cria uma **solicitação de pagamento** que vai para a aba **Aprovações** do Financeiro. O dinheiro só sai quando o Financeiro **aprova** — e aí é emitida **uma nota fiscal de folha por funcionário**. Enquanto aguarda, o holerite fica **"Aguardando aprovação do financeiro"** e seu botão fica **bloqueado**. Se o Financeiro **recusar**, o holerite volta a **Pendente**. (A demissão continua lançando o custo direto no Financeiro.)
 
@@ -50,7 +50,7 @@ Página única em três abas: **Folha do Mês** (gestão de períodos e holerite
 
 ## Page
 
-- `/folha` — `app/(modules)/folha/page.tsx`. 2 abas (Tabs shadcn).
+- `/folha` — `app/(modules)/folha/page.tsx`. 3 abas (Tabs shadcn).
 
 ### Aba "Folha do Mês"
 1. `PeriodoSelector` no topo: mês + ano + botão "Abrir Período" (idempotente).
@@ -87,6 +87,10 @@ A lista de holerites já vem **completa** do período selecionado; o filtro/orde
 - Ordenação clicável **apenas** em **Nome** e **Salário base** (allowlist do backend); as demais colunas não ordenam.
 - `CargoForm` (Dialog, RHF + Zod) serve para criar e editar. Excluir abre `AlertDialog`; erro 400 do backend (cargo com vínculo) é exibido no toast e o cargo permanece.
 
+### Aba "Folhas do funcionário"
+- Select de funcionário carregado com ativos + inativos, input de ano e tabela anual de holerites.
+- Cada linha mostra competência, proventos, benefícios, descontos, total líquido, status e botão `HoleritePDF`.
+
 ## Service (`services/folha.ts`)
 
 ```typescript
@@ -101,6 +105,7 @@ getFuncionarios(params?: { is_active?; contract_type? }): Promise<Employee[]>
 createFuncionario(data: FormData): Promise<Employee>          // multipart; envia position_id; base_salary opcional
 updateFuncionario(id, data: Partial<...>): Promise<Employee>  // JSON; usa position_id
 demitirFuncionario(id): Promise<Employee>
+getHoleritesFuncionario(employeeId, year): Promise<EmployeePayslip[]>
 
 // Períodos
 getPeriodos(): Promise<PayrollPeriod[]>
@@ -121,9 +126,11 @@ solicitarPagamentoTodos(periodId): Promise<PayrollPaymentRequest>    // lote
 
 **Multipart upload:** `createFuncionario` chama `fetch` diretamente (em vez de `apiFetch`) porque o helper força `Content-Type: application/json`. O service mantém `credentials: "include"` para o cookie de sessão e replica o tratamento 401 → redirect /login. Esse é o único ponto fora do `apiFetch` no módulo.
 
-**Decimals:** `base_salary`, `overtime_amount`, `deductions`, `total_amount`, `total_paid`, `termination_cost_override` chegam como string do backend (Pydantic + Decimal). O service converte via `toNumber()` em `parseEmployee`/`parseEntry`/`parsePeriod`/`parseJobPosition`.
+**Decimals:** `base_salary`, `overtime_amount`, `deductions`, `total_amount`, `total_paid`, `termination_cost_override` e os benefícios (`transport_voucher_cost`, `meal_voucher_value`, `pharmacy_voucher_value`, `life_insurance_value`) chegam como string do backend (Pydantic + Decimal). O service converte via `toNumber()`/`toNumberOrNull()` em `parseEmployee`/`parseEntry`/`parsePeriod`/`parseJobPosition`/`parseEmployeePayslip`.
 
 **Cargos (paginação):** `getCargos` usa `fetchPaginated` (infra da Demanda 0) porque `GET /api/folha/cargos` responde o **envelope `Page[T]` cru** (`items/total/page/page_size/pages`), e não o `SuccessResponse`. `order_by` aceito: `name`, `base_salary` (default `name asc`); `search` filtra por nome. As demais rotas de cargo (POST/PUT/DELETE) usam `SuccessResponse` via `apiFetch`.
+
+**Histórico:** `getHoleritesFuncionario(employeeId, year)` consome `GET /api/folha/funcionarios/{id}/holerites?year=YYYY` (`SuccessResponse`) e converte cada item via `parseEmployeePayslip`.
 
 **Photo URL:** O backend retorna `photo_url` relativo (`/uploads/employees/...`). O service prefixa com `NEXT_PUBLIC_API_URL` para virar absoluto antes de servir aos componentes.
 
@@ -137,7 +144,9 @@ type PayrollPeriodStatus = "aberta" | "fechada"
 interface JobPosition { id; name; description; base_salary; is_active }
 
 interface Employee { id; name; cpf; position_id; position_name; base_salary; contract_type;
-  admission_date; photo_path; photo_url; is_active; termination_cost_override; created_at }
+  admission_date; photo_path; photo_url; is_active; termination_cost_override;
+  transport_voucher_cost; meal_voucher_value; pharmacy_voucher_value; life_insurance_value;
+  dependents_count; created_at }
 
 interface PayrollEntry { id; payroll_period_id; employee_id; employee_name;
   contract_type; base_salary; overtime_amount; deductions; total_amount; status; paid_at }
@@ -150,6 +159,8 @@ interface PayrollPaymentRequest { id; payroll_period_id; competency; // "MM/AAAA
   request_type: "individual" | "lote"; status; total_amount; approval_note;
   requested_at; decided_at; entries: { entry_id; employee_id; employee_name; net_amount }[];
   created_at; updated_at }
+
+interface EmployeePayslip extends PayrollEntry { reference_month; reference_year; period_status }
 ```
 
 ## Componentes
@@ -173,6 +184,8 @@ Dialog com dois schemas Zod separados: criação (inclui `cpf` regex `000.000.00
 
 **Cargo (dropdown) + salário sugerido:** o campo **Cargo** é um `Select` populado por `getCargos` (busca 1 página de 100 ao abrir; a listagem já exclui cargos removidos). `position_id` é obrigatório no schema. Ao escolher um cargo, o **Salário base** é preenchido com o `base_salary` do cargo — mas continua **editável**. Na edição, o `position_id` atual vem pré-selecionado. O **Salário base é opcional**: só é anexado ao `FormData` quando informado (vazio → o backend usa o salário do cargo). A conversão vazio→`undefined`/texto→número usa `setValueAs` no `register`.
 
+**Benefícios/dependentes:** o formulário também permite configurar **vale transporte**, **vale refeição**, **vale farmácia**, **seguro de vida** e **número de dependentes** (todos opcionais; convertidos vazio→não enviado). Esses valores alimentam o lançamento automático de itens na abertura do período e o cálculo de IRRF.
+
 **Props:** `open`, `onOpenChange`, `employee?: Employee | null`, `onSuccess`
 
 ### `CargoForm`
@@ -184,12 +197,12 @@ Dialog (RHF + Zod) para criar/editar cargo. Campos: **Nome** (obrigatório), **D
 `CargosTab` orquestra a aba Cargos: usa o hook `useCargos` (estado de página/ordenação/busca, espelhando `useMovimentacoes`), monta as colunas do `DataTable`, e detém os diálogos de criar/editar (`CargoForm`) e excluir (`AlertDialog`). O `DataTable` permanece "burro". `useCargos` busca `PAGE_SIZE = 20`, ordenação inicial `name asc`; trocar ordenação/busca volta para a página 1.
 
 ### `PeriodoSelector`
-Select de mês (1-12 nomes em português) + Input number ano (default mês/ano atuais). Botão "Abrir Período" chama `createOrGetPeriodo` (idempotente). Se o backend retornar período pré-existente (criado há > 5s), exibe toast "Período já existe, carregando..."; caso contrário toast de sucesso. Mostra badge "Aberta" (verde) ou "Fechada" (cinza) ao lado.
+Select de mês (1-12 nomes em português) + Input number ano (default mês/ano atuais). Meses/anos futuros ficam bloqueados antes da chamada. Botão "Abrir Período" chama `createOrGetPeriodo` (idempotente). Mostra badge "Aberta" (verde) ou "Fechada" (cinza) ao lado.
 
 **Props:** `activePeriod: PayrollPeriod | null`, `onPeriodLoaded: (p: PayrollPeriod) => void`
 
 ### `EntryRow`
-Linha da tabela de holerites: avatar pequeno + nome, badge de contrato, salário base, horas extras (verde + sinal +), descontos (vermelho + sinal -), total destacado em bold, badge de status (pendente amarelo / **aguardando aprovação âmbar** / pago verde). Ações por linha:
+Linha da tabela de holerites: avatar pequeno + nome, badge de contrato, salário base, horas extras (verde + sinal +), descontos (vermelho + sinal -), benefícios informativos, total destacado em bold, badge de status (pendente amarelo / **aguardando aprovação âmbar** / pago verde). Ações por linha:
 - Botão editar (Pencil) → abre `EntryEditForm` (apenas se `aberta` + `pendente`).
 - Botão **"Solicitar pagamento"** individual com loading (apenas se `aberta` + `pendente`). Cria a solicitação e mostra o toast *"Enviado para aprovação do financeiro"*.
 - Quando o holerite está **aguardando aprovação**, no lugar do botão aparece um botão **bloqueado** "Aguardando aprovação" (e o badge de status "Aguardando aprovação do financeiro").
@@ -198,16 +211,17 @@ Linha da tabela de holerites: avatar pequeno + nome, badge de contrato, salário
 **Props:** `entry: PayrollEntry`, `period: PayrollPeriod`, `employee?: Employee`, `onChanged: () => void`
 
 ### `EntryEditForm`
-Dialog simples com `overtime_amount` e `deductions` (ambos `z.number().min(0)`). Preview do total em tempo real: `base_salary + overtime − deductions` exibido em card destacado. Ao salvar chama `updateEntry`.
+Dialog com `overtime_amount` e `deductions`, lista de itens do holerite e cálculo automático de hora extra, adicional noturno, INSS, IRRF, FGTS e vale transporte. Ao salvar/aplicar, o backend recalcula itens estatutários derivados.
 
 **Props:** `open`, `onOpenChange`, `entry: PayrollEntry | null`, `onSuccess`
 
 ### `HoleritePDF`
 Botão "PDF" que dinamicamente importa `jsPDF` (`await import("jspdf")`) — evita bundle bloat. Gera holerite com:
-- Cabeçalho "Coffee Farm ERP — Holerite"
+- Logo vetorial "CF" + cabeçalho "Coffee Farm ERP — Holerite"
 - Período: mês/ano em português
 - Funcionário: nome, CPF (do `employee` opcional), cargo (`position_name`), contrato
-- Tabela de valores: salário base, horas extras (+), descontos (−), total líquido em bold
+- Tabela de 3 colunas: Proventos, Benefícios e Descontos
+- Subtotais por coluna, total líquido (Proventos − Descontos) e total de benefícios
 - Data de pagamento (se `paid_at`)
 - Rodapé: "Documento gerado em DD/MM/AAAA"
 - Nome do arquivo: `holerite_{nome_normalizado}_{mes}_{ano}.pdf`
@@ -224,8 +238,8 @@ Botão verde **"Solicitar pagamento de todos (R$ X)"** calculando o total das pe
 1. Usuário escolhe mês/ano no `PeriodoSelector` e clica "Abrir Período".
 2. `createOrGetPeriodo` chama `POST /api/folha/periodos` (idempotente). Backend:
    - Se já existe → retorna o período existente (com entries).
-   - Se novo → cria 1 entry por funcionário **ativo** com `total_amount = base_salary`, status `pendente`.
-3. Tabela exibe holerites. Usuário pode editar `overtime_amount`/`deductions` por entry — backend recalcula `total_amount`.
+   - Se novo → cria 1 entry por funcionário **ativo** com **salário proporcional** (dias corridos trabalhados no mês) e já lança os **itens automáticos** (INSS, FGTS, IRRF quando devido, vale transporte e benefícios), status `pendente`.
+3. Tabela exibe holerites. Usuário pode editar `overtime_amount`/`deductions` por entry — backend recalcula os itens estatutários (INSS/IRRF/FGTS) e o `total_amount`.
 4. **Solicitar pagamento** individual (`solicitarPagamento`) ou em lote (`solicitarPagamentoTodos`):
    - **Não** move dinheiro. O(s) holerite(s) passa(m) a **aguardando aprovação** e o botão fica bloqueado.
    - No lote, **todos** os pendentes do período entram numa **única** solicitação e bloqueiam de uma vez.

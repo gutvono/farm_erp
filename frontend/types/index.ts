@@ -744,6 +744,7 @@ export type PayrollCalculationType =
   | "inss"
   | "fgts"
   | "transport_voucher"
+  | "irrf"
 export type PayrollItemSource = "manual" | "automatic"
 
 export interface JobPosition {
@@ -767,6 +768,11 @@ export interface Employee {
   photo_url: string | null
   is_active: boolean
   termination_cost_override: number | null
+  transport_voucher_cost: number | null
+  meal_voucher_value: number | null
+  pharmacy_voucher_value: number | null
+  life_insurance_value: number | null
+  dependents_count: number
   created_at: string
 }
 
@@ -797,6 +803,12 @@ export interface PayrollPeriod {
   total_amount: number
   entries: PayrollEntry[]
   created_at: string
+}
+
+export interface EmployeePayslip extends PayrollEntry {
+  reference_month: number
+  reference_year: number
+  period_status: PayrollPeriodStatus
 }
 
 export interface PayrollEvent {

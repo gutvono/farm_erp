@@ -148,18 +148,23 @@ export function HoleritesTable({
         </span>
       </div>
 
-      {loading ? (
-        <div className="py-12 text-center text-slate-400">Carregando...</div>
-      ) : entries.length === 0 ? (
+      {entries.length === 0 ? (
         <div className="py-12 text-center text-slate-400">
-          Nenhum holerite gerado para este período
+          {loading ? "Carregando..." : "Nenhum holerite gerado para este período"}
         </div>
       ) : rows.length === 0 ? (
         <div className="py-12 text-center text-slate-400">
           Nenhum holerite corresponde aos filtros
         </div>
       ) : (
-        <div className="rounded-md border bg-white">
+        // Mantemos a tabela montada durante o reload (apenas esmaecida) para não
+        // desmontar o modal de edição aberto numa das linhas.
+        <div
+          className={cn(
+            "rounded-md border bg-white transition-opacity",
+            loading && "pointer-events-none opacity-60"
+          )}
+        >
           <Table>
             <TableHeader>
               <TableRow>

@@ -80,6 +80,11 @@ const baseFields = {
   }),
   admission_date: z.string().min(1, "Data de admissão é obrigatória"),
   termination_cost_override: terminationField,
+  transport_voucher_cost: terminationField,
+  meal_voucher_value: terminationField,
+  pharmacy_voucher_value: terminationField,
+  life_insurance_value: terminationField,
+  dependents_count: z.number().int().min(0, "Dependentes deve ser >= 0"),
 }
 
 const createSchema = z.object({
@@ -153,6 +158,23 @@ export function FuncionarioForm({
           employee.termination_cost_override != null
             ? String(employee.termination_cost_override)
             : "",
+        transport_voucher_cost:
+          employee.transport_voucher_cost != null
+            ? String(employee.transport_voucher_cost)
+            : "",
+        meal_voucher_value:
+          employee.meal_voucher_value != null
+            ? String(employee.meal_voucher_value)
+            : "",
+        pharmacy_voucher_value:
+          employee.pharmacy_voucher_value != null
+            ? String(employee.pharmacy_voucher_value)
+            : "",
+        life_insurance_value:
+          employee.life_insurance_value != null
+            ? String(employee.life_insurance_value)
+            : "",
+        dependents_count: employee.dependents_count ?? 0,
       })
     } else {
       setCpfDisplay("")
@@ -164,6 +186,11 @@ export function FuncionarioForm({
         contract_type: undefined,
         admission_date: "",
         termination_cost_override: "",
+        transport_voucher_cost: "",
+        meal_voucher_value: "",
+        pharmacy_voucher_value: "",
+        life_insurance_value: "",
+        dependents_count: 0,
       })
     }
   }, [open, employee, createForm, editForm])
@@ -236,6 +263,23 @@ export function FuncionarioForm({
       if (terminationCost !== undefined) {
         formData.append("termination_cost_override", String(terminationCost))
       }
+      const transportVoucherCost = parseCurrency(data.transport_voucher_cost ?? "")
+      if (transportVoucherCost !== undefined) {
+        formData.append("transport_voucher_cost", String(transportVoucherCost))
+      }
+      const mealVoucherValue = parseCurrency(data.meal_voucher_value ?? "")
+      if (mealVoucherValue !== undefined) {
+        formData.append("meal_voucher_value", String(mealVoucherValue))
+      }
+      const pharmacyVoucherValue = parseCurrency(data.pharmacy_voucher_value ?? "")
+      if (pharmacyVoucherValue !== undefined) {
+        formData.append("pharmacy_voucher_value", String(pharmacyVoucherValue))
+      }
+      const lifeInsuranceValue = parseCurrency(data.life_insurance_value ?? "")
+      if (lifeInsuranceValue !== undefined) {
+        formData.append("life_insurance_value", String(lifeInsuranceValue))
+      }
+      formData.append("dependents_count", String(data.dependents_count))
       if (photoFile) {
         formData.append("photo_file", photoFile)
       }
@@ -262,6 +306,11 @@ export function FuncionarioForm({
         contract_type: data.contract_type,
         admission_date: data.admission_date,
         termination_cost_override: parseCurrency(data.termination_cost_override ?? ""),
+        transport_voucher_cost: parseCurrency(data.transport_voucher_cost ?? ""),
+        meal_voucher_value: parseCurrency(data.meal_voucher_value ?? ""),
+        pharmacy_voucher_value: parseCurrency(data.pharmacy_voucher_value ?? ""),
+        life_insurance_value: parseCurrency(data.life_insurance_value ?? ""),
+        dependents_count: data.dependents_count,
       })
       toast.success("Funcionário atualizado com sucesso")
       onSuccess()
@@ -389,6 +438,64 @@ export function FuncionarioForm({
               <p className="text-xs text-slate-400">
                 Sobrescreve o padrão do contrato
               </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="edit-transport_voucher_cost">Vale transporte</Label>
+                <Input
+                  id="edit-transport_voucher_cost"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Custo mensal real"
+                  {...editForm.register("transport_voucher_cost")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-meal_voucher_value">Vale refeição</Label>
+                <Input
+                  id="edit-meal_voucher_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...editForm.register("meal_voucher_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-pharmacy_voucher_value">Vale farmácia</Label>
+                <Input
+                  id="edit-pharmacy_voucher_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...editForm.register("pharmacy_voucher_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-life_insurance_value">Seguro de vida</Label>
+                <Input
+                  id="edit-life_insurance_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...editForm.register("life_insurance_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="edit-dependents_count">Dependentes</Label>
+                <Input
+                  id="edit-dependents_count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  {...editForm.register("dependents_count", { valueAsNumber: true })}
+                />
+                {editForm.formState.errors.dependents_count && (
+                  <p className="text-xs text-red-500">
+                    {editForm.formState.errors.dependents_count.message}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="flex justify-end gap-2 pt-2">
@@ -530,6 +637,64 @@ export function FuncionarioForm({
               <p className="text-xs text-slate-400">
                 Sobrescreve o padrão do contrato
               </p>
+            </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-1">
+                <Label htmlFor="transport_voucher_cost">Vale transporte</Label>
+                <Input
+                  id="transport_voucher_cost"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Custo mensal real"
+                  {...createForm.register("transport_voucher_cost")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="meal_voucher_value">Vale refeição</Label>
+                <Input
+                  id="meal_voucher_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...createForm.register("meal_voucher_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="pharmacy_voucher_value">Vale farmácia</Label>
+                <Input
+                  id="pharmacy_voucher_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...createForm.register("pharmacy_voucher_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="life_insurance_value">Seguro de vida</Label>
+                <Input
+                  id="life_insurance_value"
+                  type="text"
+                  inputMode="decimal"
+                  placeholder="Valor mensal"
+                  {...createForm.register("life_insurance_value")}
+                />
+              </div>
+              <div className="space-y-1">
+                <Label htmlFor="dependents_count">Dependentes</Label>
+                <Input
+                  id="dependents_count"
+                  type="number"
+                  min="0"
+                  step="1"
+                  {...createForm.register("dependents_count", { valueAsNumber: true })}
+                />
+                {createForm.formState.errors.dependents_count && (
+                  <p className="text-xs text-red-500">
+                    {createForm.formState.errors.dependents_count.message}
+                  </p>
+                )}
+              </div>
             </div>
 
             <div className="space-y-1">

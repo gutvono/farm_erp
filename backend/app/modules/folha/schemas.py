@@ -74,6 +74,11 @@ class EmployeeCreate(BaseModel):
     contract_type: ContractType
     admission_date: date
     termination_cost_override: Optional[Decimal] = Field(default=None, ge=0)
+    transport_voucher_cost: Optional[Decimal] = Field(default=None, ge=0)
+    meal_voucher_value: Optional[Decimal] = Field(default=None, ge=0)
+    pharmacy_voucher_value: Optional[Decimal] = Field(default=None, ge=0)
+    life_insurance_value: Optional[Decimal] = Field(default=None, ge=0)
+    dependents_count: int = Field(default=0, ge=0)
 
 
 class EmployeeUpdate(BaseModel):
@@ -85,6 +90,11 @@ class EmployeeUpdate(BaseModel):
     contract_type: Optional[ContractType] = None
     admission_date: Optional[date] = None
     termination_cost_override: Optional[Decimal] = Field(default=None, ge=0)
+    transport_voucher_cost: Optional[Decimal] = Field(default=None, ge=0)
+    meal_voucher_value: Optional[Decimal] = Field(default=None, ge=0)
+    pharmacy_voucher_value: Optional[Decimal] = Field(default=None, ge=0)
+    life_insurance_value: Optional[Decimal] = Field(default=None, ge=0)
+    dependents_count: Optional[int] = Field(default=None, ge=0)
 
 
 class EmployeeOut(BaseModel):
@@ -100,6 +110,11 @@ class EmployeeOut(BaseModel):
     admission_date: date
     termination_date: Optional[date] = None
     termination_cost_override: Optional[Decimal] = None
+    transport_voucher_cost: Optional[Decimal] = None
+    meal_voucher_value: Optional[Decimal] = None
+    pharmacy_voucher_value: Optional[Decimal] = None
+    life_insurance_value: Optional[Decimal] = None
+    dependents_count: int = 0
     photo_url: Optional[str] = None
     is_active: bool
     created_at: datetime
@@ -123,6 +138,11 @@ class EmployeeOut(BaseModel):
             admission_date=employee.hire_date,
             termination_date=employee.termination_date,
             termination_cost_override=employee.termination_cost_override,
+            transport_voucher_cost=employee.transport_voucher_cost,
+            meal_voucher_value=employee.meal_voucher_value,
+            pharmacy_voucher_value=employee.pharmacy_voucher_value,
+            life_insurance_value=employee.life_insurance_value,
+            dependents_count=employee.dependents_count or 0,
             photo_url=photo_url,
             is_active=employee.is_active,
             created_at=employee.created_at,
@@ -344,6 +364,12 @@ class PayrollEntryOut(BaseModel):
 
 class PayrollEntryDetailedOut(PayrollEntryOut):
     pass
+
+
+class EmployeePayslipOut(PayrollEntryOut):
+    reference_month: int
+    reference_year: int
+    period_status: PayrollPeriodStatus
 
 
 # ---------------------------------------------------------------------------
