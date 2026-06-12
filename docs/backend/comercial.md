@@ -37,6 +37,12 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/comercial/vendas/{id}/cancelar` | **Cancelar venda**: estorna estoque e financeiro ponta a ponta |
 | `DELETE` | `/api/comercial/vendas/{id}` | Soft delete / "Excluir" (somente se já `cancelada` — ver abaixo) |
 
+### Relatórios (Demanda 10)
+
+| Método | Rota | Descrição |
+|--------|------|-----------|
+| `GET` | `/api/comercial/relatorios/vendas` | Relatório de vendas por período. Query: `start`/`end` (datas, default mês corrente), `granularity` (`day`\|`week`\|`month`, default `month`) |
+
 ## Paginação server-side (Demanda 8)
 
 `GET /clientes` e `GET /vendas` retornam o envelope **`Page[T]` cru** (não embrulhado em
@@ -319,6 +325,42 @@ uma Venda").
   inadimplentes = flag manual **OU** `id ∈ get_client_ids_with_overdue` (uma query, reusada
   para a anotação — sem N+1). `is_delinquent=false`/ausente mantém o comportamento atual
   (apenas o flag manual), conforme decisão do PO.
+
+### Relatório de Vendas (`GET /relatorios/vendas`, Demanda 10)
+
+Relatório agregado por período, montado em `service.get_sales_report()`. Combina a **fatia
+operacional** (vendas/itens, via agregações no `repository` do Comercial) com a **fatia de
+recebíveis** (lida **via service do Financeiro** — `fin_service.get_receivables_report`; o
+Comercial nunca consulta `accounts_receivable` direto).
+
+**Parâmetros:** `start`/`end` (datas; se ausentes → **mês corrente**), `granularity`
+(`day`|`week`|`month`). Validações: `start ≤ end` senão **400 "Período inválido: a data inicial
+não pode ser maior que a final"**; granularidade fora da lista → **400 "Granularidade inválida
+(use 'day', 'week' ou 'month')"**. Período filtrado por `sold_at`.
+
+**Regra de canceladas (travada):** vendas `cancelada` ficam **fora** de todos os totais —
+faturamento, ticket, mix, série temporal, top produtos e top clientes. Aparecem **apenas** na
+quebra por status (`by_status`). Todas as agregações filtram `deleted_at IS NULL`.
+
+**Conteúdo (`SalesReportOut`):**
+- **`kpis`** — `faturamento` (Σ `total_amount`, líquido pós-desconto D9), `num_vendas`,
+  `ticket_medio` (= faturamento/nº; **0** quando não há vendas, sem divisão por zero).
+- **`by_status`** — `{status, count, total}` por status (**inclui `cancelada`**).
+- **`mix`** — à vista × parcelado (`parcelado` = `installments > 1`), com `count`/`total`.
+- **`timeseries`** — `{period, count, total}` por `day`/`week`/`month` (via `to_char`/
+  `date_trunc` sobre `sold_at`).
+- **`top_products`** — top N por faturamento; `quantity` e `total` somados de `sale_items` ao
+  **preço de tabela** (`subtotal` do item). Observação: como o desconto D9.C é de cabeçalho, a
+  soma dos `top_products` pode exceder o `faturamento` líquido pela diferença do desconto.
+- **`top_clients`** — top N por faturamento (Σ `total_amount`), com `num_vendas`.
+- **`receivables`** — `ReceivablesReportOut` do Financeiro (recebido/a receber no período +
+  inadimplência em R$ com aging; ver `docs/backend/financeiro.md`).
+
+**Efeito observável:** ao abrir o relatório de um período, o usuário vê quanto faturou (sem as
+canceladas), o ticket médio, a evolução no tempo, quais cafés e clientes puxaram a receita, e a
+saúde dos recebíveis (o que entrou, o que ainda vai vencer e quanto está inadimplente por faixa
+de atraso). O **headline do dashboard** (mês corrente) reusa a mesma agregação
+(`get_current_month_sales_kpis`) — ver `docs/backend/dashboard.md`.
 
 ## Database Schema
 

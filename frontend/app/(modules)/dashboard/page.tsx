@@ -10,6 +10,9 @@ import {
   Package,
   Factory,
   UserX,
+  ShoppingCart,
+  Receipt,
+  Calculator,
 } from "lucide-react"
 import { RootLayout } from "@/components/layout/RootLayout"
 import { KPICard } from "@/components/modules/dashboard/KPICard"
@@ -19,7 +22,7 @@ import { Button } from "@/components/ui/button"
 import { Skeleton } from "@/components/ui/skeleton"
 import { getDashboard } from "@/services/dashboard"
 import { DashboardData } from "@/types/index"
-import { formatDateTime } from "@/lib/utils"
+import { formatCurrency, formatDateTime } from "@/lib/utils"
 
 function KPISkeletons() {
   return (
@@ -86,9 +89,40 @@ export default function DashboardPage() {
     if (!data) return null
 
     const { kpis, cash_flow } = data
+    const monthLabel = new Intl.DateTimeFormat("pt-BR", {
+      month: "long",
+      year: "numeric",
+    }).format(new Date())
 
     return (
       <div className="space-y-6">
+        {/* Headline de vendas do mês (Demanda 10) */}
+        <div className="space-y-2">
+          <h3 className="text-sm font-semibold text-slate-600">
+            Vendas do mês — {monthLabel}
+          </h3>
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            <KPICard
+              title="Faturamento de Vendas"
+              value={formatCurrency(kpis.sales_revenue_month)}
+              icon={Receipt}
+              variant="default"
+            />
+            <KPICard
+              title="Vendas no Mês"
+              value={`${kpis.sales_count_month} venda${kpis.sales_count_month !== 1 ? "s" : ""}`}
+              icon={ShoppingCart}
+              variant="default"
+            />
+            <KPICard
+              title="Ticket Médio"
+              value={formatCurrency(kpis.sales_ticket_month)}
+              icon={Calculator}
+              variant="default"
+            />
+          </div>
+        </div>
+
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
           <KPICard
             title="Saldo Atual"

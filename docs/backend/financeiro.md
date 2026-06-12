@@ -219,6 +219,30 @@ No fluxo de **venda parcelada** (Comercial chama `criar_faturas_parceladas` + N 
 
 No fluxo de **compra parcelada** (Compras divide `receipt_total_amount` em N parcelas), cada conta a pagar mantém `purchase_order_id` e recebe `installment_number`/`installment_total`. Ver `docs/backend/compras.md` para detalhes sobre o gatilho `complete_order_after_payment`, que só é executado no pagamento da primeira parcela.
 
+### `get_receivables_report(db, *, start, end)` — fatia de recebíveis (Demanda 10)
+
+Função de **agregação por período** consumida pelo **Comercial** para montar a fatia de
+recebíveis do Relatório de Vendas. Regra de arquitetura travada: o Comercial **não** consulta
+`accounts_receivable`/`invoices` direto — lê tudo por aqui (consumidor, não reimplementador).
+Retorna `ReceivablesReportOut`:
+
+- **`received_in_period`** — Σ `amount_received` de AR (não canceladas) com `received_at ∈
+  [start, end]` (parcelas efetivamente quitadas no intervalo).
+- **`to_receive_in_period`** — Σ saldo (`amount − amount_received`) de AR **em aberto** (saldo
+  > 0, não cancelada) com `due_date ∈ [start, end]`.
+- **`overdue_total` + `aging`** — AR **vencidas** (`due_date < hoje`, em aberto, não cancelada,
+  reusando a definição derivada da 9.A `_receivable_is_overdue`), com buckets por dias de
+  atraso (`1-30`, `31-60`, `61-90`, `90+`). É uma **foto de inadimplência na data de hoje** —
+  diferente de `received`/`to_receive`, **não** é limitada ao período do relatório.
+
+As queries agregadas vivem no `repository` (`sum_received_between`, `sum_open_due_between`,
+`list_overdue_receivables`); o `service` apenas faz o bucketing do aging e monta o DTO.
+
+> **Limitação conhecida:** `received_in_period` usa `received_at`, que só é carimbado quando a
+> parcela é **quitada** (recebimentos parciais não têm timestamp por evento — vivem só nos
+> `financial_movements`). Logo a métrica reflete o que foi **liquidado** no período, não cada
+> recebimento parcial.
+
 ## Regras de Negócio
 
 ### Saldo

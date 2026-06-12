@@ -95,7 +95,17 @@ def get_unread_count(db: Session) -> int:
 
 
 def get_dashboard(db: Session) -> DashboardOut:
+    from app.modules.comercial import service as comercial_service
+
     kpi_data = dashboard_repo.get_kpis(db)
+
+    # Headline de vendas do mês (Demanda 10): reusa a agregação do Comercial,
+    # sem duplicar SQL aqui.
+    sales_kpis = comercial_service.get_current_month_sales_kpis(db)
+    kpi_data["sales_revenue_month"] = float(sales_kpis.faturamento)
+    kpi_data["sales_count_month"] = sales_kpis.num_vendas
+    kpi_data["sales_ticket_month"] = float(sales_kpis.ticket_medio)
+
     cash_flow_data = dashboard_repo.get_cash_flow(db, months=6)
 
     kpis = DashboardKPIs(**kpi_data)

@@ -11,6 +11,7 @@ import { useClientes } from "@/components/modules/comercial/useClientes"
 import { VendasTable } from "@/components/modules/comercial/VendasTable"
 import { useVendas } from "@/components/modules/comercial/useVendas"
 import { VendaForm } from "@/components/modules/comercial/VendaForm"
+import { RelatoriosVendas } from "@/components/modules/comercial/RelatoriosVendas"
 import { getClientes } from "@/services/comercial"
 import { getItens } from "@/services/estoque"
 import { Client, StockItem } from "@/types/index"
@@ -69,6 +70,7 @@ export default function ComercialPage() {
           <TabsList>
             <TabsTrigger value="sales">Vendas</TabsTrigger>
             <TabsTrigger value="clients">Clientes</TabsTrigger>
+            <TabsTrigger value="reports">Relatórios</TabsTrigger>
           </TabsList>
 
           {/* ── Aba Vendas ── */}
@@ -119,6 +121,11 @@ export default function ComercialPage() {
               onEdit={handleEditClient}
               onChanged={handleClienteSaved}
             />
+          </TabsContent>
+
+          {/* ── Aba Relatórios ── */}
+          <TabsContent value="reports" className="space-y-4">
+            <RelatoriosVendas />
           </TabsContent>
         </Tabs>
       </div>

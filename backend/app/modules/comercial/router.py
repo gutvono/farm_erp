@@ -1,3 +1,4 @@
+from datetime import date
 from typing import Optional
 from uuid import UUID
 
@@ -196,3 +197,27 @@ def delete_sale(
 ) -> SuccessResponse:
     comercial_service.soft_delete_sale(db, sale_id)
     return success("Venda removida com sucesso")
+
+
+# ---------------------------------------------------------------------------
+# Reports (Demanda 10)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/relatorios/vendas", response_model=SuccessResponse)
+def sales_report(
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    granularity: str = "month",
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    """Relatório de vendas por período. `start`/`end` (datas, default mês corrente);
+    `granularity` da série temporal: `day`|`week`|`month`."""
+    report = comercial_service.get_sales_report(
+        db, start=start, end=end, granularity=granularity
+    )
+    return success(
+        "Relatório de vendas gerado com sucesso",
+        report.model_dump(mode="json"),
+    )

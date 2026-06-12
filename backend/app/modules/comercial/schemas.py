@@ -5,6 +5,7 @@ from uuid import UUID
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
+from app.modules.financeiro.schemas import ReceivablesReportOut
 from app.shared.enums import PaymentMethod, SaleStatus
 
 
@@ -221,3 +222,69 @@ class SaleCancelRequest(BaseModel):
     cancelamento, registrado nas NFs estornadas."""
 
     reason: Optional[str] = None
+
+
+# ---------------------------------------------------------------------------
+# Sales report (Demanda 10) — operacional (Comercial) + recebíveis (Financeiro)
+# ---------------------------------------------------------------------------
+
+
+class SalesReportKPIs(BaseModel):
+    """KPIs de topo do relatório (e do headline do dashboard). `faturamento` e
+    `ticket_medio` são líquidos (sobre `total_amount`, pós-desconto D9);
+    canceladas excluídas."""
+
+    faturamento: Decimal
+    num_vendas: int
+    ticket_medio: Decimal
+
+
+class SalesStatusItem(BaseModel):
+    status: str
+    count: int
+    total: Decimal
+
+
+class SalesMixItem(BaseModel):
+    """Categoria do mix: ``a_vista`` ou ``parcelado`` (installments > 1)."""
+
+    category: str
+    count: int
+    total: Decimal
+
+
+class SalesTimeseriesItem(BaseModel):
+    period: str
+    count: int
+    total: Decimal
+
+
+class TopProductItem(BaseModel):
+    stock_item_id: UUID
+    name: str
+    quantity: Decimal
+    total: Decimal
+
+
+class TopClientItem(BaseModel):
+    client_id: UUID
+    name: str
+    num_vendas: int
+    total: Decimal
+
+
+class SalesReportOut(BaseModel):
+    """Relatório de Vendas por período (Demanda 10). Combina a fatia operacional
+    (vendas/itens, via repository do Comercial) com a fatia de recebíveis (lida
+    via service do Financeiro). Canceladas só aparecem em `by_status`."""
+
+    start: date
+    end: date
+    granularity: str
+    kpis: SalesReportKPIs
+    by_status: list[SalesStatusItem]
+    mix: list[SalesMixItem]
+    timeseries: list[SalesTimeseriesItem]
+    top_products: list[TopProductItem]
+    top_clients: list[TopClientItem]
+    receivables: ReceivablesReportOut

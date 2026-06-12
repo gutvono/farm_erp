@@ -14,6 +14,13 @@ from app.modules.comercial.schemas import (
     ClientUpdate,
     SaleCreate,
     SaleOut,
+    SalesMixItem,
+    SalesReportKPIs,
+    SalesReportOut,
+    SalesStatusItem,
+    SalesTimeseriesItem,
+    TopClientItem,
+    TopProductItem,
 )
 from app.modules.estoque import repository as estoque_repo
 from app.modules.estoque import service as estoque_service
@@ -394,3 +401,126 @@ def soft_delete_sale(db: Session, sale_id: UUID) -> Sale:
         )
 
     return comercial_repo.soft_delete_sale(db, sale_id)
+
+
+# ---------------------------------------------------------------------------
+# Sales report (Demanda 10)
+# ---------------------------------------------------------------------------
+
+
+def _month_bounds(today: date) -> tuple[date, date]:
+    """Primeiro e último dia do mês de ``today`` (default do relatório/headline)."""
+    start = today.replace(day=1)
+    if start.month == 12:
+        next_month = start.replace(year=start.year + 1, month=1)
+    else:
+        next_month = start.replace(month=start.month + 1)
+    return start, next_month - timedelta(days=1)
+
+
+def _ticket_medio(faturamento: Decimal, num_vendas: int) -> Decimal:
+    """Ticket médio = faturamento / nº de vendas; 0 quando não há vendas (evita
+    divisão por zero)."""
+    if num_vendas <= 0:
+        return Decimal("0.00")
+    return (faturamento / num_vendas).quantize(Decimal("0.01"))
+
+
+def get_sales_report(
+    db: Session,
+    *,
+    start: Optional[date] = None,
+    end: Optional[date] = None,
+    granularity: str = "month",
+    top_limit: int = 5,
+) -> SalesReportOut:
+    """Monta o Relatório de Vendas do período: fatia operacional (repository do
+    Comercial) + fatia de recebíveis (service do Financeiro). Canceladas ficam
+    fora dos totais (faturamento/ticket/mix/séries/tops) e só aparecem em
+    ``by_status``. Sem período → mês corrente.
+    """
+    today = date.today()
+    if start is None or end is None:
+        start, end = _month_bounds(today)
+    if start > end:
+        raise HTTPException(
+            status_code=400,
+            detail="Período inválido: a data inicial não pode ser maior que a final",
+        )
+    granularity = (granularity or "month").lower()
+    if granularity not in ("day", "week", "month"):
+        raise HTTPException(
+            status_code=400,
+            detail="Granularidade inválida (use 'day', 'week' ou 'month')",
+        )
+
+    faturamento, num_vendas = comercial_repo.sales_summary(db, start=start, end=end)
+    kpis = SalesReportKPIs(
+        faturamento=faturamento,
+        num_vendas=num_vendas,
+        ticket_medio=_ticket_medio(faturamento, num_vendas),
+    )
+
+    by_status = [
+        SalesStatusItem(status=status, count=count, total=total)
+        for status, count, total in comercial_repo.sales_by_status(
+            db, start=start, end=end
+        )
+    ]
+    mix = [
+        SalesMixItem(category=category, count=count, total=total)
+        for category, count, total in comercial_repo.sales_mix(
+            db, start=start, end=end
+        )
+    ]
+    timeseries = [
+        SalesTimeseriesItem(period=period, count=count, total=total)
+        for period, count, total in comercial_repo.sales_timeseries(
+            db, start=start, end=end, granularity=granularity
+        )
+    ]
+    top_products = [
+        TopProductItem(
+            stock_item_id=stock_item_id, name=name, quantity=quantity, total=total
+        )
+        for stock_item_id, name, quantity, total in comercial_repo.top_products(
+            db, start=start, end=end, limit=top_limit
+        )
+    ]
+    top_clients = [
+        TopClientItem(
+            client_id=client_id, name=name, num_vendas=num, total=total
+        )
+        for client_id, name, num, total in comercial_repo.top_clients(
+            db, start=start, end=end, limit=top_limit
+        )
+    ]
+
+    # Fatia de recebíveis SEMPRE via service do Financeiro (regra de arquitetura
+    # travada — o Comercial não consulta accounts_receivable direto).
+    receivables = fin_service.get_receivables_report(db, start=start, end=end)
+
+    return SalesReportOut(
+        start=start,
+        end=end,
+        granularity=granularity,
+        kpis=kpis,
+        by_status=by_status,
+        mix=mix,
+        timeseries=timeseries,
+        top_products=top_products,
+        top_clients=top_clients,
+        receivables=receivables,
+    )
+
+
+def get_current_month_sales_kpis(db: Session) -> SalesReportKPIs:
+    """KPIs de vendas do mês corrente (headline do dashboard). Reusa a mesma
+    agregação do relatório — não há SQL duplicado."""
+    start, end = _month_bounds(date.today())
+    faturamento, num_vendas = comercial_repo.sales_summary(db, start=start, end=end)
+    return SalesReportKPIs(
+        faturamento=faturamento,
+        num_vendas=num_vendas,
+        ticket_medio=_ticket_medio(faturamento, num_vendas),
+    )
