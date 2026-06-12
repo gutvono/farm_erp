@@ -137,6 +137,7 @@ class PayrollCalculationType(str, enum.Enum):
     INSS = "inss"
     FGTS = "fgts"
     TRANSPORT_VOUCHER = "transport_voucher"
+    IRRF = "irrf"
 
 
 class PayrollItemSource(str, enum.Enum):

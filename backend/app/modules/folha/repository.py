@@ -43,6 +43,10 @@ EMPLOYEE_ORDER_COLUMNS = {
 
 SALARY_BASE_EVENT_DESCRIPTION = "Salario base"
 MANUAL_DEDUCTION_EVENT_DESCRIPTION = "Descontos manuais"
+MEAL_VOUCHER_EVENT_DESCRIPTION = "Vale refeição"
+PHARMACY_VOUCHER_EVENT_DESCRIPTION = "Vale farmácia"
+LIFE_INSURANCE_EVENT_DESCRIPTION = "Seguro de vida"
+IRRF_EVENT_DESCRIPTION = "IRRF"
 
 DEFAULT_PAYROLL_EVENT_DEFINITIONS = (
     {
@@ -98,6 +102,38 @@ DEFAULT_PAYROLL_EVENT_DEFINITIONS = (
         "event_type": PayrollEventType.DESCONTO,
         "calculation_type": PayrollCalculationType.MANUAL,
         "is_automatic": False,
+        "affects_net": True,
+        "is_active": True,
+    },
+    {
+        "description": MEAL_VOUCHER_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.INFORMATIVO,
+        "calculation_type": PayrollCalculationType.MANUAL,
+        "is_automatic": False,
+        "affects_net": False,
+        "is_active": True,
+    },
+    {
+        "description": PHARMACY_VOUCHER_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.INFORMATIVO,
+        "calculation_type": PayrollCalculationType.MANUAL,
+        "is_automatic": False,
+        "affects_net": False,
+        "is_active": True,
+    },
+    {
+        "description": LIFE_INSURANCE_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.INFORMATIVO,
+        "calculation_type": PayrollCalculationType.MANUAL,
+        "is_automatic": False,
+        "affects_net": False,
+        "is_active": True,
+    },
+    {
+        "description": IRRF_EVENT_DESCRIPTION,
+        "event_type": PayrollEventType.DESCONTO,
+        "calculation_type": PayrollCalculationType.IRRF,
+        "is_automatic": True,
         "affects_net": True,
         "is_active": True,
     },
@@ -214,6 +250,11 @@ def create_employee(
     admission_date: date,
     photo_path: Optional[str] = None,
     termination_cost_override: Optional[Decimal] = None,
+    transport_voucher_cost: Optional[Decimal] = None,
+    meal_voucher_value: Optional[Decimal] = None,
+    pharmacy_voucher_value: Optional[Decimal] = None,
+    life_insurance_value: Optional[Decimal] = None,
+    dependents_count: int = 0,
 ) -> Employee:
     employee = Employee(
         name=name,
@@ -226,6 +267,11 @@ def create_employee(
         hire_date=admission_date,
         photo_path=photo_path,
         termination_cost_override=termination_cost_override,
+        transport_voucher_cost=transport_voucher_cost,
+        meal_voucher_value=meal_voucher_value,
+        pharmacy_voucher_value=pharmacy_voucher_value,
+        life_insurance_value=life_insurance_value,
+        dependents_count=dependents_count,
         is_active=True,
     )
     db.add(employee)
@@ -269,6 +315,10 @@ def get_employee(db: Session, employee_id: UUID) -> Optional[Employee]:
         .filter(Employee.id == employee_id, Employee.deleted_at.is_(None))
         .first()
     )
+
+
+def get_employee_any(db: Session, employee_id: UUID) -> Optional[Employee]:
+    return db.query(Employee).filter(Employee.id == employee_id).first()
 
 
 def get_employee_by_cpf(db: Session, cpf: str) -> Optional[Employee]:
@@ -436,17 +486,44 @@ def create_period(
 
 
 def list_periods(
-    db: Session, *, skip: int = 0, limit: int = 100
+    db: Session,
+    *,
+    skip: int = 0,
+    limit: int = 100,
+    max_year: Optional[int] = None,
+    max_month: Optional[int] = None,
 ) -> list[PayrollPeriod]:
+    query = db.query(PayrollPeriod).filter(PayrollPeriod.deleted_at.is_(None))
+    if max_year is not None and max_month is not None:
+        query = query.filter(
+            (PayrollPeriod.competency_year < max_year)
+            | (
+                (PayrollPeriod.competency_year == max_year)
+                & (PayrollPeriod.competency_month <= max_month)
+            )
+        )
     periods = (
-        db.query(PayrollPeriod)
-        .filter(PayrollPeriod.deleted_at.is_(None))
-        .order_by(
+        query.order_by(
             PayrollPeriod.competency_year.desc(),
             PayrollPeriod.competency_month.desc(),
         )
         .offset(skip)
         .limit(limit)
+        .all()
+    )
+    for p in periods:
+        _ = p.entries
+    return periods
+
+
+def list_open_periods(db: Session) -> list[PayrollPeriod]:
+    """Períodos de folha ainda abertos (status aberta, não excluídos)."""
+    periods = (
+        db.query(PayrollPeriod)
+        .filter(
+            PayrollPeriod.deleted_at.is_(None),
+            PayrollPeriod.status == PayrollPeriodStatus.ABERTA,
+        )
         .all()
     )
     for p in periods:
@@ -514,6 +591,35 @@ def list_entries_by_period(
         db.query(PayrollEntry)
         .filter(PayrollEntry.payroll_period_id == period_id)
         .order_by(PayrollEntry.created_at.asc())
+        .all()
+    )
+
+
+def list_entries_by_employee(
+    db: Session,
+    employee_id: UUID,
+    *,
+    year: Optional[int] = None,
+) -> list[PayrollEntry]:
+    query = (
+        db.query(PayrollEntry)
+        .join(PayrollPeriod)
+        .options(
+            joinedload(PayrollEntry.period),
+            joinedload(PayrollEntry.items).joinedload(PayrollEntryItem.event),
+        )
+        .filter(
+            PayrollEntry.employee_id == employee_id,
+            PayrollPeriod.deleted_at.is_(None),
+        )
+    )
+    if year is not None:
+        query = query.filter(PayrollPeriod.competency_year == year)
+    return (
+        query.order_by(
+            PayrollPeriod.competency_year.desc(),
+            PayrollPeriod.competency_month.desc(),
+        )
         .all()
     )
 
@@ -721,6 +827,20 @@ def upsert_entry_item(
 
 def delete_entry_item(db: Session, item_id: UUID) -> bool:
     item = get_entry_item(db, item_id)
+    if not item:
+        return False
+    db.delete(item)
+    db.commit()
+    return True
+
+
+def delete_entry_item_by_event(
+    db: Session,
+    *,
+    entry_id: UUID,
+    event_id: UUID,
+) -> bool:
+    item = get_entry_item_by_event(db, entry_id=entry_id, event_id=event_id)
     if not item:
         return False
     db.delete(item)

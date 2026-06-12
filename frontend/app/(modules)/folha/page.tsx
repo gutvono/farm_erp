@@ -6,6 +6,21 @@ import { toast } from "sonner"
 import { RootLayout } from "@/components/layout/RootLayout"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   AlertDialog,
@@ -22,10 +37,16 @@ import { HoleritesTable } from "@/components/modules/folha/HoleritesTable"
 import { FuncionariosTable } from "@/components/modules/folha/FuncionariosTable"
 import { useFuncionarios } from "@/components/modules/folha/useFuncionarios"
 import { FuncionarioForm } from "@/components/modules/folha/FuncionarioForm"
+import { HoleritePDF } from "@/components/modules/folha/HoleritePDF"
 import { PagarTodosButton } from "@/components/modules/folha/PagarTodosButton"
 import { PeriodoSelector } from "@/components/modules/folha/PeriodoSelector"
-import { fecharPeriodo, getFuncionarios, getPeriodo } from "@/services/folha"
-import { Employee, PayrollPeriod } from "@/types/index"
+import {
+  fecharPeriodo,
+  getFuncionarios,
+  getHoleritesFuncionario,
+  getPeriodo,
+} from "@/services/folha"
+import { Employee, EmployeePayslip, PayrollPeriod } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
 
 const MONTHS = [
@@ -45,6 +66,10 @@ export default function FolhaPage() {
   const funcionarios = useFuncionarios()
   const [funcFormOpen, setFuncFormOpen] = useState(false)
   const [editingEmployee, setEditingEmployee] = useState<Employee | null>(null)
+  const [historyEmployeeId, setHistoryEmployeeId] = useState("")
+  const [historyYear, setHistoryYear] = useState(new Date().getFullYear())
+  const [historyPayslips, setHistoryPayslips] = useState<EmployeePayslip[]>([])
+  const [historyLoading, setHistoryLoading] = useState(false)
 
   const reloadPeriod = useCallback(async () => {
     if (!period) return
@@ -128,6 +153,66 @@ export default function FolhaPage() {
     return { pending, awaiting, paid, totalPending, totalPaid, total }
   }, [period])
 
+  const loadHistory = useCallback(async () => {
+    if (!historyEmployeeId) {
+      setHistoryPayslips([])
+      return
+    }
+    setHistoryLoading(true)
+    try {
+      const data = await getHoleritesFuncionario(historyEmployeeId, historyYear)
+      setHistoryPayslips(data)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Erro ao carregar histórico")
+    } finally {
+      setHistoryLoading(false)
+    }
+  }, [historyEmployeeId, historyYear])
+
+  useEffect(() => {
+    loadHistory()
+  }, [loadHistory])
+
+  const historySummary = useMemo(() => {
+    if (historyPayslips.length === 0) return null
+    const count = historyPayslips.length
+    const totalLiquido = historyPayslips.reduce((s, p) => s + p.total_amount, 0)
+    const totalProventos = historyPayslips.reduce((s, p) => s + p.total_earnings, 0)
+    const totalDescontos = historyPayslips.reduce((s, p) => s + p.total_deductions, 0)
+    const totalBeneficios = historyPayslips.reduce(
+      (s, p) => s + p.total_informative,
+      0
+    )
+    const paidCount = historyPayslips.filter((p) => p.status === "pago").length
+    const maior = historyPayslips.reduce(
+      (max, p) => (p.total_amount > max.total_amount ? p : max),
+      historyPayslips[0]
+    )
+    return {
+      count,
+      paidCount,
+      totalLiquido,
+      totalProventos,
+      totalDescontos,
+      totalBeneficios,
+      mediaLiquida: totalLiquido / count,
+      maiorLiquido: maior.total_amount,
+      maiorMes: MONTHS[maior.reference_month - 1],
+    }
+  }, [historyPayslips])
+
+  function periodFromPayslip(payslip: EmployeePayslip): PayrollPeriod {
+    return {
+      id: payslip.payroll_period_id,
+      reference_month: payslip.reference_month,
+      reference_year: payslip.reference_year,
+      status: payslip.period_status,
+      total_amount: payslip.total_amount,
+      entries: [payslip],
+      created_at: new Date().toISOString(),
+    }
+  }
+
   return (
     <RootLayout title="Folha de Pagamento">
       <div className="space-y-4">
@@ -143,6 +228,7 @@ export default function FolhaPage() {
             <TabsTrigger value="folha">Folha do Mês</TabsTrigger>
             <TabsTrigger value="funcionarios">Funcionários</TabsTrigger>
             <TabsTrigger value="cargos">Cargos</TabsTrigger>
+            <TabsTrigger value="historico">Folhas do funcionário</TabsTrigger>
           </TabsList>
 
           {/* ── Aba Folha do Mês ── */}
@@ -280,6 +366,156 @@ export default function FolhaPage() {
           {/* ── Aba Cargos ── */}
           <TabsContent value="cargos" className="space-y-4">
             <CargosTab />
+          </TabsContent>
+
+          {/* ── Aba Histórico por Funcionário ── */}
+          <TabsContent value="historico" className="space-y-4">
+            <div className="flex flex-wrap items-end gap-3">
+              <div className="space-y-1 min-w-[280px]">
+                <Select value={historyEmployeeId} onValueChange={setHistoryEmployeeId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Selecione um funcionário" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {allEmployees.map((emp) => (
+                      <SelectItem key={emp.id} value={emp.id}>
+                        {emp.name}
+                        {!emp.is_active ? " (inativo)" : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-1 w-32">
+                <input
+                  className="h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm"
+                  type="number"
+                  min={2000}
+                  max={new Date().getFullYear()}
+                  value={historyYear}
+                  onChange={(event) =>
+                    setHistoryYear(Number(event.target.value) || new Date().getFullYear())
+                  }
+                />
+              </div>
+            </div>
+
+            {historySummary && (
+              <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">
+                      Líquido acumulado · {historyYear}
+                    </p>
+                    <p className="text-xl font-bold text-slate-900">
+                      {formatCurrency(historySummary.totalLiquido)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      {historySummary.count} holerite
+                      {historySummary.count !== 1 ? "s" : ""} ·{" "}
+                      {historySummary.paidCount} pago
+                      {historySummary.paidCount !== 1 ? "s" : ""}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Média líquida mensal</p>
+                    <p className="text-xl font-bold text-emerald-700">
+                      {formatCurrency(historySummary.mediaLiquida)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      Maior: {formatCurrency(historySummary.maiorLiquido)} (
+                      {historySummary.maiorMes})
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Proventos · Descontos</p>
+                    <p className="text-lg font-bold text-green-700">
+                      {formatCurrency(historySummary.totalProventos)}
+                    </p>
+                    <p className="text-sm font-semibold text-red-700">
+                      - {formatCurrency(historySummary.totalDescontos)}
+                    </p>
+                  </CardContent>
+                </Card>
+                <Card>
+                  <CardContent className="p-4">
+                    <p className="text-xs text-slate-500">Benefícios acumulados</p>
+                    <p className="text-xl font-bold text-blue-700">
+                      {formatCurrency(historySummary.totalBeneficios)}
+                    </p>
+                    <p className="mt-1 text-xs text-slate-400">
+                      FGTS, vale-refeição, seguro de vida e afins
+                    </p>
+                  </CardContent>
+                </Card>
+              </div>
+            )}
+
+            {!historyEmployeeId ? (
+              <div className="py-12 text-center text-slate-400">
+                Selecione um funcionário para visualizar os holerites do ano.
+              </div>
+            ) : historyLoading ? (
+              <div className="py-12 text-center text-slate-400">
+                Carregando histórico...
+              </div>
+            ) : historyPayslips.length === 0 ? (
+              <div className="py-12 text-center text-slate-400">
+                Nenhum holerite no período
+              </div>
+            ) : (
+              <div className="rounded-md border bg-white">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Competência</TableHead>
+                      <TableHead className="text-right">Proventos</TableHead>
+                      <TableHead className="text-right">Benefícios</TableHead>
+                      <TableHead className="text-right">Descontos</TableHead>
+                      <TableHead className="text-right">Total líquido</TableHead>
+                      <TableHead>Status</TableHead>
+                      <TableHead className="text-right">Ações</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {historyPayslips.map((payslip) => (
+                      <TableRow key={payslip.id}>
+                        <TableCell className="font-medium">
+                          {MONTHS[payslip.reference_month - 1]}/{payslip.reference_year}
+                        </TableCell>
+                        <TableCell className="text-right text-green-700">
+                          {formatCurrency(payslip.total_earnings)}
+                        </TableCell>
+                        <TableCell className="text-right text-blue-700">
+                          {formatCurrency(payslip.total_informative)}
+                        </TableCell>
+                        <TableCell className="text-right text-red-700">
+                          {formatCurrency(payslip.total_deductions)}
+                        </TableCell>
+                        <TableCell className="text-right font-bold">
+                          {formatCurrency(payslip.total_amount)}
+                        </TableCell>
+                        <TableCell>
+                          {payslip.status === "pago" ? "Pago" : "Pendente"}
+                        </TableCell>
+                        <TableCell className="text-right">
+                          <HoleritePDF
+                            entry={payslip}
+                            period={periodFromPayslip(payslip)}
+                            employee={employeeById.get(payslip.employee_id)}
+                          />
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            )}
           </TabsContent>
         </Tabs>
       </div>

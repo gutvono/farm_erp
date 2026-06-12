@@ -482,6 +482,12 @@ Funcionários. Contratos: CLT, PJ, Temporário.
 | `contract_type` | ENUM `contract_type` | `clt` \| `pj` \| `temporario` |
 | `base_salary` | `NUMERIC(12,2)` | Salário base (efetivo; prefillado a partir do cargo na criação) |
 | `hire_date`, `termination_date` | `DATE` | Admissão e demissão |
+| `termination_cost_override` | `NUMERIC(12,2)` NULL | Custo de rescisão customizado |
+| `transport_voucher_cost` | `NUMERIC(12,2)` NULL | Custo real mensal de transporte |
+| `meal_voucher_value` | `NUMERIC(12,2)` NULL | Vale refeição informativo |
+| `pharmacy_voucher_value` | `NUMERIC(12,2)` NULL | Vale farmácia informativo |
+| `life_insurance_value` | `NUMERIC(12,2)` NULL | Seguro de vida informativo |
+| `dependents_count` | `INTEGER` default 0 | Dependentes para dedução de IRRF |
 | `photo_path` | `VARCHAR(500)` | Caminho em `/uploads` |
 | `is_active` | `BOOLEAN` | Ativo (FALSE após demissão) |
 
@@ -519,13 +525,13 @@ Catálogo de eventos usados nos holerites.
 |--------|------|-----------|
 | `description` | `VARCHAR(255)` UNIQUE | Nome do evento |
 | `event_type` | ENUM `payroll_event_type` | `provento` \| `desconto` \| `informativo` |
-| `calculation_type` | ENUM `payroll_calculation_type` | `manual`, `overtime`, `night_shift`, `inss`, `fgts`, `transport_voucher` |
+| `calculation_type` | ENUM `payroll_calculation_type` | `manual`, `overtime`, `night_shift`, `inss`, `irrf`, `fgts`, `transport_voucher` |
 | `is_automatic` | `BOOLEAN` | Calculado pelo sistema |
 | `affects_net` | `BOOLEAN` | Entra no cálculo do líquido |
 | `is_active` | `BOOLEAN` | Disponível para lançamento |
 
-Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS,
-Vale transporte, FGTS e Descontos manuais.
+Eventos padrão: Salario base, Hora extra, Adicional noturno, INSS, IRRF,
+Vale transporte, Vale refeição, Vale farmácia, Seguro de vida, FGTS e Descontos manuais.
 
 #### `payroll_entry_items`
 Itens de folha por holerite. UNIQUE (`payroll_entry_id`, `payroll_event_id`).

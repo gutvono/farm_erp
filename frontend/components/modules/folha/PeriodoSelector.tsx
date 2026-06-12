@@ -29,11 +29,19 @@ interface PeriodoSelectorProps {
 
 export function PeriodoSelector({ activePeriod, onPeriodLoaded }: PeriodoSelectorProps) {
   const today = new Date()
+  const currentMonth = today.getMonth() + 1
+  const currentYear = today.getFullYear()
   const [month, setMonth] = useState<number>(today.getMonth() + 1)
   const [year, setYear] = useState<number>(today.getFullYear())
   const [loading, setLoading] = useState(false)
+  const isFutureCompetency =
+    year > currentYear || (year === currentYear && month > currentMonth)
 
   async function handleAbrir() {
+    if (isFutureCompetency) {
+      toast.error("Competência futura não é permitida")
+      return
+    }
     setLoading(true)
     try {
       const before = activePeriod?.id
@@ -71,7 +79,11 @@ export function PeriodoSelector({ activePeriod, onPeriodLoaded }: PeriodoSelecto
             </SelectTrigger>
             <SelectContent>
               {MONTHS.map((label, idx) => (
-                <SelectItem key={idx + 1} value={String(idx + 1)}>
+                <SelectItem
+                  key={idx + 1}
+                  value={String(idx + 1)}
+                  disabled={year === currentYear && idx + 1 > currentMonth}
+                >
                   {label}
                 </SelectItem>
               ))}
@@ -85,15 +97,27 @@ export function PeriodoSelector({ activePeriod, onPeriodLoaded }: PeriodoSelecto
             id="year"
             type="number"
             min={2000}
-            max={2100}
+            max={currentYear}
             value={year}
-            onChange={(e) => setYear(Number(e.target.value) || today.getFullYear())}
+            onChange={(e) => {
+              const nextYear = Number(e.target.value) || currentYear
+              setYear(nextYear)
+              if (nextYear === currentYear && month > currentMonth) {
+                setMonth(currentMonth)
+              }
+            }}
           />
         </div>
 
-        <Button onClick={handleAbrir} disabled={loading}>
+        <Button onClick={handleAbrir} disabled={loading || isFutureCompetency}>
           {loading ? "Abrindo..." : "Abrir Período"}
         </Button>
+
+        {isFutureCompetency && (
+          <span className="text-sm text-red-600">
+            Competência futura não é permitida
+          </span>
+        )}
 
         {activePeriod && (
           <div className="ml-auto flex items-center gap-2">

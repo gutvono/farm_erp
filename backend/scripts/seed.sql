@@ -87,16 +87,23 @@ ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
 -- 4b. EMPLOYEES (8: 3 CLT + 3 PJ + 2 Temp) — cargo via position_id (role legado: NULL)
+--     Colunas de benefício/dependentes (Demanda Folha): transport_voucher_cost,
+--     meal_voucher_value, pharmacy_voucher_value, life_insurance_value,
+--     dependents_count. Exemplos preenchidos nos CLT e temporários.
 -- -----------------------------------------------------------------------------
-INSERT INTO employees (id, name, document, email, phone, position_id, contract_type, base_salary, hire_date, is_active) VALUES
-('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', '99999999-9999-9999-9999-999999990001', 'clt',         6000.00, '2020-03-01', TRUE),
-('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', '99999999-9999-9999-9999-999999990002', 'clt',         3500.00, '2021-06-15', TRUE),
-('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', '99999999-9999-9999-9999-999999990003', 'clt',         2200.00, '2022-09-10', TRUE),
-('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', '99999999-9999-9999-9999-999999990004', 'pj',          5500.00, '2023-02-01', TRUE),
-('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', '99999999-9999-9999-9999-999999990005', 'pj',          4000.00, '2023-08-15', TRUE),
-('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', '99999999-9999-9999-9999-999999990006', 'pj',          4500.00, '2022-01-10', TRUE),
-('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', '99999999-9999-9999-9999-999999990007', 'temporario',  1800.00, '2026-02-01', TRUE),
-('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', '99999999-9999-9999-9999-999999990008', 'temporario',  1800.00, '2026-02-01', TRUE)
+INSERT INTO employees (
+  id, name, document, email, phone, position_id, contract_type, base_salary, hire_date,
+  transport_voucher_cost, meal_voucher_value, pharmacy_voucher_value,
+  life_insurance_value, dependents_count, is_active
+) VALUES
+('44444444-4444-4444-4444-444444444001', 'João Silva',        '111.222.333-01', 'joao.silva@fazenda.com',     '(35) 98100-0001', '99999999-9999-9999-9999-999999990001', 'clt',         6000.00, '2020-03-01', 320.00, 650.00,  80.00, 45.00, 2, TRUE),
+('44444444-4444-4444-4444-444444444002', 'Maria Santos',      '111.222.333-02', 'maria.santos@fazenda.com',   '(35) 98100-0002', '99999999-9999-9999-9999-999999990002', 'clt',         3500.00, '2021-06-15', 280.00, 500.00,   NULL, 45.00, 1, TRUE),
+('44444444-4444-4444-4444-444444444003', 'Carlos Oliveira',   '111.222.333-03', 'carlos.oliveira@fazenda.com','(35) 98100-0003', '99999999-9999-9999-9999-999999990003', 'clt',         2200.00, '2022-09-10', 220.00, 420.00,   NULL, 35.00, 0, TRUE),
+('44444444-4444-4444-4444-444444444004', 'Ana Pereira',       '111.222.333-04', 'ana.pereira@consult.com',    '(11) 98100-0004', '99999999-9999-9999-9999-999999990004', 'pj',          5500.00, '2023-02-01', NULL,   NULL,     NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444005', 'Pedro Costa',       '111.222.333-05', 'pedro.costa@pj.com',         '(35) 98100-0005', '99999999-9999-9999-9999-999999990005', 'pj',          4000.00, '2023-08-15', NULL,   NULL,     NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444006', 'Lucas Rodrigues',   '111.222.333-06', 'lucas@contabil.com',         '(35) 98100-0006', '99999999-9999-9999-9999-999999990006', 'pj',          4500.00, '2022-01-10', NULL,   NULL,     NULL, NULL,  1, TRUE),
+('44444444-4444-4444-4444-444444444007', 'Rafael Almeida',    '111.222.333-07', 'rafael.almeida@fazenda.com', '(35) 98100-0007', '99999999-9999-9999-9999-999999990007', 'temporario',  1800.00, '2026-02-01', 180.00, 350.00,   NULL, NULL,  0, TRUE),
+('44444444-4444-4444-4444-444444444008', 'Sofia Lima',        '111.222.333-08', 'sofia.lima@fazenda.com',     '(35) 98100-0008', '99999999-9999-9999-9999-999999990008', 'temporario',  1800.00, '2026-02-01', 180.00, 350.00,   NULL, NULL,  0, TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -111,7 +118,11 @@ INSERT INTO payroll_events (
 ('dededede-dede-dede-dede-dededede0004', 'INSS',              'desconto',    'inss',              TRUE,  TRUE,  TRUE),
 ('dededede-dede-dede-dede-dededede0005', 'Vale transporte',   'desconto',    'transport_voucher', TRUE,  TRUE,  TRUE),
 ('dededede-dede-dede-dede-dededede0006', 'FGTS',              'informativo', 'fgts',              TRUE,  FALSE, TRUE),
-('dededede-dede-dede-dede-dededede0007', 'Descontos manuais', 'desconto',    'manual',            FALSE, TRUE,  TRUE)
+('dededede-dede-dede-dede-dededede0007', 'Descontos manuais', 'desconto',    'manual',            FALSE, TRUE,  TRUE),
+('dededede-dede-dede-dede-dededede0008', 'Vale refeição',     'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0009', 'Vale farmácia',     'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0010', 'Seguro de vida',    'informativo', 'manual',            FALSE, FALSE, TRUE),
+('dededede-dede-dede-dede-dededede0011', 'IRRF',              'desconto',    'irrf',              TRUE,  TRUE,  TRUE)
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -361,7 +372,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO payroll_periods (id, competency_year, competency_month, status, closed_at, total_amount) VALUES
 ('dddddddd-dddd-dddd-dddd-dddddddd0001', 2026, 1, 'fechada', '2026-02-01 18:00:00-03', 29300.00),
 ('dddddddd-dddd-dddd-dddd-dddddddd0002', 2026, 2, 'fechada', '2026-03-01 18:00:00-03', 29943.33),
-('dddddddd-dddd-dddd-dddd-dddddddd0003', 2026, 3, 'aberta',  NULL,                      29300.00)
+('dddddddd-dddd-dddd-dddd-dddddddd0003', 2026, 3, 'aberta',  NULL,                      24276.48)
 ON CONFLICT (id) DO NOTHING;
 
 -- Entries 01/2026 (PAGO) - 8 funcionários
@@ -390,14 +401,150 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Entries 03/2026 (ABERTA, PENDENTE) - 8 funcionários
 INSERT INTO payroll_entries (id, payroll_period_id, employee_id, base_salary, extras_hours, extras_value, absences_quantity, absences_value, deductions_value, net_amount, status, paid_at) VALUES
-('dddddddd-dddd-dddd-dddd-ddd030300001', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444001', 6000.00, 0, 0, 0, 0, 0, 6000.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300002', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444002', 3500.00, 0, 0, 0, 0, 0, 3500.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300003', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444003', 2200.00, 0, 0, 0, 0, 0, 2200.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300004', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444004', 5500.00, 0, 0, 0, 0, 0, 5500.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300005', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444005', 4000.00, 0, 0, 0, 0, 0, 4000.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300006', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444006', 4500.00, 0, 0, 0, 0, 0, 4500.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300007', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444007', 1800.00, 0, 0, 0, 0, 0, 1800.00, 'pendente', NULL),
-('dddddddd-dddd-dddd-dddd-ddd030300008', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444008', 1800.00, 0, 0, 0, 0, 0, 1800.00, 'pendente', NULL)
+-- net_amount/deductions_value já refletem os itens estatutários (INSS/IRRF/Vale transporte)
+-- aplicados automaticamente, coerentes com os payroll_entry_items semeados abaixo.
+('dddddddd-dddd-dddd-dddd-ddd030300001', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444001', 6000.00, 0, 0, 0, 0, 1434.82, 4565.18, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300002', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444002', 3500.00, 0, 0, 0, 0,  587.43, 2912.57, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300003', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444003', 2200.00, 0, 0, 0, 0,  305.69, 1894.31, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300004', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444004', 5500.00, 0, 0, 0, 0, 1030.84, 4469.16, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300005', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444005', 4000.00, 0, 0, 0, 0,  531.87, 3468.13, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300006', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444006', 4500.00, 0, 0, 0, 0,  641.49, 3858.51, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300007', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444007', 1800.00, 0, 0, 0, 0,  245.69, 1554.31, 'pendente', NULL),
+('dddddddd-dddd-dddd-dddd-ddd030300008', 'dddddddd-dddd-dddd-dddd-dddddddd0003', '44444444-4444-4444-4444-444444444008', 1800.00, 0, 0, 0, 0,  245.69, 1554.31, 'pendente', NULL)
+ON CONFLICT (id) DO NOTHING;
+
+-- -----------------------------------------------------------------------------
+-- 14b. PAYROLL ENTRY ITEMS (detalhamento dos holerites — substitui o backfill manual)
+-- Valores coerentes com app/modules/folha/calculations.py (tabelas INSS/IRRF 2024,
+-- FGTS 8 por cento, vale transporte limitado a 6 por cento do salário). Períodos pagos (01/02) recebem
+-- apenas itens informativos + legados (líquido preservado); o período aberto (03)
+-- recebe o cálculo estatutário completo (INSS/IRRF/transporte abatem o líquido).
+-- source: automatic = gerado pelo sistema, manual = lançamento legado.
+-- -----------------------------------------------------------------------------
+INSERT INTO payroll_entry_items (id, payroll_entry_id, payroll_event_id, amount, calculation_base, quantity, percentage, metadata, source) VALUES
+-- ===== Período 01/2026 (pago) — salário base + benefícios + FGTS informativo =====
+-- João Silva
+('eeeeeeee-eeee-eeee-eeee-110100000000', 'dddddddd-dddd-dddd-dddd-ddd010100001', 'dededede-dede-dede-dede-dededede0001', 6000.00, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-110800000000', 'dddddddd-dddd-dddd-dddd-ddd010100001', 'dededede-dede-dede-dede-dededede0008',  650.00,  650.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-110900000000', 'dddddddd-dddd-dddd-dddd-ddd010100001', 'dededede-dede-dede-dede-dededede0009',   80.00,   80.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-111000000000', 'dddddddd-dddd-dddd-dddd-ddd010100001', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-110600000000', 'dddddddd-dddd-dddd-dddd-ddd010100001', 'dededede-dede-dede-dede-dededede0006',  480.00, 6000.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Maria Santos
+('eeeeeeee-eeee-eeee-eeee-120100000000', 'dddddddd-dddd-dddd-dddd-ddd010100002', 'dededede-dede-dede-dede-dededede0001', 3500.00, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-120800000000', 'dddddddd-dddd-dddd-dddd-ddd010100002', 'dededede-dede-dede-dede-dededede0008',  500.00,  500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-121000000000', 'dddddddd-dddd-dddd-dddd-ddd010100002', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-120600000000', 'dddddddd-dddd-dddd-dddd-ddd010100002', 'dededede-dede-dede-dede-dededede0006',  280.00, 3500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Carlos Oliveira
+('eeeeeeee-eeee-eeee-eeee-130100000000', 'dddddddd-dddd-dddd-dddd-ddd010100003', 'dededede-dede-dede-dede-dededede0001', 2200.00, 2200.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-130800000000', 'dddddddd-dddd-dddd-dddd-ddd010100003', 'dededede-dede-dede-dede-dededede0008',  420.00,  420.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-131000000000', 'dddddddd-dddd-dddd-dddd-ddd010100003', 'dededede-dede-dede-dede-dededede0010',   35.00,   35.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-130600000000', 'dddddddd-dddd-dddd-dddd-ddd010100003', 'dededede-dede-dede-dede-dededede0006',  176.00, 2200.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Ana Pereira (PJ, sem benefícios)
+('eeeeeeee-eeee-eeee-eeee-140100000000', 'dddddddd-dddd-dddd-dddd-ddd010100004', 'dededede-dede-dede-dede-dededede0001', 5500.00, 5500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-140600000000', 'dddddddd-dddd-dddd-dddd-ddd010100004', 'dededede-dede-dede-dede-dededede0006',  440.00, 5500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Pedro Costa (PJ)
+('eeeeeeee-eeee-eeee-eeee-150100000000', 'dddddddd-dddd-dddd-dddd-ddd010100005', 'dededede-dede-dede-dede-dededede0001', 4000.00, 4000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-150600000000', 'dddddddd-dddd-dddd-dddd-ddd010100005', 'dededede-dede-dede-dede-dededede0006',  320.00, 4000.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Lucas Rodrigues (PJ)
+('eeeeeeee-eeee-eeee-eeee-160100000000', 'dddddddd-dddd-dddd-dddd-ddd010100006', 'dededede-dede-dede-dede-dededede0001', 4500.00, 4500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-160600000000', 'dddddddd-dddd-dddd-dddd-ddd010100006', 'dededede-dede-dede-dede-dededede0006',  360.00, 4500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Rafael Almeida (temporário)
+('eeeeeeee-eeee-eeee-eeee-170100000000', 'dddddddd-dddd-dddd-dddd-ddd010100007', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-170800000000', 'dddddddd-dddd-dddd-dddd-ddd010100007', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-170600000000', 'dddddddd-dddd-dddd-dddd-ddd010100007', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Sofia Lima (temporário)
+('eeeeeeee-eeee-eeee-eeee-180100000000', 'dddddddd-dddd-dddd-dddd-ddd010100008', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-180800000000', 'dddddddd-dddd-dddd-dddd-ddd010100008', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-180600000000', 'dddddddd-dddd-dddd-dddd-ddd010100008', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- ===== Período 02/2026 (pago) — inclui horas extras e desconto manual =====
+-- João Silva (10h extras = 500, desconto manual 100; base FGTS = 6500)
+('eeeeeeee-eeee-eeee-eeee-210100000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0001', 6000.00, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-210200000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0002',  500.00, 6000.00, NULL, NULL, '{}'::jsonb, 'manual'),
+('eeeeeeee-eeee-eeee-eeee-210700000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0007',  100.00, 6000.00, NULL, NULL, '{}'::jsonb, 'manual'),
+('eeeeeeee-eeee-eeee-eeee-210800000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0008',  650.00,  650.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-210900000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0009',   80.00,   80.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-211000000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-210600000000', 'dddddddd-dddd-dddd-dddd-ddd020200001', 'dededede-dede-dede-dede-dededede0006',  520.00, 6500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Maria Santos (1 falta = 116.67; base FGTS = 3500)
+('eeeeeeee-eeee-eeee-eeee-220100000000', 'dddddddd-dddd-dddd-dddd-ddd020200002', 'dededede-dede-dede-dede-dededede0001', 3500.00, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-220800000000', 'dddddddd-dddd-dddd-dddd-ddd020200002', 'dededede-dede-dede-dede-dededede0008',  500.00,  500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-221000000000', 'dddddddd-dddd-dddd-dddd-ddd020200002', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-220600000000', 'dddddddd-dddd-dddd-dddd-ddd020200002', 'dededede-dede-dede-dede-dededede0006',  280.00, 3500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Carlos Oliveira (8h extras = 160; base FGTS = 2360)
+('eeeeeeee-eeee-eeee-eeee-230100000000', 'dddddddd-dddd-dddd-dddd-ddd020200003', 'dededede-dede-dede-dede-dededede0001', 2200.00, 2200.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-230200000000', 'dddddddd-dddd-dddd-dddd-ddd020200003', 'dededede-dede-dede-dede-dededede0002',  160.00, 2200.00, NULL, NULL, '{}'::jsonb, 'manual'),
+('eeeeeeee-eeee-eeee-eeee-230800000000', 'dddddddd-dddd-dddd-dddd-ddd020200003', 'dededede-dede-dede-dede-dededede0008',  420.00,  420.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-231000000000', 'dddddddd-dddd-dddd-dddd-ddd020200003', 'dededede-dede-dede-dede-dededede0010',   35.00,   35.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-230600000000', 'dddddddd-dddd-dddd-dddd-ddd020200003', 'dededede-dede-dede-dede-dededede0006',  188.80, 2360.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Ana Pereira (PJ)
+('eeeeeeee-eeee-eeee-eeee-240100000000', 'dddddddd-dddd-dddd-dddd-ddd020200004', 'dededede-dede-dede-dede-dededede0001', 5500.00, 5500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-240600000000', 'dddddddd-dddd-dddd-dddd-ddd020200004', 'dededede-dede-dede-dede-dededede0006',  440.00, 5500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Pedro Costa (PJ)
+('eeeeeeee-eeee-eeee-eeee-250100000000', 'dddddddd-dddd-dddd-dddd-ddd020200005', 'dededede-dede-dede-dede-dededede0001', 4000.00, 4000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-250600000000', 'dddddddd-dddd-dddd-dddd-ddd020200005', 'dededede-dede-dede-dede-dededede0006',  320.00, 4000.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Lucas Rodrigues (PJ)
+('eeeeeeee-eeee-eeee-eeee-260100000000', 'dddddddd-dddd-dddd-dddd-ddd020200006', 'dededede-dede-dede-dede-dededede0001', 4500.00, 4500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-260600000000', 'dddddddd-dddd-dddd-dddd-ddd020200006', 'dededede-dede-dede-dede-dededede0006',  360.00, 4500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Rafael Almeida (temporário)
+('eeeeeeee-eeee-eeee-eeee-270100000000', 'dddddddd-dddd-dddd-dddd-ddd020200007', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-270800000000', 'dddddddd-dddd-dddd-dddd-ddd020200007', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-270600000000', 'dddddddd-dddd-dddd-dddd-ddd020200007', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Sofia Lima (temporário)
+('eeeeeeee-eeee-eeee-eeee-280100000000', 'dddddddd-dddd-dddd-dddd-ddd020200008', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-280800000000', 'dddddddd-dddd-dddd-dddd-ddd020200008', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-280600000000', 'dddddddd-dddd-dddd-dddd-ddd020200008', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- ===== Período 03/2026 (aberto) — cálculo estatutário completo =====
+-- João Silva (INSS 641.51, IRRF 473.31 [2 dep], VT 320, FGTS 480)
+('eeeeeeee-eeee-eeee-eeee-310100000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0001', 6000.00, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-310400000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0004',  641.51, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-311100000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0011',  473.31, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-310500000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0005',  320.00, 6000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-310600000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0006',  480.00, 6000.00, NULL, 8, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-310800000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0008',  650.00,  650.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-310900000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0009',   80.00,   80.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-311000000000', 'dddddddd-dddd-dddd-dddd-ddd030300001', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+-- Maria Santos (INSS 308.60, IRRF 68.83 [1 dep], VT 210, FGTS 280)
+('eeeeeeee-eeee-eeee-eeee-320100000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0001', 3500.00, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-320400000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0004',  308.60, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-321100000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0011',   68.83, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-320500000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0005',  210.00, 3500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-320600000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0006',  280.00, 3500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-320800000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0008',  500.00,  500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-321000000000', 'dddddddd-dddd-dddd-dddd-ddd030300002', 'dededede-dede-dede-dede-dededede0010',   45.00,   45.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+-- Carlos Oliveira (INSS 173.69, isento IRRF, VT 132, FGTS 176)
+('eeeeeeee-eeee-eeee-eeee-330100000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0001', 2200.00, 2200.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-330400000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0004',  173.69, 2200.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-330500000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0005',  132.00, 2200.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-330600000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0006',  176.00, 2200.00, NULL, 8, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-330800000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0008',  420.00,  420.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-331000000000', 'dddddddd-dddd-dddd-dddd-ddd030300003', 'dededede-dede-dede-dede-dededede0010',   35.00,   35.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+-- Ana Pereira (PJ — INSS 571.51, IRRF 459.33, FGTS 440)
+('eeeeeeee-eeee-eeee-eeee-340100000000', 'dddddddd-dddd-dddd-dddd-ddd030300004', 'dededede-dede-dede-dede-dededede0001', 5500.00, 5500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-340400000000', 'dddddddd-dddd-dddd-dddd-ddd030300004', 'dededede-dede-dede-dede-dededede0004',  571.51, 5500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-341100000000', 'dddddddd-dddd-dddd-dddd-ddd030300004', 'dededede-dede-dede-dede-dededede0011',  459.33, 5500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-340600000000', 'dddddddd-dddd-dddd-dddd-ddd030300004', 'dededede-dede-dede-dede-dededede0006',  440.00, 5500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Pedro Costa (PJ — INSS 368.60, IRRF 163.27, FGTS 320)
+('eeeeeeee-eeee-eeee-eeee-350100000000', 'dddddddd-dddd-dddd-dddd-ddd030300005', 'dededede-dede-dede-dede-dededede0001', 4000.00, 4000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-350400000000', 'dddddddd-dddd-dddd-dddd-ddd030300005', 'dededede-dede-dede-dede-dededede0004',  368.60, 4000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-351100000000', 'dddddddd-dddd-dddd-dddd-ddd030300005', 'dededede-dede-dede-dede-dededede0011',  163.27, 4000.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-350600000000', 'dddddddd-dddd-dddd-dddd-ddd030300005', 'dededede-dede-dede-dede-dededede0006',  320.00, 4000.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Lucas Rodrigues (PJ — INSS 431.51, IRRF 209.98 [1 dep], FGTS 360)
+('eeeeeeee-eeee-eeee-eeee-360100000000', 'dddddddd-dddd-dddd-dddd-ddd030300006', 'dededede-dede-dede-dede-dededede0001', 4500.00, 4500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-360400000000', 'dddddddd-dddd-dddd-dddd-ddd030300006', 'dededede-dede-dede-dede-dededede0004',  431.51, 4500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-361100000000', 'dddddddd-dddd-dddd-dddd-ddd030300006', 'dededede-dede-dede-dede-dededede0011',  209.98, 4500.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-360600000000', 'dddddddd-dddd-dddd-dddd-ddd030300006', 'dededede-dede-dede-dede-dededede0006',  360.00, 4500.00, NULL, 8, '{}'::jsonb, 'automatic'),
+-- Rafael Almeida (temporário — INSS 137.69, isento IRRF, VT 108, FGTS 144)
+('eeeeeeee-eeee-eeee-eeee-370100000000', 'dddddddd-dddd-dddd-dddd-ddd030300007', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-370400000000', 'dddddddd-dddd-dddd-dddd-ddd030300007', 'dededede-dede-dede-dede-dededede0004',  137.69, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-370500000000', 'dddddddd-dddd-dddd-dddd-ddd030300007', 'dededede-dede-dede-dede-dededede0005',  108.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-370600000000', 'dddddddd-dddd-dddd-dddd-ddd030300007', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-370800000000', 'dddddddd-dddd-dddd-dddd-ddd030300007', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+-- Sofia Lima (temporário — INSS 137.69, isento IRRF, VT 108, FGTS 144)
+('eeeeeeee-eeee-eeee-eeee-380100000000', 'dddddddd-dddd-dddd-dddd-ddd030300008', 'dededede-dede-dede-dede-dededede0001', 1800.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-380400000000', 'dddddddd-dddd-dddd-dddd-ddd030300008', 'dededede-dede-dede-dede-dededede0004',  137.69, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-380500000000', 'dddddddd-dddd-dddd-dddd-ddd030300008', 'dededede-dede-dede-dede-dededede0005',  108.00, 1800.00, NULL, NULL, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-380600000000', 'dddddddd-dddd-dddd-dddd-ddd030300008', 'dededede-dede-dede-dede-dededede0006',  144.00, 1800.00, NULL, 8, '{}'::jsonb, 'automatic'),
+('eeeeeeee-eeee-eeee-eeee-380800000000', 'dddddddd-dddd-dddd-dddd-ddd030300008', 'dededede-dede-dede-dede-dededede0008',  350.00,  350.00, NULL, NULL, '{}'::jsonb, 'automatic')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------
@@ -577,7 +724,7 @@ ON CONFLICT (id) DO NOTHING;
 --   2 contas a pagar (1 paga, 1 em aberto)
 --   7 contas a receber (2 quitadas, 4 em aberto, 1 cancelada)
 --   3 períodos de folha, 24 lançamentos
---   7 eventos de folha
+--   11 eventos de folha
 --   17 movimentações de estoque
 --   28 movimentações financeiras (25 originais + 3 registros R$0 da Cotação 1)
 --   3 notificações

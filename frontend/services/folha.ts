@@ -4,6 +4,7 @@ import {
   ApiResponse,
   ContractType,
   Employee,
+  EmployeePayslip,
   JobPosition,
   Paginated,
   PayrollCalculationPreview,
@@ -54,10 +55,15 @@ interface RawEmployee {
   base_salary: string | number
   contract_type: ContractType
   admission_date: string
-  photo_path: string | null
+  photo_path?: string | null
   photo_url: string | null
   is_active: boolean
   termination_cost_override: string | number | null
+  transport_voucher_cost?: string | number | null
+  meal_voucher_value?: string | number | null
+  pharmacy_voucher_value?: string | number | null
+  life_insurance_value?: string | number | null
+  dependents_count?: string | number
   created_at: string
 }
 
@@ -71,10 +77,15 @@ function parseEmployee(raw: RawEmployee): Employee {
     base_salary: toNumber(raw.base_salary),
     contract_type: raw.contract_type,
     admission_date: raw.admission_date,
-    photo_path: raw.photo_path,
+    photo_path: raw.photo_path ?? null,
     photo_url: buildPhotoUrl(raw.photo_url),
     is_active: raw.is_active,
     termination_cost_override: toNumberOrNull(raw.termination_cost_override),
+    transport_voucher_cost: toNumberOrNull(raw.transport_voucher_cost),
+    meal_voucher_value: toNumberOrNull(raw.meal_voucher_value),
+    pharmacy_voucher_value: toNumberOrNull(raw.pharmacy_voucher_value),
+    life_insurance_value: toNumberOrNull(raw.life_insurance_value),
+    dependents_count: toNumber(raw.dependents_count),
     created_at: raw.created_at,
   }
 }
@@ -153,6 +164,11 @@ export async function updateFuncionario(
     contract_type: ContractType
     admission_date: string
     termination_cost_override: number
+    transport_voucher_cost: number
+    meal_voucher_value: number
+    pharmacy_voucher_value: number
+    life_insurance_value: number
+    dependents_count: number
   }>
 ): Promise<Employee> {
   const response = await apiFetch<ApiResponse<RawEmployee>>(
@@ -357,6 +373,21 @@ function parseEntry(raw: RawPayrollEntry): PayrollEntry {
   }
 }
 
+interface RawEmployeePayslip extends RawPayrollEntry {
+  reference_month: number
+  reference_year: number
+  period_status: PayrollPeriodStatus
+}
+
+function parseEmployeePayslip(raw: RawEmployeePayslip): EmployeePayslip {
+  return {
+    ...parseEntry(raw),
+    reference_month: raw.reference_month,
+    reference_year: raw.reference_year,
+    period_status: raw.period_status,
+  }
+}
+
 interface RawPayrollPeriod {
   id: string
   reference_month: number
@@ -402,6 +433,17 @@ export async function getPeriodo(id: string): Promise<PayrollPeriod> {
     `/api/folha/periodos/${id}`
   )
   return parsePeriod(response.data)
+}
+
+export async function getHoleritesFuncionario(
+  employeeId: string,
+  year: number
+): Promise<EmployeePayslip[]> {
+  const response = await apiFetch<ApiResponse<RawEmployeePayslip[]>>(
+    `/api/folha/funcionarios/${employeeId}/holerites`,
+    { params: { year } }
+  )
+  return response.data.map(parseEmployeePayslip)
 }
 
 export async function fecharPeriodo(id: string): Promise<PayrollPeriod> {

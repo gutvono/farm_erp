@@ -1019,6 +1019,9 @@ def approve_payroll_request(db: Session, request_id: UUID) -> dict:
     folha_service.mark_request_decided(
         db, request, status=folha_service.REQUEST_STATUS_APPROVED
     )
+    # Fecha o período automaticamente se todos os holerites já foram pagos.
+    if period is not None:
+        folha_service.close_period_if_all_paid(db, period.id)
     reloaded = folha_service.get_payment_request_or_404(db, request_id)
     return folha_service.serialize_payment_request(db, reloaded)
 
