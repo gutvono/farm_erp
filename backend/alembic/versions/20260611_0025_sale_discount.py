@@ -21,8 +21,8 @@ Idempotência / create_all:
 
 downgrade(): dropa as duas colunas (IF EXISTS).
 
-Revision ID: 0023_sale_discount
-Revises: 0022_fin_cat_juros_multa
+Revision ID: 0025_sale_discount
+Revises: 0024_fin_cat_juros_multa
 Create Date: 2026-06-11
 
 """
@@ -32,8 +32,8 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 # NB: version_num é VARCHAR(32) — manter o id <= 32 caracteres.
-revision: str = "0023_sale_discount"
-down_revision: Union[str, None] = "0022_fin_cat_juros_multa"
+revision: str = "0025_sale_discount"
+down_revision: Union[str, None] = "0024_fin_cat_juros_multa"
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 
