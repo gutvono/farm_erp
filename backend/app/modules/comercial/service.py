@@ -75,6 +75,15 @@ def _validate_document_or_400(document: Optional[str]) -> None:
 # ---------------------------------------------------------------------------
 
 
+def serialize_client(db: Session, client: Client) -> ClientOut:
+    """Serializa um cliente com a inadimplência derivada (Demanda 9.A): consulta
+    o Financeiro (`client_has_overdue`) e deriva `has_overdue` +
+    `is_delinquent_effective`. Para listas, use a anotação em lote em
+    ``list_clients`` (evita N+1)."""
+    has_overdue = fin_service.client_has_overdue(db, client.id)
+    return ClientOut.from_model(client, has_overdue)
+
+
 def create_client(db: Session, data: ClientCreate) -> Client:
     _validate_document_or_400(data.document)
     return comercial_repo.create_client(db, data)
@@ -86,10 +95,17 @@ def list_clients(
     params: PageParams,
     is_delinquent: Optional[bool] = None,
 ) -> Page[ClientOut]:
+    # Inadimplência derivada (UMA query, sem N+1): o set de client_ids com
+    # parcela vencida vem do Financeiro e é reusado para (1) o filtro EFETIVO
+    # quando is_delinquent=true (Demanda 9.B) e (2) anotar cada ClientOut.
+    overdue_ids = fin_service.get_client_ids_with_overdue(db)
     clients, total = comercial_repo.list_clients(
-        db, params=params, is_delinquent=is_delinquent
+        db,
+        params=params,
+        is_delinquent=is_delinquent,
+        effective_overdue_ids=list(overdue_ids) if is_delinquent else None,
     )
-    items = [ClientOut.model_validate(c) for c in clients]
+    items = [ClientOut.from_model(c, c.id in overdue_ids) for c in clients]
     return Page.create(items=items, total=total, params=params)
 
 

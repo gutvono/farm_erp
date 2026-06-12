@@ -40,6 +40,18 @@ Todos exigem autenticação via cookie `session_token` (`get_current_user`). Pre
 | `GET` | `/destinos-colheita` | Lê os 3 itens-destino (industria/embalagem/descarte) de `app_settings` | — |
 | `PUT` | `/destinos-colheita` | Persiste os 3 itens-destino. Valida que os 3 `stock_items` existem (`404` se não) | `HarvestDestinationsUpdate` |
 
+### Encargos de atraso (multa/juros — Demanda 9.B)
+
+| Método | Rota | O que faz | Body |
+|--------|------|-----------|------|
+| `GET` | `/encargos` | Lê as taxas de encargo por atraso de `app_settings` (default `2`/`1` se ausentes) | — |
+| `PUT` | `/encargos` | Persiste as 2 taxas (percentuais, validadas `≥ 0`) | `EncargosUpdate` |
+
+Chaves em `app_settings`: `multa_atraso_percent` (multa única %) e `juros_mora_mensal_percent`
+(juros de mora %/mês). Consumidas pelo Financeiro no cálculo do encargo na baixa de parcela
+vencida (ver `docs/backend/financeiro.md` → "Juros/multa por atraso na baixa"). Semeadas pelo
+DBA (9.B) com `2` e `1`.
+
 ## Schemas
 
 ### StockCategoryCreate / StockCategoryUpdate (JSON)
@@ -78,6 +90,16 @@ Todos exigem autenticação via cookie `session_token` (`get_current_user`). Pre
 }
 ```
 - No `Out`, cada campo pode vir `null` se ainda não configurado.
+
+### EncargosUpdate / EncargosOut (Demanda 9.B)
+```json
+{
+  "multa_atraso_percent": 2,
+  "juros_mora_mensal_percent": 1
+}
+```
+- Percentuais (`Decimal`), validados `≥ 0` no `Update`. O `Out` devolve sempre as 2 taxas (com
+  os defaults `2`/`1` quando a chave não existe em `app_settings`).
 
 ## Papéis de sistema (`SystemRole`)
 

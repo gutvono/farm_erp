@@ -335,9 +335,23 @@ async function generatePdf(invoice: Invoice, nfType: NfType) {
 
   // Totals
   doc.setFont("helvetica", "bold")
-  doc.text("Subtotal mercadoria:", 120, y, { align: "right" })
-  doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
-  y += 5
+  if (invoice.discount_amount > 0) {
+    // Desconto de cabeçalho (Demanda 9.C): Subtotal bruto → Desconto → Total líquido.
+    doc.text("Subtotal:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.subtotal), 150, y, { align: "right" })
+    y += 5
+    doc.setFont("helvetica", "normal")
+    doc.text("Desconto:", 120, y, { align: "right" })
+    doc.text(`- ${formatCurrency(invoice.discount_amount)}`, 150, y, { align: "right" })
+    y += 5
+    doc.text("Total líquido:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
+    y += 5
+  } else {
+    doc.text("Subtotal mercadoria:", 120, y, { align: "right" })
+    doc.text(formatCurrency(invoice.total_amount), 150, y, { align: "right" })
+    y += 5
+  }
   doc.setFont("helvetica", "normal")
   doc.text("ICMS:", 120, y, { align: "right" })
   doc.text(formatCurrency(totalIcms), 150, y, { align: "right" })
@@ -654,9 +668,29 @@ export function FaturaCard({ invoice, onChanged }: FaturaCardProps) {
                     </TableCell>
                   </TableRow>
                 ))}
+                {invoice.discount_amount > 0 && (
+                  <>
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-slate-600">
+                        Subtotal
+                      </TableCell>
+                      <TableCell className="text-right text-slate-600">
+                        {formatCurrency(invoice.subtotal)}
+                      </TableCell>
+                    </TableRow>
+                    <TableRow>
+                      <TableCell colSpan={3} className="text-right text-emerald-700">
+                        Desconto
+                      </TableCell>
+                      <TableCell className="text-right text-emerald-700">
+                        - {formatCurrency(invoice.discount_amount)}
+                      </TableCell>
+                    </TableRow>
+                  </>
+                )}
                 <TableRow>
                   <TableCell colSpan={3} className="text-right font-semibold">
-                    Total
+                    {invoice.discount_amount > 0 ? "Total líquido" : "Total"}
                   </TableCell>
                   <TableCell className="text-right font-bold text-slate-900">
                     {formatCurrency(invoice.total_amount)}

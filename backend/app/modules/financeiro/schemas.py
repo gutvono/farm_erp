@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from app.shared.enums import (
     AccountPayableStatus,
@@ -135,11 +135,48 @@ class AccountReceivableOut(BaseModel):
 
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
+    @computed_field
+    @property
+    def is_overdue(self) -> bool:
+        """Vencida (Demanda 9.A): venc. < hoje, com saldo em aberto e não
+        cancelada. Quitada ou cancelada nunca é vencida — derivado na leitura."""
+        status = getattr(self.status, "value", self.status)
+        if status == AccountReceivableStatus.CANCELADA.value:
+            return False
+        if Decimal(self.amount_received) >= Decimal(self.amount):
+            return False
+        return self.due_date < date.today()
+
+    @computed_field
+    @property
+    def days_overdue(self) -> int:
+        """Dias de atraso (`hoje - due_date`) quando vencida; senão 0."""
+        if not self.is_overdue:
+            return 0
+        return max(0, (date.today() - self.due_date).days)
+
 
 class ReceivePaymentRequest(BaseModel):
     amount: Decimal = Field(gt=0)
     received_at: Optional[datetime] = None
     notes: Optional[str] = None
+    # Encargo por atraso (Demanda 9.B): override opcional do valor pré-calculado.
+    # Só se aplica à baixa que QUITA uma parcela vencida. `0` = perdão. Ausente =
+    # usa o cálculo automático (multa + juros) das taxas em Configurações.
+    encargo: Optional[Decimal] = Field(default=None, ge=0)
+
+
+class EncargoOut(BaseModel):
+    """Breakdown do encargo por atraso de uma conta a receber (Demanda 9.B).
+    `0` em tudo quando a parcela não está vencida."""
+
+    receivable_id: UUID
+    number: str
+    saldo: Decimal
+    dias_atraso: int
+    multa: Decimal
+    juros: Decimal
+    total: Decimal
 
 
 # ---------------------------------------------------------------------------

@@ -1,3 +1,4 @@
+from decimal import Decimal, InvalidOperation
 from typing import Optional
 from uuid import UUID
 
@@ -7,6 +8,8 @@ from sqlalchemy.orm import Session
 from app.modules.configuracoes import repository as config_repo
 from app.modules.configuracoes.model import StockCategory
 from app.modules.configuracoes.schemas import (
+    EncargosOut,
+    EncargosUpdate,
     HarvestDestinationsOut,
     HarvestDestinationsUpdate,
     StockCategoryCreate,
@@ -22,6 +25,12 @@ from app.shared.pagination import Page, PageParams
 HARVEST_INDUSTRIA_KEY = "harvest_destination_industria_item_id"
 HARVEST_EMBALAGEM_KEY = "harvest_destination_embalagem_item_id"
 HARVEST_DESCARTE_KEY = "harvest_destination_descarte_item_id"
+
+# Chaves de app_settings para as taxas de encargo por atraso (Demanda 9.B).
+MULTA_ATRASO_KEY = "multa_atraso_percent"
+JUROS_MORA_MENSAL_KEY = "juros_mora_mensal_percent"
+DEFAULT_MULTA_ATRASO_PERCENT = Decimal("2")
+DEFAULT_JUROS_MORA_MENSAL_PERCENT = Decimal("1")
 
 
 # ---------------------------------------------------------------------------
@@ -146,6 +155,43 @@ def update_harvest_destinations(
     config_repo.set_setting(db, HARVEST_EMBALAGEM_KEY, str(data.embalagem_item_id))
     config_repo.set_setting(db, HARVEST_DESCARTE_KEY, str(data.descarte_item_id))
     return get_harvest_destinations(db)
+
+
+# ---------------------------------------------------------------------------
+# Encargos de atraso (multa/juros) — app_settings (Demanda 9.B)
+# ---------------------------------------------------------------------------
+
+
+def _setting_decimal(db: Session, key: str, default: Decimal) -> Decimal:
+    """Lê uma taxa (Decimal) de app_settings; usa `default` se ausente/inválida."""
+    setting = config_repo.get_setting(db, key)
+    if not setting or setting.value is None:
+        return default
+    try:
+        return Decimal(str(setting.value))
+    except (InvalidOperation, ValueError):
+        return default
+
+
+def get_encargos(db: Session) -> EncargosOut:
+    return EncargosOut(
+        multa_atraso_percent=_setting_decimal(
+            db, MULTA_ATRASO_KEY, DEFAULT_MULTA_ATRASO_PERCENT
+        ),
+        juros_mora_mensal_percent=_setting_decimal(
+            db, JUROS_MORA_MENSAL_KEY, DEFAULT_JUROS_MORA_MENSAL_PERCENT
+        ),
+    )
+
+
+def update_encargos(db: Session, data: EncargosUpdate) -> EncargosOut:
+    config_repo.set_setting(
+        db, MULTA_ATRASO_KEY, str(data.multa_atraso_percent)
+    )
+    config_repo.set_setting(
+        db, JUROS_MORA_MENSAL_KEY, str(data.juros_mora_mensal_percent)
+    )
+    return get_encargos(db)
 
 
 # ---------------------------------------------------------------------------

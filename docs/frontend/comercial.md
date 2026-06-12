@@ -22,6 +22,9 @@ ser uma simples troca de status.
 ### Clientes
 - **Colunas:** Nome (com badge **Inadimplente** e o documento abaixo), Email, Telefone,
   Endereço (composto a partir dos campos), Cadastro e as ações.
+  - **Inadimplência efetiva (Demanda 9.A):** o badge **Inadimplente** aparece tanto para
+    quem foi **marcado manualmente** quanto para quem tem **parcela vencida** (mesmo sem
+    marcação). Passe o mouse no badge para ver a **origem** (manual, vencida ou ambas).
 - **Ordenar:** clique em **Nome** ou **Cadastro**.
 - **Filtrar/buscar:** caixa **Buscar** (nome ou documento) e o botão **Apenas inadimplentes**.
 - **Ações na linha:** **Editar** (abre o formulário) e **Excluir** (com confirmação).
@@ -79,9 +82,11 @@ Mensagens: "Cliente criado com sucesso" / "Cliente atualizado com sucesso".
 - Mostra nome, documento, email, telefone e o **endereço composto** numa linha menor
   abaixo (ex.: `Rua das Flores, 123 - Apto 4 · Centro · São Paulo/SP · 01234-000`).
   Cai para o endereço legado (texto livre) quando os campos novos estão vazios.
-- Badge vermelho **"Inadimplente"** quando o cliente está marcado como tal.
+- Badge vermelho **"Inadimplente"** quando o cliente é inadimplente **efetivo** — por
+  marcação manual **ou** por ter **parcela vencida** (Demanda 9.A). O tooltip do badge diz
+  a origem.
 
-[SCREENSHOT: lista de clientes com endereço composto e badge Inadimplente]
+[SCREENSHOT: lista de clientes com endereço composto e badge Inadimplente (cliente com parcela vencida, sem marcação manual)]
 
 ## Abas
 
@@ -98,10 +103,11 @@ Mensagens: "Cliente criado com sucesso" / "Cliente atualizado com sucesso".
 
 ## Vender — aviso de inadimplência (avisar, não bloquear)
 
-No `VendaForm`, quando o cliente selecionado está inadimplente:
+No `VendaForm`, quando o cliente selecionado está inadimplente — **efetivo**: marcação
+manual **ou** parcela vencida (Demanda 9.A):
 
-1. Aparece um **banner amarelo** abaixo do Select: "Este cliente está marcado como
-   inadimplente" (no Select, o nome também leva o sufixo ⚠️).
+1. Aparece um **banner amarelo** abaixo do Select: "Este cliente está inadimplente"
+   (no Select, o nome também leva o sufixo ⚠️).
 2. Ao clicar em **Criar venda**, abre um **AlertDialog de confirmação** ("Cliente
    inadimplente — deseja continuar com a venda mesmo assim?").
    - **Continuar com a venda** → conclui a venda (o backend **não** bloqueia).
@@ -114,6 +120,29 @@ Para clientes adimplentes, o "Criar venda" finaliza direto, sem o diálogo extra
 Ao criar a venda: o backend valida estoque, registra saída, gera a(s) nota(s) fiscal(is),
 lança conta(s) a receber e movimentação financeira. Erro de estoque insuficiente → toast
 com a mensagem exata do backend.
+
+## Desconto na venda e resumo de valores (Demanda 9.C)
+
+No `VendaForm`, abaixo da lista de itens há um campo **Desconto (%)** (ao lado de **Valor
+do Transporte**). É um desconto **de cabeçalho**, aplicado **sobre o subtotal dos itens** —
+o preço unitário de cada item **não** é alterado. Default **0** (sem desconto).
+
+Logo abaixo, um **resumo de valores** acompanha o que o usuário digita:
+
+1. **Subtotal (itens)** — soma dos itens a preço de tabela.
+2. **Desconto (X%)** — em verde, o valor (R$) abatido (= subtotal × X/100). Só aparece
+   quando o desconto é maior que zero.
+3. **Transporte (NF separada)** — quando há frete (sai numa NF de transporte própria, à
+   vista). Só aparece quando maior que zero.
+4. **Total final** — em destaque: subtotal − desconto + transporte.
+
+Em venda **parcelada**, a prévia das parcelas usa o **total líquido** (já com o desconto):
+as parcelas somam o líquido, não o bruto. O frete não entra no parcelamento.
+
+> O resumo é só uma **prévia** (calculada na tela). O valor gravado é o que o **backend**
+> calcula ao salvar — a nota fiscal e as contas a receber derivam do **total com desconto**.
+
+[SCREENSHOT: VendaForm com Subtotal → Desconto → Total final no resumo de valores]
 
 ## Cancelar venda (ação dedicada, estorno ponta a ponta)
 
@@ -233,3 +262,16 @@ installment_interval_days: number     // default 30
 ```
 
 `createVenda` sempre envia `payment_method`; campos de parcelamento enviados apenas quando `payment_method === "parcelado"`.
+
+## Campos de desconto em `Sale` (Demanda 9.C)
+
+```typescript
+items_subtotal: number    // Σ itens a preço de tabela (bruto), antes do desconto
+discount_percent: number  // % de desconto de cabeçalho (0–100), default 0
+discount_amount: number   // valor (R$) = items_subtotal × discount_percent/100
+total_amount: number      // LÍQUIDO = items_subtotal − discount_amount (+ frete em NF separada)
+```
+
+`createVenda` envia `discount_percent` apenas quando maior que zero. O preço unitário dos
+itens **não** é alterado — o desconto é de **cabeçalho** (sobre o subtotal). A nota fiscal e
+as parcelas (contas a receber) derivam do **total líquido**.

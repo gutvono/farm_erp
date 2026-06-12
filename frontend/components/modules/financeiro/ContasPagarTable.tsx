@@ -119,7 +119,7 @@ export function ContasPagarTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Vence de</Label>
+          <Label className="text-xs text-slate-500">Data início</Label>
           <Input
             type="date"
             value={filters.due_after ?? ""}
@@ -131,7 +131,7 @@ export function ContasPagarTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Vence até</Label>
+          <Label className="text-xs text-slate-500">Data fim</Label>
           <Input
             type="date"
             value={filters.due_before ?? ""}

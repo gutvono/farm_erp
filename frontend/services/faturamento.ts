@@ -67,6 +67,8 @@ interface RawInvoice {
   client_name: string
   status: InvoiceStatus
   total_amount: string | number
+  subtotal: string | number
+  discount_amount: string | number
   issue_date: string
   due_date: string | null
   notes: string | null
@@ -91,6 +93,8 @@ function parseInvoice(raw: RawInvoice): Invoice {
     client_name: raw.client_name,
     status: raw.status,
     total_amount: toNumber(raw.total_amount),
+    subtotal: toNumber(raw.subtotal),
+    discount_amount: toNumber(raw.discount_amount),
     issue_date: raw.issue_date,
     due_date: raw.due_date,
     notes: raw.notes,

@@ -10,7 +10,13 @@ from sqlalchemy.orm import Session
 from app.modules.faturamento import repository as fat_repo
 from app.modules.faturamento.model import Invoice
 from app.modules.faturamento.schemas import InvoiceCreate, InvoiceOut
-from app.shared.enums import FinancialCategory, InvoiceStatus, MovementType, SaleStatus
+from app.shared.enums import (
+    AccountReceivableStatus,
+    FinancialCategory,
+    InvoiceStatus,
+    MovementType,
+    SaleStatus,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -31,6 +37,19 @@ def _get_client_name(db: Session, client_id: Optional[UUID]) -> str:
     from app.modules.comercial.model import Client
     client = db.query(Client).filter(Client.id == client_id).first()
     return client.name if client else ""
+
+
+def _get_sale_discount(db: Session, sale_id: Optional[UUID]) -> Decimal:
+    """Desconto de cabeçalho (R$) da venda vinculada à nota (Demanda 9.C).
+
+    Fonte única do desconto: `sales.discount_amount`. Retorna 0 para nota sem
+    venda (transporte/serviço/folha/manual) ou venda sem desconto.
+    """
+    if sale_id is None:
+        return Decimal("0")
+    from app.modules.comercial.model import Sale
+    sale = db.query(Sale).filter(Sale.id == sale_id).first()
+    return Decimal(str(sale.discount_amount or 0)) if sale else Decimal("0")
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +229,32 @@ def get_invoice(db: Session, invoice_id: UUID) -> Invoice:
     return _get_invoice_or_404(db, invoice_id)
 
 
+def marcar_fatura_paga_se_quitada(db: Session, invoice_id: UUID) -> None:
+    """Persiste `invoice.status = paga` quando TODAS as parcelas (AR) da nota
+    estão quitadas (Demanda 9.B). Chamado pelo Financeiro na baixa que quita a
+    última parcela. Resolve `GET /faturas?status=paga` (que filtra pela coluna do
+    banco). No-op se a nota não está `emitida` ou ainda tem parcela em aberto.
+
+    Usa o repository direto (não `update_status`) para NÃO registrar o movimento
+    de "fatura paga" do valor cheio — o caixa real já entrou parcela a parcela.
+    """
+    from app.modules.financeiro import service as fin_service
+
+    invoice = fat_repo.get_invoice(db, invoice_id)
+    if not invoice or invoice.status != InvoiceStatus.EMITIDA:
+        return
+
+    parcelas = [
+        ar
+        for ar in fin_service.get_receivables_by_invoice(db, invoice_id)
+        if ar.status != AccountReceivableStatus.CANCELADA
+    ]
+    if parcelas and all(
+        ar.status == AccountReceivableStatus.QUITADO for ar in parcelas
+    ):
+        fat_repo.update_invoice_status(db, invoice_id, InvoiceStatus.PAGA)
+
+
 def serialize_invoice(db: Session, invoice: Invoice) -> InvoiceOut:
     """Monta o ``InvoiceOut`` com o bloco de parcelas (AR por `invoice_id`) e o
     status **derivado** (Demanda 9.0). Parcelas canceladas são omitidas do bloco.
@@ -223,7 +268,19 @@ def serialize_invoice(db: Session, invoice: Invoice) -> InvoiceOut:
         for ar in fin_service.get_receivables_by_invoice(db, invoice.id)
         if ar.status != AccountReceivableStatus.CANCELADA
     ]
-    return InvoiceOut.from_model(invoice, client_name, parcelas=parcelas)
+    # Desconto de cabeçalho (Demanda 9.C): SÓ a NF de VENDA carrega o desconto.
+    # A NF de transporte compartilha o mesmo `sale_id` da venda, então NÃO pode
+    # herdar o desconto — daí o gate por `invoice_type` (não basta ter sale_id).
+    # Fonte única = `sales.discount_amount`; demais tipos (transporte/devolução/
+    # serviço/folha/recebimento/manual) ou venda sem desconto → 0. NÃO se deriva
+    # por subtração Σitens − total (quebraria com frete, que entra no total).
+    is_venda = (invoice.invoice_type or "venda").lower() == "venda"
+    discount_amount = (
+        _get_sale_discount(db, invoice.sale_id) if is_venda else Decimal("0")
+    )
+    return InvoiceOut.from_model(
+        invoice, client_name, parcelas=parcelas, discount_amount=discount_amount
+    )
 
 
 def get_invoices_by_sale(db: Session, sale_id: UUID) -> list[Invoice]:

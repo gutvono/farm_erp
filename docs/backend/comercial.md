@@ -18,7 +18,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Método | Rota | Descrição |
 |--------|------|-----------|
-| `GET` | `/api/comercial/clientes` | Lista clientes **paginada `Page[ClientOut]`** (filtro `is_delinquent`; `search` nome/documento; `order_by`: `name`/`created_at`) |
+| `GET` | `/api/comercial/clientes` | Lista clientes **paginada `Page[ClientOut]`** (`search` nome/documento; `order_by`: `name`/`created_at`). Filtro `is_delinquent=true` = inadimplência **efetiva** (manual OU vencida — 9.B); `false`/ausente = comportamento atual (só flag manual) |
 | `POST` | `/api/comercial/clientes` | Cria cliente |
 | `GET` | `/api/comercial/clientes/{id}` | Detalhe do cliente |
 | `PUT` | `/api/comercial/clientes/{id}` | Atualiza dados do cliente |
@@ -46,7 +46,7 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 
 | Endpoint | Filtros preservados | `search` (ILIKE) | `order_by` allowlist (default) |
 |----------|---------------------|------------------|--------------------------------|
-| `GET /clientes` | `is_delinquent` | nome, documento | `name` (default), `created_at` |
+| `GET /clientes` | `is_delinquent` (efetiva quando `true`, ver Inadimplência) | nome, documento | `name` (default), `created_at` |
 | `GET /vendas` | `status`, `client_id` | — | `sold_at` (default desc, indexado), `status` |
 
 `order_by` é validado por allowlist: valor fora da lista cai no default (responde 200,
@@ -88,8 +88,14 @@ o conjunto filtrado completo (`deleted_at IS NULL`).
 ### ClientOut — campos principais
 - `id`, `name`, `document`, `email`, `phone`, `address`, `notes`
 - Endereço estruturado: `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`
-- `is_delinquent` (bool) — campo real no model (`is_delinquent`, não `is_defaulter`). Exposto
-  na listagem `GET /clientes` para o front decidir **avisar** na venda (ver "Inadimplência")
+- `is_delinquent` (bool) — flag **manual** (override D7); campo real no model (`is_delinquent`,
+  não `is_defaulter`).
+- **`has_overdue` (bool, Demanda 9.A)** — derivado: o cliente tem ≥1 parcela vencida (conta a
+  receber com `due_date < hoje`, saldo em aberto e não cancelada). Calculado na leitura.
+- **`is_delinquent_effective` (bool, Demanda 9.A)** — `is_delinquent` **OU** `has_overdue`. É o
+  sinal que o front usa para **avisar** na venda e no badge da lista (ver "Inadimplência").
+  Na listagem `GET /clientes` o `has_overdue` é anotado com **uma** query (sem N+1); no
+  `GET /clientes/{id}` é consultado para aquele cliente.
 
 ### SaleCreate
 ```json
@@ -109,12 +115,17 @@ o conjunto filtrado completo (`deleted_at IS NULL`).
   "first_due_date": null,
   "installment_interval_days": 30,
   "payment_method": "a_vista" | "parcelado" | "pix" | "boleto",
-  "shipping_cost": 150.00
+  "shipping_cost": 150.00,
+  "discount_percent": 10
 }
 ```
 
 - Mínimo de 1 item
-- `total_amount` calculado automaticamente (soma dos subtotais **+ `shipping_cost`**)
+- `total_amount` calculado automaticamente: **subtotal dos itens − desconto + `shipping_cost`**
+- `discount_percent` (Demanda 9.C): desconto de **cabeçalho**, só **%** (0–100, default 0).
+  Aplicado sobre o **subtotal dos itens** (não por item) — o `unit_price`/`subtotal` de cada
+  item **permanece intacto** (preço de tabela preservado, modelo ERP auditável). Ver
+  "Desconto de cabeçalho" nas regras de negócio
 - `shipping_cost`: opcional (`>= 0`), custo de transporte. Quando `> 0`, é somado ao `total_amount` e dispara a emissão de uma NF de transporte (ver "Ao Criar uma Venda")
 - `subtotal` por item = `quantity × unit_price`
 - `sold_at` opcional (default: now)
@@ -140,6 +151,10 @@ o conjunto filtrado completo (`deleted_at IS NULL`).
 
 ### SaleOut — campos principais
 - Inclui `client_name`, `items` (com `stock_item_name` e `subtotal`), `payment_method` e `shipping_cost` (default `0`)
+- **Desconto (Demanda 9.C):** `items_subtotal` (subtotal **bruto** dos itens, soma a preço de
+  tabela), `discount_percent` e `discount_amount` (R$). Expostos para o front/NF montarem
+  **Subtotal → Desconto → Total líquido** sem recomputar. `total_amount` já é o **líquido**
+  (`items_subtotal − discount_amount + shipping_cost`).
 
 ## Regras de Negócio
 
@@ -211,7 +226,11 @@ Executado em sequência no `service.create_sale()`:
    # Se insuficiente: HTTPException 400 com nome do item e quantidade disponível
    ```
 
-2. **Criação da venda** — `repository.create_sale()` com status `realizada`
+2. **Criação da venda** — `repository.create_sale()` com status `realizada`. Aqui o
+   **desconto de cabeçalho** é aplicado (Demanda 9.C): `discount_amount = subtotal_itens ×
+   discount_percent / 100` (quantizado a R$ 0,01) e `total_amount = subtotal_itens −
+   discount_amount + shipping_cost`. `discount_percent`/`discount_amount` ficam persistidos na
+   venda (fonte única de verdade do desconto); o `subtotal` de cada item não muda.
 
 3. **Baixa no Estoque** — para cada item:
    ```python
@@ -254,17 +273,52 @@ Executado em sequência no `service.create_sale()`:
    - O valor real é registrado exclusivamente no recebimento da Conta a Receber
      (via `financeiro.receive_payment`).
 
-### Inadimplência de Clientes — AVISAR, não bloquear (decisão de PO, Demanda 7)
-- Controlada pelo campo `is_delinquent` (Boolean) em `Client`.
-- Pode ser marcada manualmente via `PUT /clientes/{id}/inadimplente` e revertida via
-  `PUT /clientes/{id}/reverter-inadimplencia`.
-- O módulo Financeiro também atualiza `is_delinquent` ao marcar conta a receber como
-  inadimplente (`mark_as_defaulter`).
-- **`create_sale` NÃO consulta `is_delinquent` e NÃO recusa a venda** — vender para cliente
-  inadimplente é concluído normalmente (201). O backend é a fonte da verdade do dado
-  (`is_delinquent` no `ClientOut`/listagem); **avisar** é responsabilidade do front (badge +
-  confirmação antes de finalizar). Automatizar a flag a partir de AR vencida está fora do
-  escopo desta demanda.
+### Desconto de cabeçalho na venda (Demanda 9.C)
+
+Desconto **explícito e auditável de ponta a ponta** (modelo ERP correto): o preço de
+tabela do item permanece intacto e o desconto é registrado **à parte**, no cabeçalho da
+venda, **só em %** (sobre o subtotal dos itens, não por item). Sem roles/alçada (decisão
+do usuário 2026-06-09 — é TCC).
+
+**Efeito observável** — ao informar `discount_percent = X` na venda, o sistema:
+1. mantém o `unit_price`/`subtotal` de cada item no **preço de tabela** (nada é reescrito);
+2. calcula `discount_amount = subtotal_itens × X / 100` (R$, arredondado a 0,01) e grava
+   `discount_percent` + `discount_amount` na venda;
+3. fecha `total_amount = subtotal_itens − discount_amount + frete` (o **líquido**);
+4. **a nota e as parcelas (contas a receber) derivam do líquido** — a NF de venda nasce com
+   `total_amount` líquido e exibe **Subtotal → Desconto → Total líquido** (lendo o desconto da
+   venda vinculada; ver `docs/backend/faturamento.md`); na venda parcelada, a soma das N
+   parcelas fecha o líquido.
+
+A venda é a **fonte única do desconto**: a NF **não** tem coluna própria de desconto (não se
+duplica `sales.discount_amount`) e o valor **não** é derivado por subtração `Σitens − total`
+(quebraria com frete, que entra no `total_amount` da NF de venda). O **cancelamento** estorna o
+**líquido** (motor único do Faturamento intacto — estoque + todas as AR + nota; ver "Cancelar
+uma Venda").
+
+> **Frete (débito técnico pré-existente — fora do escopo da 9.C):** a NF de venda inclui o
+> `shipping_cost` no `total_amount` **e** existe uma NF de transporte separada com o mesmo
+> frete (`criar_nota_transporte`) — possível dupla contagem do frete. A 9.C **não** alterou o
+> tratamento de frete; apenas registra a observação para uma demanda futura.
+
+### Inadimplência de Clientes — AVISAR, não bloquear (D7) + DERIVADA (Demanda 9.A)
+- **Efetiva = manual OU vencida.** O cliente é inadimplente **efetivo**
+  (`is_delinquent_effective`) se o flag manual `is_delinquent` está ligado **OU** se tem
+  alguma parcela vencida (`has_overdue`, derivado das contas a receber).
+- **Manual (override D7, inalterado):** `is_delinquent` em `Client`; marcado via
+  `PUT /clientes/{id}/inadimplente`, revertido via `PUT /clientes/{id}/reverter-inadimplencia`;
+  o Financeiro também liga o flag ao `mark_as_defaulter`. Continua funcionando como override.
+- **Derivada (9.A):** `has_overdue` é calculado **na leitura** (sem job/scheduler) consultando o
+  Financeiro (`financeiro_service.get_client_ids_with_overdue` em lote para a lista;
+  `client_has_overdue` para um cliente). Uma parcela está vencida se `due_date < hoje`, tem
+  saldo em aberto (`amount_received < amount`) e não está cancelada.
+- **`create_sale` NÃO consulta inadimplência e NÃO recusa a venda** — vender para cliente
+  inadimplente (manual ou vencido) é concluído normalmente (201). **Avisar** é responsabilidade
+  do front (badge + confirmação antes de finalizar), agora dirigido por `is_delinquent_effective`.
+- **Filtro efetivo (9.B):** `GET /clientes?is_delinquent=true` retorna os **efetivamente**
+  inadimplentes = flag manual **OU** `id ∈ get_client_ids_with_overdue` (uma query, reusada
+  para a anotação — sem N+1). `is_delinquent=false`/ausente mantém o comportamento atual
+  (apenas o flag manual), conforme decisão do PO.
 
 ## Database Schema
 
@@ -294,7 +348,9 @@ Executado em sequência no `service.create_sale()`:
 | `id` | UUID PK |
 | `client_id` | UUID FK → clients |
 | `status` | enum (`realizada` / `entregue` / `cancelada`) |
-| `total_amount` | NUMERIC(12,2) — inclui `shipping_cost` |
+| `total_amount` | NUMERIC(12,2) — **líquido**: subtotal itens − `discount_amount` + `shipping_cost` |
+| `discount_percent` | NUMERIC(5,2) NOT NULL default 0 (Demanda 9.C) — % do desconto de cabeçalho |
+| `discount_amount` | NUMERIC(12,2) NOT NULL default 0 (Demanda 9.C) — valor do desconto em R$ |
 | `shipping_cost` | NUMERIC(12,2) (nullable, default 0) — custo de transporte |
 | `sold_at` | TIMESTAMPTZ |
 | `delivered_at` | TIMESTAMPTZ (nullable) |
@@ -324,6 +380,13 @@ Executado em sequência no `service.create_sale()`:
 - Adiciona `purchase_orders.shipping_cost NUMERIC(12,2) nullable, server_default '0'` (a mesma migration cobre Comercial e Compras).
 
 Reversível via `downgrade()` (drop das duas colunas).
+
+`0023_sale_discount` (arquivo `alembic/versions/20260611_0023_sale_discount.py`, Demanda 9.C / DBA):
+- Adiciona à tabela `sales` o desconto de cabeçalho: `discount_percent NUMERIC(5,2)` e
+  `discount_amount NUMERIC(12,2)`, ambos `NOT NULL DEFAULT 0`. O preço de tabela dos itens
+  (`sale_items.subtotal`) permanece intacto; o `total_amount` passa a ser o líquido. O Backend
+  (esta etapa) **não** criou migration — apenas aplica o desconto no `create_sale` e expõe os
+  campos nos schemas. Reversível via `downgrade()` (drop das duas colunas).
 
 `0021_client_address` (arquivo `alembic/versions/20260608_0021_client_address.py`, Demanda 7 / DBA):
 - Adiciona à tabela `clients` o endereço estruturado (`cep, street, number, complement,

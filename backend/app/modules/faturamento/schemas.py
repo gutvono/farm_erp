@@ -81,6 +81,12 @@ class InvoiceOut(BaseModel):
     sale_id: Optional[UUID] = None
     issue_date: date
     due_date: Optional[date] = None
+    # Cabeçalho de valores da NF (Demanda 9.C): `subtotal` = Σ itens a preço de
+    # tabela; `discount_amount` = desconto lido da VENDA vinculada (fonte única —
+    # `sales.discount_amount`), 0 para nota sem venda/sem desconto; `total_amount`
+    # = total líquido da nota. A NF exibe Subtotal → Desconto → Total líquido.
+    subtotal: Decimal = Decimal("0")
+    discount_amount: Decimal = Decimal("0")
     total_amount: Decimal
     status: InvoiceStatus
     notes: Optional[str] = None
@@ -100,12 +106,18 @@ class InvoiceOut(BaseModel):
     model_config = ConfigDict(from_attributes=True, use_enum_values=True)
 
     @classmethod
-    def from_model(cls, invoice, client_name: str, parcelas=None) -> "InvoiceOut":
+    def from_model(
+        cls, invoice, client_name: str, parcelas=None, discount_amount=Decimal("0")
+    ) -> "InvoiceOut":
         """Serializa a nota. ``parcelas`` é a lista de AR (não canceladas) ligadas
         à nota por `invoice_id`; quando informada, o `status` é **derivado**: a
         nota nasce `emitida` e vira `paga` somente quando TODAS as parcelas estão
         quitadas (nunca por parcela). `cancelada` é preservado. Sem parcelas, o
-        status do banco é mantido."""
+        status do banco é mantido.
+
+        ``discount_amount`` vem da VENDA vinculada (`sales.discount_amount`),
+        fonte única do desconto — 0 para nota sem venda/sem desconto. O `subtotal`
+        (Σ itens a preço de tabela) é derivado dos próprios itens da nota."""
         ar_list = sorted(
             parcelas or [], key=lambda r: (r.installment_number or 1)
         )
@@ -117,6 +129,10 @@ class InvoiceOut(BaseModel):
             )
             status = InvoiceStatus.PAGA if all_quitadas else InvoiceStatus.EMITIDA
 
+        subtotal = sum(
+            (Decimal(str(i.subtotal)) for i in invoice.items), Decimal("0")
+        )
+
         return cls(
             id=invoice.id,
             number=invoice.number,
@@ -125,6 +141,8 @@ class InvoiceOut(BaseModel):
             sale_id=invoice.sale_id,
             issue_date=invoice.issue_date,
             due_date=invoice.due_date,
+            subtotal=subtotal,
+            discount_amount=Decimal(str(discount_amount or 0)),
             total_amount=invoice.total_amount,
             status=status,
             notes=invoice.notes,

@@ -10,6 +10,7 @@ import {
   CashFlowPoint,
   CashFlowResult,
   DefaulterItem,
+  EncargoBreakdown,
   FinancialMovement,
   MovementType,
   Paginated,
@@ -106,6 +107,8 @@ interface RawReceivable {
   installment_number: number | null
   installment_total: number | null
   payment_method: PaymentMethod | null
+  is_overdue?: boolean
+  days_overdue?: number
   created_at: string
   updated_at: string
 }
@@ -127,6 +130,8 @@ function parseReceivable(raw: RawReceivable): AccountsReceivable {
     installment_number: raw.installment_number,
     installment_total: raw.installment_total,
     payment_method: raw.payment_method ?? null,
+    is_overdue: raw.is_overdue ?? false,
+    days_overdue: raw.days_overdue ?? 0,
     created_at: raw.created_at,
     updated_at: raw.updated_at,
   }
@@ -336,18 +341,55 @@ export async function createContaReceber(data: {
   return parseReceivable(response.data)
 }
 
+/**
+ * Registra a baixa de uma parcela. `encargo` (Demanda 9.B) é o override opcional
+ * do encargo por atraso: só vale na baixa que QUITA uma parcela vencida, `0` =
+ * perdão, ausente = backend usa o cálculo automático (multa + juros).
+ */
 export async function receberConta(
   id: string,
-  amount: number
+  amount: number,
+  encargo?: number
 ): Promise<AccountsReceivable> {
   const response = await apiFetch<ApiResponse<RawReceivable>>(
     `/api/financeiro/contas-receber/${id}/receber`,
     {
       method: "PUT",
-      body: JSON.stringify({ amount }),
+      body: JSON.stringify(encargo === undefined ? { amount } : { amount, encargo }),
     }
   )
   return parseReceivable(response.data)
+}
+
+interface RawEncargo {
+  receivable_id: string
+  number: string
+  saldo: number | string
+  dias_atraso: number
+  multa: number | string
+  juros: number | string
+  total: number | string
+}
+
+/**
+ * Calcula o breakdown do encargo por atraso de uma parcela
+ * (`GET /api/financeiro/contas-receber/{id}/encargo`). Tudo `0` quando a parcela
+ * não está vencida.
+ */
+export async function getEncargo(id: string): Promise<EncargoBreakdown> {
+  const response = await apiFetch<ApiResponse<RawEncargo>>(
+    `/api/financeiro/contas-receber/${id}/encargo`
+  )
+  const raw = response.data
+  return {
+    receivable_id: raw.receivable_id,
+    number: raw.number,
+    saldo: toNumber(raw.saldo),
+    dias_atraso: raw.dias_atraso,
+    multa: toNumber(raw.multa),
+    juros: toNumber(raw.juros),
+    total: toNumber(raw.total),
+  }
 }
 
 export async function marcarInadimplente(id: string): Promise<AccountsReceivable> {

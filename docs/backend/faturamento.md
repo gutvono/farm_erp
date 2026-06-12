@@ -74,6 +74,12 @@ envelope inalterados.
 
 ### InvoiceOut
 - Inclui `client_name`, `number`, `issue_date`, `due_date`, itens com `subtotal`.
+- **Cabeçalho de valores (Demanda 9.C):** `subtotal` (Σ itens a preço de tabela),
+  `discount_amount` (desconto de cabeçalho **lido da venda vinculada** — `sales.discount_amount`)
+  e `total_amount` (total líquido). Permite à NF/PDF exibir **Subtotal → Desconto → Total
+  líquido**. Para nota **sem venda** (transporte/serviço/folha/manual) ou **venda sem
+  desconto**, `discount_amount = 0` e `subtotal = total_amount`. Ver "Desconto de cabeçalho"
+  abaixo.
 - **`parcelas` (Demanda 9.0):** o **bloco de cobrança** da nota — lista das contas a
   receber (`accounts_receivable`) ligadas à nota por `invoice_id`. Cada parcela:
   `id`, `number`, `installment_number`, `installment_total`, `due_date`, `amount`,
@@ -120,6 +126,24 @@ precedência. Notas sem AR mantêm o status do banco.
 > `GET /faturas?status=paga` (que usa a coluna do banco) **não** retorna notas de venda
 > quitadas-por-derivação. Aceitável na 9.0 (decisão "derivar na leitura"); revisitar se o
 > filtro por status virar requisito.
+
+### Desconto de cabeçalho na NF (Demanda 9.C)
+
+A NF de venda passa a exibir **Subtotal → Desconto → Total líquido**. A **fonte única** do
+desconto é a **venda vinculada** (`invoices.sale_id → sales.discount_amount`); a tabela
+`invoices` **não** ganhou coluna de desconto (evita duplicar `sales.discount_amount`).
+
+No `serialize_invoice` (ponto único de serialização):
+- `subtotal` = Σ dos `subtotal` dos itens da nota (preço de tabela);
+- `discount_amount` = `sales.discount_amount` da venda vinculada (helper `_get_sale_discount`);
+- `total_amount` = total líquido já gravado na nota (`subtotal − desconto`, + frete quando há).
+
+Tratamento de bordas → `discount_amount = 0`: nota **sem venda** (`sale_id IS NULL` —
+transporte/serviço/folha/manual) ou venda **sem desconto**. O desconto **nunca** é derivado por
+subtração `Σitens − total`: isso quebraria com frete, pois a NF de venda inclui o `shipping_cost`
+no `total_amount` (e o frete ainda tem NF de transporte própria — débito técnico pré-existente,
+fora do escopo da 9.C). O `notes` semeado na NF-0004 explicando o desconto é **cosmético** — não
+é fonte de dado.
 
 ### Ao Marcar como Paga
 ```python
@@ -183,7 +207,9 @@ Retorna o `Invoice` criado; o Comercial usa o `invoice.id` para ligar as parcela
 
 Ponto único de serialização (usado pelo router). Busca as parcelas da nota
 (`financeiro_service.get_receivables_by_invoice`, omitindo as canceladas) e monta o
-`InvoiceOut` com o **bloco `parcelas`** e o **status derivado**.
+`InvoiceOut` com o **bloco `parcelas`**, o **status derivado** e o **desconto de cabeçalho**
+(`subtotal`/`discount_amount`, lido da venda vinculada via `_get_sale_discount` — ver
+"Desconto de cabeçalho na NF").
 
 ## Fatura Manual vs. Automática
 

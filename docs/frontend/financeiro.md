@@ -120,8 +120,14 @@ Tabela paginada (`ContasReceberTable`), mesmos filtros/ordenação:
 - **Buscar**: número, descrição ou nome do cliente.
 - **Vence de / Vence até** e **Status** (Todos / Em aberto / Parcialmente pago / Quitado / Cancelada).
 - Ordenação por **Vencimento** e **Valor**; paginado (20 por página).
+- **Indicador de vencida (Demanda 9.A):** na coluna **Vencimento**, contas em aberto/parcial
+  cujo vencimento já passou exibem um **badge vermelho "Vencida"** e o texto **"há N dias"**
+  (dias de atraso). Contas quitadas, canceladas, com vencimento **hoje** ou **futuro** não
+  mostram o indicador.
 - Botão "Nova conta a receber" dispara `NovaContaForm type="receber"` (requer ID do cliente).
 - Cada linha tem **Detalhes** → abre `ContaReceivableDetail`. No Sheet: campo "Valor recebido" + **Confirmar recebimento** (validação: `0 < valor ≤ amount - amount_received`); **Cliente não vai pagar** (em aberto/parcial) e **Reverter inadimplência** (status `cancelada`); PIX/Boleto conforme o método.
+
+[SCREENSHOT: aba Contas a Receber com a AR-0002 marcada "Vencida · há 55 dias"]
 
 ### 5. Movimentações (`movements`)
 Tabela paginada (`MovimentacoesTable`) com colunas Data, Descrição, Categoria, Módulo, Tipo (badge verde/vermelho), Valor. Filtros/ordenação **server-side**:
@@ -204,6 +210,33 @@ Tabela de apresentação (estado de query no hook `useMovimentacoesFin`).
 
 **PixModal**: chave PIX + código copia-e-cola + botão "Confirmar pagamento".
 **BoletoModal**: linha digitável + botão cópia + download PDF via `jsPDF` + botão "Confirmar pagamento".
+
+## Encargo por atraso na baixa (Demanda 9.B)
+
+`ContaReceivableDetail` cobra **multa + juros de mora** ao **quitar** uma parcela
+**vencida** (`is_overdue === true`). O encargo é separado do principal: a parcela é
+quitada pelo `amount` (saldo devedor) e o encargo vira um **movimento financeiro
+distinto** (categoria `juros_multa`).
+
+- Quando o operador digita um valor que **cobre o saldo total** (`= amount −
+  amount_received`, tolerância de centavo) numa conta vencida, o componente busca o
+  breakdown via `getEncargo(id)` e exibe **multa (R$)**, **juros (R$)**, **encargo
+  calculado** e o **total a receber** (principal + encargo), deixando explícito que são
+  lançamentos separados.
+- O encargo tem um **campo editável** (default = total calculado). `0` = **perdão**.
+  O valor é enviado em `receberConta(id, amount, encargo)` (campo opcional `encargo` no
+  body de `PUT .../receber`).
+- **Pagamento parcial** de parcela vencida **não gera encargo** (e a UI avisa que o
+  encargo só se aplica na quitação total). Conta **não vencida**: fluxo inalterado, sem
+  qualquer menção a encargo.
+- PIX/Boleto quitam o saldo total → quando a parcela está vencida, o override calculado
+  também é enviado na confirmação do modal.
+
+```typescript
+getEncargo(id): Promise<EncargoBreakdown>   // GET /contas-receber/{id}/encargo
+receberConta(id, amount, encargo?)          // encargo opcional: 0 = perdão; ausente = auto
+interface EncargoBreakdown { receivable_id; number; saldo; dias_atraso; multa; juros; total }
+```
 
 ## Dependências
 

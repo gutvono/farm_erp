@@ -121,6 +121,22 @@ referência registrada na própria nota (ordem de compra × venda).
 
 [SCREENSHOT: nota de venda parcelada expandida, mostrando o selo "Parcelada 3×" e a tabela de Parcelas (1 quitada, 2 em aberto)]
 
+### 1.8 Nota fiscal com desconto (Demanda 9.C)
+
+Quando a venda teve **desconto** (campo Desconto (%) no formulário de venda), a nota fiscal
+mostra a **linha de desconto** — tanto no card expandido quanto no **PDF**:
+
+1. Expanda a nota: abaixo dos itens, antes do total, aparecem **Subtotal** (itens a preço
+   de tabela) e **Desconto** (em verde, o valor abatido); o total passa a se chamar
+   **"Total líquido"**.
+2. No **PDF**, o bloco de totais imprime **Subtotal → Desconto → Total líquido** (e segue
+   com os impostos e o **TOTAL NF-e**, que é o líquido).
+3. As **parcelas** (cobrança) já derivam do **total líquido** — somam o valor com desconto.
+4. Notas **sem desconto** mantêm o layout anterior (só **Total**), sem nenhuma linha de
+   desconto.
+
+[SCREENSHOT: NF de venda expandida com a linha de Desconto e "Total líquido"]
+
 ---
 
 ## 2. Tipos de Nota Fiscal e seus badges
@@ -237,6 +253,10 @@ bloco **"PARCELAS"** com a tabela completa (nº / vencimento / valor / status) e
 cheio** da nota. Substituiu o antigo bloco "DUPLICATAS" de **uma** parcela (que assumia o
 modelo de N notas e o "1 de N").
 
+Quando `invoice.discount_amount > 0` (Demanda 9.C), o bloco de totais (PDF e card
+expandido) renderiza **Subtotal (`invoice.subtotal`) → Desconto (`invoice.discount_amount`)
+→ Total líquido (`invoice.total_amount`)**. Sem desconto, mantém só o **Total**.
+
 ### Tipos (`types/index.ts`)
 
 ```typescript
@@ -262,7 +282,9 @@ interface Invoice {
   client_id: string | null        // null = NF sem cliente (compras, inclui serviço)
   client_name: string
   status: InvoiceStatus           // DERIVADO: emitida→paga só quando TODAS as parcelas quitadas
-  total_amount: number
+  total_amount: number            // total LÍQUIDO (já com desconto)
+  subtotal: number                // Σ itens a preço de tabela (bruto) — Demanda 9.C
+  discount_amount: number         // desconto (R$) da venda vinculada; 0 sem desconto — Demanda 9.C
   issue_date: string
   due_date: string | null
   notes: string | null

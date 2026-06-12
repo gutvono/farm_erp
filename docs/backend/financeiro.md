@@ -54,13 +54,14 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
 | `POST` | `/api/financeiro/contas-receber` | Cria nova conta |
 | `GET` | `/api/financeiro/contas-receber/{id}` | Detalhe |
 | `PUT` | `/api/financeiro/contas-receber/{id}` | Atualiza conta ativa |
-| `PUT` | `/api/financeiro/contas-receber/{id}/receber` | Registra recebimento parcial ou total |
+| `PUT` | `/api/financeiro/contas-receber/{id}/receber` | Registra recebimento parcial ou total. Body aceita `encargo` opcional (override do juros/multa — Demanda 9.B) |
+| `GET` | `/api/financeiro/contas-receber/{id}/encargo` | Pré-calcula o encargo por atraso (multa/juros/dias) — para a tela de baixa (9.B) |
 | `PUT` | `/api/financeiro/contas-receber/{id}/inadimplente` | Marca cliente como inadimplente |
 | `PUT` | `/api/financeiro/contas-receber/{id}/reverter-inadimplencia` | Reverte inadimplência |
 | `PATCH` | `/api/financeiro/contas-receber/{id}/metodo-pagamento` | Atualiza `payment_method` da conta (apenas se `em_aberto`) |
 | `GET` | `/api/financeiro/contas-receber/{id}/pix` | Retorna `PixPaymentInfo`. Requer `payment_method == "pix"` |
 | `GET` | `/api/financeiro/contas-receber/{id}/boleto` | Retorna `BoletoPaymentInfo`. Requer `payment_method == "boleto"` |
-| `GET` | `/api/financeiro/relatorio-inadimplencia` | Lista clientes com contas em inadimplência |
+| `GET` | `/api/financeiro/relatorio-inadimplencia` | Lista contas em inadimplência **efetiva** (manual **OU** vencida — Demanda 9.A) |
 
 ### Aprovação de folha (Demanda 4)
 
@@ -239,6 +240,61 @@ No fluxo de **compra parcelada** (Compras divide `receipt_total_amount` em N par
 - Valor recebido nunca pode exceder o saldo devedor (`amount - amount_received`)
 - Sempre gera movimento de entrada com a categoria `recebimento`
 - Cada recebimento atualiza `amount_received` cumulativamente
+
+### Inadimplência derivada / parcela vencida (Demanda 9.A)
+
+Sem scheduler no projeto, a inadimplência automática é **DERIVADA na leitura** (nenhum job,
+nenhum schema novo). Uma conta a receber está **vencida (overdue)** quando:
+
+> `due_date < hoje` **E** `amount_received < amount` (saldo em aberto) **E** `status != cancelada`.
+
+(Parcela quitada ou cancelada nunca é vencida.)
+
+- **`AccountReceivableOut`** expõe, derivados na serialização: **`is_overdue`** (bool) e
+  **`days_overdue`** (`max(0, hoje - due_date)` quando vencida; senão `0`).
+- **Funções do Service** (fonte da verdade do overdue, usadas pelo Comercial via Service):
+  - `get_client_ids_with_overdue(db) -> set[UUID]` — **uma** query (`SELECT DISTINCT client_id`)
+    com os clientes que têm ≥1 parcela vencida. Anota a lista de clientes **sem N+1**.
+  - `client_has_overdue(db, client_id) -> bool` — para o GET de um cliente.
+- **Inadimplência efetiva = manual OU vencida.** O `relatorio-inadimplencia` agora reconcilia os
+  dois: inclui as contas marcadas manualmente (status `cancelada` de cliente com
+  `is_delinquent`) **e** as contas vencidas em aberto. O override manual (`mark_as_defaulter`/
+  reverter) segue inalterado. O Comercial expõe `has_overdue`/`is_delinquent_effective` no
+  `ClientOut` a partir destas funções.
+
+### Juros/multa por atraso na baixa (Demanda 9.B)
+
+Ao **quitar** uma parcela **vencida**, o sistema cobra um **encargo** (multa + juros de mora),
+calculado sobre o **saldo** da parcela. As taxas vêm de Configurações (`app_settings`), com
+default `2`%/`1`% (ver `docs/backend/configuracoes.md`).
+
+> `multa  = saldo × multa_atraso_percent/100`  (uma vez)
+> `juros  = saldo × (juros_mora_mensal_percent/100 / 30) × dias_atraso`  (mora simples, pro-rata)
+> `total  = multa + juros`
+
+- **`GET /contas-receber/{id}/encargo`** → breakdown `EncargoOut`
+  (`saldo, dias_atraso, multa, juros, total`); `0` em tudo se a parcela não está vencida. O front
+  mostra **antes** da baixa. Ex. (AR vencida 55 dias, saldo 23.250): multa `465,00`, juros
+  `426,25`, total `891,25`.
+- **`PUT /contas-receber/{id}/receber`** aceita `encargo` **opcional** (override):
+  - parcela vencida, sem `encargo` no body → usa o `total` pré-calculado;
+  - com `encargo` (inclusive **`0` = perdão**) → usa o valor informado (validado `≥ 0`);
+  - parcela **não** vencida → encargo `0` (nenhum movimento de encargo).
+- **O encargo NÃO entra no principal.** A parcela quita pelo `amount` (lógica de
+  `amount_received` inalterada). Quando `encargo > 0`, é registrado um **movimento separado**
+  `ENTRADA`/**`juros_multa`** (`amount = encargo`, `reference_id` = a AR, descrição
+  `"Juros/multa por atraso — {número} (parcela i/N)"`) — receita financeira à parte.
+- **Pagamento parcial:** o encargo é cobrado **apenas na baixa que QUITA** a parcela; baixas
+  parciais não geram encargo.
+
+### Status da nota = `paga` na baixa da última parcela (Demanda 9.B)
+
+Quando uma baixa deixa uma AR `quitada` e **todas** as parcelas daquela nota (`invoice_id`,
+não canceladas) estão quitadas, o Financeiro chama
+`faturamento_service.marcar_fatura_paga_se_quitada(db, invoice_id)`, que **persiste**
+`invoices.status = paga` (via repository, sem registrar movimento de "fatura paga" — o caixa já
+entrou parcela a parcela). Isso resolve `GET /faturas?status=paga` (que filtra pela coluna do
+banco). O status derivado na leitura da 9.0 continua coerente.
 
 ### Numeração
 - Payables: `AP-0001`, `AP-0002`, ...

@@ -54,6 +54,11 @@ const schema = z
       .int()
       .min(1),
     shipping_cost: z.number().min(0).optional(),
+    // Desconto de cabeçalho (Demanda 9.C): % sobre o subtotal dos itens, default 0.
+    discount_percent: z
+      .number({ error: "Informe o desconto" })
+      .min(0, "Desconto >= 0")
+      .max(100, "Desconto <= 100"),
     items: z.array(itemSchema).min(1, "Adicione pelo menos 1 item"),
   })
   .superRefine((data, ctx) => {
@@ -120,6 +125,7 @@ export function VendaForm({
       first_due_date: "",
       installment_interval_days: 30,
       shipping_cost: undefined,
+      discount_percent: 0,
       items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
     },
   })
@@ -144,17 +150,24 @@ export function VendaForm({
   }, 0)
 
   const shippingCost = Number(watch("shipping_cost")) || 0
-  const totalAmount = itemsTotal + shippingCost
+  // Desconto de cabeçalho (Demanda 9.C): % sobre o subtotal dos itens. Preview no
+  // client; o backend é a fonte da verdade do valor gravado.
+  const discountPercent = Number(watch("discount_percent")) || 0
+  const discountAmount = Math.round(itemsTotal * (discountPercent / 100) * 100) / 100
+  const netItemsTotal = Math.max(0, itemsTotal - discountAmount)
+  const totalAmount = netItemsTotal + shippingCost
 
+  // Parcelas derivam do total LÍQUIDO dos itens (após desconto). O frete sai em NF
+  // própria (à vista) e não entra no parcelamento.
   const installmentPreview: { label: string; due: string; amount: number }[] =
     (() => {
       if (!isParcelado || installments < 2 || !firstDueDate) return []
-      const base = Math.round((itemsTotal / installments) * 100) / 100
+      const base = Math.round((netItemsTotal / installments) * 100) / 100
       const dates = calcInstallmentDates(firstDueDate, installments, intervalDays || 30)
       return dates.map((dt, i) => {
         const amount =
           i === installments - 1
-            ? Math.round((itemsTotal - base * (installments - 1)) * 100) / 100
+            ? Math.round((netItemsTotal - base * (installments - 1)) * 100) / 100
             : base
         return {
           label: `Parcela ${i + 1}/${installments}`,
@@ -174,6 +187,7 @@ export function VendaForm({
         first_due_date: "",
         installment_interval_days: 30,
         shipping_cost: undefined,
+        discount_percent: 0,
         items: [{ stock_item_id: "", quantity: 0, unit_price: 0 }],
       })
     }
@@ -182,7 +196,8 @@ export function VendaForm({
   // Inadimplência = AVISAR, não bloquear (Demanda 7): se o cliente está
   // inadimplente, pede confirmação antes de finalizar; confirmar prossegue.
   function onSubmit(data: FormData) {
-    if (selectedClient?.is_delinquent) {
+    // Inadimplência EFETIVA (Demanda 9.A): manual OU parcela vencida.
+    if (selectedClient?.is_delinquent_effective) {
       setPendingData(data)
       setDelinquentConfirmOpen(true)
       return
@@ -211,6 +226,7 @@ export function VendaForm({
           isParcelado && data.installments >= 2 ? data.installment_interval_days : undefined,
         shipping_cost:
           data.shipping_cost && data.shipping_cost > 0 ? data.shipping_cost : undefined,
+        discount_percent: data.discount_percent > 0 ? data.discount_percent : undefined,
         items: data.items.map((item) => ({
           stock_item_id: item.stock_item_id,
           quantity: item.quantity,
@@ -250,7 +266,7 @@ export function VendaForm({
                   {clients.map((c) => (
                     <SelectItem key={c.id} value={c.id}>
                       {c.name}
-                      {c.is_delinquent ? " ⚠️" : ""}
+                      {c.is_delinquent_effective ? " ⚠️" : ""}
                     </SelectItem>
                   ))}
                 </SelectContent>
@@ -266,10 +282,10 @@ export function VendaForm({
             </div>
           </div>
 
-          {selectedClient?.is_delinquent && (
+          {selectedClient?.is_delinquent_effective && (
             <div className="flex items-center gap-2 rounded-md border border-yellow-300 bg-yellow-50 px-3 py-2 text-sm text-yellow-800">
               <AlertTriangle className="h-4 w-4 flex-shrink-0" />
-              Este cliente está marcado como inadimplente
+              Este cliente está inadimplente
             </div>
           )}
 
@@ -479,42 +495,78 @@ export function VendaForm({
             </div>
           </div>
 
-          <div className="space-y-1">
-            <div className="flex items-center gap-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1">
+              <Label htmlFor="discount_percent">Desconto (%)</Label>
+              <Input
+                id="discount_percent"
+                type="number"
+                step="0.01"
+                min="0"
+                max="100"
+                {...register("discount_percent", { valueAsNumber: true })}
+                placeholder="0"
+              />
+              <span className="text-xs text-slate-500">Sobre o subtotal dos itens</span>
+              {errors.discount_percent && (
+                <p className="text-xs text-red-500">{errors.discount_percent.message}</p>
+              )}
+            </div>
+
+            <div className="space-y-1">
               <Label htmlFor="shipping_cost">Valor do Transporte (R$)</Label>
+              <Input
+                id="shipping_cost"
+                type="number"
+                step="0.01"
+                min="0"
+                {...register("shipping_cost", {
+                  setValueAs: (v) => {
+                    if (v === "" || v === null || v === undefined) return undefined
+                    const n = Number(v)
+                    return Number.isNaN(n) ? undefined : n
+                  },
+                })}
+                placeholder="0.00"
+              />
               <span className="text-xs text-slate-500">Gera uma NF de transporte separada</span>
             </div>
-            <Input
-              id="shipping_cost"
-              type="number"
-              step="0.01"
-              min="0"
-              {...register("shipping_cost", {
-                setValueAs: (v) => {
-                  if (v === "" || v === null || v === undefined) return undefined
-                  const n = Number(v)
-                  return Number.isNaN(n) ? undefined : n
-                },
-              })}
-              placeholder="0.00"
-            />
           </div>
 
-          <div className="flex items-center justify-between pt-2 border-t">
-            <div className="text-sm font-semibold text-slate-700">
-              Total:{" "}
+          {/* Resumo de valores (Demanda 9.C): Subtotal → Desconto → Total final.
+              Preview no client; o backend grava o valor definitivo. */}
+          <div className="space-y-1 rounded-md border bg-slate-50 p-3 text-sm">
+            <div className="flex items-center justify-between text-slate-600">
+              <span>Subtotal (itens)</span>
+              <span>{formatCurrency(itemsTotal)}</span>
+            </div>
+            {discountPercent > 0 && (
+              <div className="flex items-center justify-between text-emerald-700">
+                <span>Desconto ({discountPercent}%)</span>
+                <span>- {formatCurrency(discountAmount)}</span>
+              </div>
+            )}
+            {shippingCost > 0 && (
+              <div className="flex items-center justify-between text-slate-600">
+                <span>Transporte (NF separada)</span>
+                <span>{formatCurrency(shippingCost)}</span>
+              </div>
+            )}
+            <div className="flex items-center justify-between border-t pt-1 font-semibold text-slate-800">
+              <span>Total final</span>
               <span className="text-lg font-bold text-slate-900">
                 {formatCurrency(totalAmount)}
               </span>
             </div>
-            <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-                Cancelar
-              </Button>
-              <Button type="submit" disabled={loading}>
-                {loading ? "Criando..." : "Criar venda"}
-              </Button>
-            </div>
+          </div>
+
+          <div className="flex justify-end gap-2 pt-2">
+            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button type="submit" disabled={loading}>
+              {loading ? "Criando..." : "Criar venda"}
+            </Button>
           </div>
         </form>
       </DialogContent>
@@ -533,8 +585,8 @@ export function VendaForm({
           <AlertDialogHeader>
             <AlertDialogTitle>Cliente inadimplente</AlertDialogTitle>
             <AlertDialogDescription>
-              <strong>{selectedClient?.name}</strong> está marcado como inadimplente. Deseja
-              continuar com a venda mesmo assim?
+              <strong>{selectedClient?.name}</strong> está inadimplente. Deseja continuar com a
+              venda mesmo assim?
             </AlertDialogDescription>
           </AlertDialogHeader>
           <AlertDialogFooter>

@@ -134,7 +134,9 @@ Vendas realizadas. Segue fluxo `realizada → entregue → cancelada`.
 |--------|------|-----------|
 | `client_id` | FK `clients.id` | Cliente comprador |
 | `status` | ENUM `sale_status` | `realizada` \| `entregue` \| `cancelada` |
-| `total_amount` | `NUMERIC(12,2)` | Soma dos itens |
+| `total_amount` | `NUMERIC(12,2)` | Total **líquido** da venda (subtotal dos itens − `discount_amount`) |
+| `discount_percent` | `NUMERIC(5,2)` NOT NULL default `0` | **Desconto de cabeçalho (Demanda 9.C):** percentual informado na venda (sobre o total, não por item) |
+| `discount_amount` | `NUMERIC(12,2)` NOT NULL default `0` | Valor do desconto em R$ resultante do percentual. O preço de tabela dos itens (`sale_items.subtotal`) permanece intacto — o desconto vive só no cabeçalho |
 | `sold_at` | `TIMESTAMPTZ` | Data da venda |
 | `delivered_at` | `TIMESTAMPTZ` NULL | Data de entrega |
 | `installments` | `INTEGER` default 1 | Número de parcelas |
@@ -349,10 +351,19 @@ demanda, os 3 itens-destino da colheita (D1).
 | `value` | `VARCHAR(500)` | sim | Valor (ex.: UUID de um `stock_item` como texto) |
 | `created_at`, `updated_at` | `TIMESTAMPTZ` | não | Auditoria |
 
-Índice: `ix_app_settings_key` (UNIQUE). Chaves desta demanda:
+Índice: `ix_app_settings_key` (UNIQUE). Chaves dos **itens-destino da colheita** (D1):
 `harvest_destination_industria_item_id`, `harvest_destination_embalagem_item_id`,
 `harvest_destination_descarte_item_id` → cada uma aponta (por `value` = UUID em
 texto, **sem FK**) para o `stock_item` que recebe a produção daquele destino.
+
+Chaves das **taxas de encargo por atraso** (Demanda 9.B) — `value` é a porcentagem
+em texto; lidas pelo Backend na baixa de parcela vencida (se ausentes, ele usa os
+defaults 2 / 1):
+
+| `key` | Valor (seed) | Significado (negócio) |
+|-------|--------------|-----------------------|
+| `multa_atraso_percent` | `2` | Multa **única** por atraso, em % sobre o valor da parcela |
+| `juros_mora_mensal_percent` | `1` | Juros de mora **ao mês**, em % (pro-rata pelos dias de atraso) |
 
 ---
 
@@ -407,7 +418,7 @@ Ledger imutável de todas as movimentações financeiras. Saldo da conta corrent
 | Coluna | Tipo | Descrição |
 |--------|------|-----------|
 | `movement_type` | ENUM `financial_movement_type` | `entrada` \| `saida` |
-| `category` | ENUM `financial_category` | venda, compra, folha, produção, ajuste, recebimento, pagamento, saldo_inicial, outro |
+| `category` | ENUM `financial_category` | venda, compra, folha, produção, ajuste, recebimento, pagamento, saldo_inicial, `juros_multa` (encargo por atraso — multa+juros de mora, D9.B), outro |
 | `amount` | `NUMERIC(12,2)` | Valor (pode ser 0 para registros sem impacto) |
 | `source_module`, `reference_id` | Rastreabilidade |
 | `occurred_at` | `TIMESTAMPTZ` | Data efetiva |
@@ -993,8 +1004,6 @@ preenchidos.
 
 ### Comercial — endereço do cliente (Demanda 7)
 
-**Head atual: `0021_client_address`.**
-
 **`0021_client_address`** (`down_revision` `0020_supplier_items`) — espelha a
 `0019_supplier_address`, adicionando em `clients` os mesmos sete campos de endereço
 estruturado (`cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`),
@@ -1009,6 +1018,51 @@ Testada localmente: `upgrade head → downgrade -1 → upgrade head`, `alembic c
 (*No new upgrade operations detected*), `reset_db` OK. O seed dos 3 clientes ganhou os
 campos de endereço (BR realistas) e teve os documentos corrigidos para CPF/CNPJ com **DV
 válido** (a validação do Backend da D7 passaria a rejeitar os antigos).
+
+### Faturamento/Financeiro — encargo por atraso (Demanda 9.B)
+
+**Head atual: `0022_fin_cat_juros_multa`.**
+
+**`0022_fin_cat_juros_multa`** (`down_revision` `0021_client_address`) — adiciona o valor
+`juros_multa` ao enum `financial_category`, para classificar o movimento de encargo
+(multa + juros de mora) cobrado na baixa de parcela vencida. `ALTER TYPE ... ADD VALUE IF
+NOT EXISTS` roda em `autocommit_block` (ADD VALUE não roda em transação no Postgres),
+espelhando a `0017_payroll_approval` (D4); o valor também está no enum Python
+`FinancialCategory`, então num banco novo o `create_all` da `0001` já cria o tipo com ele
+e o ADD VALUE vira no-op. **Downgrade é NO-OP** (Postgres não remove valor de enum de
+forma segura; deixá-lo é inócuo). As **taxas** ficam em `app_settings`
+(`multa_atraso_percent`=`2`, `juros_mora_mensal_percent`=`1`), semeadas — não há schema
+para elas além da tabela key-value existente.
+
+Testada localmente: `upgrade head → downgrade -1 → upgrade head`, `alembic check` limpo
+(*No new upgrade operations detected*), `enum_range` mostra `juros_multa`, `reset_db` OK
+(2 chaves de taxa presentes). O **cálculo** do encargo e o lançamento do movimento são da
+etapa Backend.
+
+### Venda — desconto de cabeçalho (Demanda 9.C)
+
+**Head atual: `0023_sale_discount`.**
+
+**`0023_sale_discount`** (`down_revision` `0022_fin_cat_juros_multa`) — adiciona em `sales`
+duas colunas para o **desconto de cabeçalho** (sobre o total da venda, não por item):
+`discount_percent` `NUMERIC(5,2) NOT NULL DEFAULT 0` (percentual informado) e
+`discount_amount` `NUMERIC(12,2) NOT NULL DEFAULT 0` (valor em R$). Modelo ERP correto: o
+preço de tabela do item (`sale_items.subtotal`) **permanece intacto** e `total_amount` já é
+o **líquido** (subtotal − `discount_amount`) — auditável de ponta a ponta (venda → nota →
+AR derivam do líquido). **Upgrade:** `ADD COLUMN IF NOT EXISTS` das duas colunas (idempotente
+— num banco novo o `create_all` da `0001` já as cria, pois o model `Sale` as reflete) +
+`ALTER COLUMN ... SET DEFAULT 0` (necessário no caminho `create_all`, onde o `ADD` é no-op e
+a coluna nasce sem default no banco — *server-default trap*; sem ele o seed que omite a
+coluna violaria NOT NULL). Num banco existente o `ADD ... NOT NULL DEFAULT 0` preenche as
+linhas com 0 (sem backfill manual). **Downgrade** dropa as duas colunas (`IF EXISTS`).
+
+Testada localmente: `upgrade head → downgrade -1 → upgrade head` (colunas somem e voltam
+com tipo/precisão/default corretos), `alembic check` limpo (*No new upgrade operations
+detected*), `reset_db` OK. O seed ganhou a **Venda 4** (NF-0004): subtotal R$ 12.000,00 com
+desconto de 10 (`discount_percent`=10,00 / `discount_amount`=1.200,00) → total líquido R$
+10.800,00; a NF e a conta a receber (AR-0007) refletem o líquido. A aplicação do desconto no
+`create_sale` e a propagação para a **nota** (coluna/linha de desconto na invoice) são da
+etapa **Backend** da D9.C.
 
 ---
 

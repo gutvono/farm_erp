@@ -1,4 +1,5 @@
 from datetime import datetime
+from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
@@ -78,3 +79,20 @@ class HarvestDestinationsOut(BaseModel):
     industria_item_id: Optional[UUID] = None
     embalagem_item_id: Optional[UUID] = None
     descarte_item_id: Optional[UUID] = None
+
+
+# ---------------------------------------------------------------------------
+# Encargos de atraso (multa/juros) — app_settings (Demanda 9.B)
+# ---------------------------------------------------------------------------
+
+
+class EncargosOut(BaseModel):
+    """Taxas de encargo por atraso (percentuais)."""
+
+    multa_atraso_percent: Decimal
+    juros_mora_mensal_percent: Decimal
+
+
+class EncargosUpdate(BaseModel):
+    multa_atraso_percent: Decimal = Field(ge=0)
+    juros_mora_mensal_percent: Decimal = Field(ge=0)
