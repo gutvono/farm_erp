@@ -2,7 +2,7 @@
 
 ## Visão Geral
 
-Página principal do sistema que exibe KPIs consolidados e gráfico de fluxo de caixa. Busca dados via `getDashboard()` ao montar e oferece botão de atualização manual.
+Página principal do sistema que exibe KPIs consolidados e gráfico de fluxo de caixa. Busca dados via `getDashboard()` ao montar e oferece botão de atualização manual. No topo, um **headline de vendas do mês corrente** (Demanda 10) dá a visão rápida do comercial antes dos KPIs cross-módulo.
 
 ## Arquivos
 
@@ -11,8 +11,8 @@ Página principal do sistema que exibe KPIs consolidados e gráfico de fluxo de 
 | `app/(modules)/dashboard/page.tsx` | Page | Página principal do dashboard |
 | `components/modules/dashboard/KPICard.tsx` | Componente | Card reutilizável de KPI |
 | `components/modules/dashboard/CashFlowChart.tsx` | Componente | Gráfico de barras de fluxo de caixa |
-| `services/dashboard.ts` | Service | Orquestra chamada à API do dashboard |
-| `types/index.ts` | Tipos | `DashboardKPIs`, `CashFlowPoint`, `DashboardData` |
+| `services/dashboard.ts` | Service | Orquestra chamada à API do dashboard (converte os KPIs de vendas para `number`) |
+| `types/index.ts` | Tipos | `DashboardKPIs` (inclui `sales_revenue_month`, `sales_count_month`, `sales_ticket_month`), `CashFlowPoint`, `DashboardData` |
 
 ## Componentes
 
@@ -58,7 +58,19 @@ Backend GET /api/dashboard/
 |--------|---------------|
 | `loading=true` | Grid de 8 skeleton cards + skeleton do gráfico |
 | `error!=null` | Mensagem de erro + botão "Tentar novamente" |
-| `data!=null` | 8 KPI cards + gráfico + rodapé com timestamp |
+| `data!=null` | Headline de vendas (3 cards) + 8 KPI cards + gráfico + rodapé com timestamp |
+
+## Headline de Vendas do Mês (Demanda 10)
+
+Logo abaixo do título da página, antes dos KPIs gerais, aparece a seção **"Vendas do mês — [mês/ano]"** com 3 cards (mesmo `KPICard`):
+
+| Card | Valor | Ícone |
+|------|-------|-------|
+| Faturamento de Vendas | `formatCurrency(kpis.sales_revenue_month)` | Receipt |
+| Vendas no Mês | `N venda(s)` (`kpis.sales_count_month`) | ShoppingCart |
+| Ticket Médio | `formatCurrency(kpis.sales_ticket_month)` | Calculator |
+
+São o **faturamento líquido**, o **nº de vendas** (canceladas fora) e o **ticket médio** do **mês corrente**. Em um mês sem vendas, os cards mostram `R$ 0,00` / `0 vendas` / `R$ 0,00` — não é erro, é a foto do mês. Para análise por período, use a aba **Relatórios** no Comercial.
 
 ## KPIs Exibidos
 

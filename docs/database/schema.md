@@ -1047,9 +1047,11 @@ etapa Backend.
 
 ### Venda — desconto de cabeçalho (Demanda 9.C)
 
-**Head atual: `0023_sale_discount`.**
+**Head atual: `0025_sale_discount`.** (Os IDs `0022`/`0023` desta migration em revisões
+anteriores deste doc foram **renumerados** para `0024`/`0025` ao integrar a cadeia da Folha
+— `0022_folha_benefits`, `0023_folha_irrf_event` — entre `0021_client_address` e esta.)
 
-**`0023_sale_discount`** (`down_revision` `0022_fin_cat_juros_multa`) — adiciona em `sales`
+**`0025_sale_discount`** (`down_revision` `0024_fin_cat_juros_multa`) — adiciona em `sales`
 duas colunas para o **desconto de cabeçalho** (sobre o total da venda, não por item):
 `discount_percent` `NUMERIC(5,2) NOT NULL DEFAULT 0` (percentual informado) e
 `discount_amount` `NUMERIC(12,2) NOT NULL DEFAULT 0` (valor em R$). Modelo ERP correto: o
@@ -1069,6 +1071,59 @@ desconto de 10 (`discount_percent`=10,00 / `discount_amount`=1.200,00) → total
 10.800,00; a NF e a conta a receber (AR-0007) refletem o líquido. A aplicação do desconto no
 `create_sale` e a propagação para a **nota** (coluna/linha de desconto na invoice) são da
 etapa **Backend** da D9.C.
+
+### Relatório de Vendas por período (Demanda 10) — **sem mudança estrutural**
+
+**Head permanece `0025_sale_discount` — esta demanda não criou migration.** O Relatório de
+Vendas (operacional + recebíveis) é puramente **analítico/agregação sobre o schema existente**;
+a etapa DBA confirmou que o modelo já suporta todas as agregações, **sem novas colunas/tabelas**:
+
+- **Operacional** (`sales` + `sale_items`): faturamento, nº de vendas, ticket médio, série
+  temporal e por status, mix à vista×parcelado, top produtos e top clientes. Período filtra por
+  `sales.sold_at` (já indexado por `idx_sales_sold_at`); valor líquido já em `sales.total_amount`
+  (com `discount_amount` à parte); produto/quantidade/receita em `sale_items`
+  (`stock_item_id`, `quantity`, `subtotal`); cliente em `sales.client_id`.
+- **Recebíveis** (`accounts_receivable`): recebido × a receber no período e inadimplência em R$
+  (aging) saem de `amount`, `amount_received`, `due_date` (indexado), `received_at`, `status`,
+  `client_id`. Regra de arquitetura da D10: o relatório lê os recebíveis **via service do
+  Financeiro**, nunca consultando `invoices` direto.
+
+**Índice `received_at`:** avaliado e **decidido NÃO criar** `idx_ar_received_at`. A agregação
+"recebido no período" filtra por `received_at`, mas o volume é trivial (seed ~13 linhas; mesmo
+em produção este ERP de fazenda única é de baixa cardinalidade) → o planejador faz *seq scan* de
+tabela pequena de qualquer forma, e o relatório roda sob demanda (não é *hot path*). Um índice
+aqui seria otimização prematura, somando superfície de migration sem ganho mensurável. **Se** o
+volume crescer materialmente no futuro, o passo certo é um índice **parcial**
+`... (received_at) WHERE received_at IS NOT NULL` (a maioria das AR fica em aberto).
+
+**`financial_movements`/saldo — intencionalmente NÃO alterados.** O relatório lê `sales` e
+`accounts_receivable`; os movimentos financeiros (fonte do saldo) não são lidos por ele. O seed
+atual já desacopla uma AR quitada de um movimento (AR-0004, R$1.000, sem `recebimento`), então
+replicar movimentos para as AR novas só aumentaria a assimetria e arriscaria o saldo projetado
+afinado (R$ 105.356,67) de que os smokes de dashboard/financeiro dependem. Coerência de caixa
+real é responsabilidade do fluxo `create_sale`/baixa, não desta massa de demonstração.
+
+#### Massa de seed de demonstração (D10)
+
+Para o relatório ter o que mostrar, o `seed.sql` foi enriquecido **sem quebrar** a base D9
+(Vendas 1–4 / NF-0001..0004 / AR-0001..0007 intactas). Adicionadas **Vendas 5–9** (→ 9 vendas,
+9 NFs, 13 AR), mantendo o fluxo D9 (1 NF + N AR; soma das AR = `total_amount` da venda):
+
+| Venda | Mês `sold_at` | Cliente | Status | Pgto | Total | Recebível |
+|------|------|---------|--------|------|------|-----------|
+| 5 | jan/26 | Cafeteria Grão Fino | entregue | à vista | 8.000 | AR-0008 **quitada** (`received_at` 20/01) |
+| 6 | jan/26 | Mercearia Dona Rita | **cancelada** | à vista | 4.500 | AR-0009 cancelada (fora dos totais) |
+| 7 | mai/26 | Aroma do Cerrado | realizada | **parcelado 2x** | 16.250 | AR-0010 quitada (22/05) + AR-0011 **a vencer** (20/06) |
+| 8 | mai/26 | Cafeteria Grão Fino | entregue | à vista | 15.600 | AR-0012 **quitada** (24/05) — 2 produtos |
+| 9 | mar/26 | Mercearia Dona Rita | realizada | à vista | 2.700 | AR-0013 **vencida** (28/04) → inadimplência |
+
+Cobertura resultante (provada por SELECT em `reset-db`): **série temporal em 5 meses**
+(jan..mai/26), **status** realizada(5)/entregue(3)/cancelada(1), **mix** à vista(6)×parcelado(2),
+**3 produtos** distintos (CAFE-ESP/SUP/TRA) em top-produtos, **3 clientes** em top-clientes, e
+**recebíveis nas 4 situações**: quitada com `received_at` (5), em aberto a vencer (2), em aberto
+vencida (4) e cancelada (2) — inadimplência em R$ por cliente derivável das vencidas. *Stock
+movements não foram tocados* (o relatório não lê estoque; segue o padrão das NF-0003/0004 da D9,
+que também não geram saída de estoque no seed).
 
 ---
 

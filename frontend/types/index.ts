@@ -51,6 +51,12 @@ export interface DashboardKPIs {
   low_stock_items: number
   open_production_orders: number
   defaulter_clients: number
+  /** Headline de vendas do mês corrente (Demanda 10): faturamento líquido. */
+  sales_revenue_month: number
+  /** Nº de vendas (não canceladas) no mês corrente. */
+  sales_count_month: number
+  /** Ticket médio do mês corrente (0 sem vendas). */
+  sales_ticket_month: number
 }
 
 export interface CashFlowPoint {
@@ -501,6 +507,88 @@ export interface Sale {
   items: SaleItem[]
   created_at: string
   updated_at: string
+}
+
+// ── RELATÓRIO DE VENDAS (Demanda 10) ──────────────────────────────────────────
+
+/** Granularidade da série temporal do relatório. */
+export type SalesGranularity = "day" | "week" | "month"
+
+/** KPIs de topo do relatório (faturamento/ticket líquidos; canceladas fora). */
+export interface SalesReportKPIs {
+  faturamento: number
+  num_vendas: number
+  ticket_medio: number
+}
+
+/** Vendas por status (inclui `cancelada`). */
+export interface SalesStatusItem {
+  status: string
+  count: number
+  total: number
+}
+
+/** Mix de pagamento: `a_vista` | `parcelado` (installments > 1). */
+export interface SalesMixItem {
+  category: string
+  count: number
+  total: number
+}
+
+/** Ponto da série temporal (período conforme a granularidade). */
+export interface SalesTimeseriesItem {
+  period: string
+  count: number
+  total: number
+}
+
+export interface TopProductItem {
+  stock_item_id: string
+  name: string
+  quantity: number
+  total: number
+}
+
+export interface TopClientItem {
+  client_id: string
+  name: string
+  num_vendas: number
+  total: number
+}
+
+/** Faixa de aging por dias de atraso, com o saldo vencido acumulado. */
+export interface AgingBucket {
+  /** "1-30" | "31-60" | "61-90" | "90+" */
+  bucket: string
+  amount: number
+}
+
+/**
+ * Fatia de recebíveis do relatório. `received_in_period`/`to_receive_in_period`
+ * são do período; `overdue_total` e `aging` são **foto de hoje** (inadimplência
+ * atual, não limitada ao período do relatório).
+ */
+export interface ReceivablesReport {
+  start: string
+  end: string
+  received_in_period: number
+  to_receive_in_period: number
+  overdue_total: number
+  aging: AgingBucket[]
+}
+
+/** Relatório de Vendas por período (operacional + recebíveis). */
+export interface SalesReport {
+  start: string
+  end: string
+  granularity: string
+  kpis: SalesReportKPIs
+  by_status: SalesStatusItem[]
+  mix: SalesMixItem[]
+  timeseries: SalesTimeseriesItem[]
+  top_products: TopProductItem[]
+  top_clients: TopClientItem[]
+  receivables: ReceivablesReport
 }
 
 // ── FATURAMENTO ───────────────────────────────────────────────────────────────

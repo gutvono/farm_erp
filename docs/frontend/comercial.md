@@ -2,14 +2,14 @@
 
 ## Visão Geral
 
-Página única com 2 abas (Tabs shadcn): **Vendas** e **Clientes**. O cadastro de cliente
+Página única com 3 abas (Tabs shadcn): **Vendas**, **Clientes** e **Relatórios**. O cadastro de cliente
 está em paridade com o de fornecedor (Demanda 7): valida CPF/CNPJ e tem endereço
 estruturado com busca automática por CEP (ViaCEP). Vendas são criadas com itens
 dinâmicos de café e avisam quando o cliente está inadimplente. O cancelamento de venda
 é uma **ação dedicada** ("Cancelar venda") que estorna estoque e financeiro — deixou de
 ser uma simples troca de status.
 
-[SCREENSHOT: aba Comercial com as duas abas (Vendas / Clientes)]
+[SCREENSHOT: aba Comercial com as três abas (Vendas / Clientes / Relatórios)]
 
 > **Demanda 8 — listas viraram tabelas paginadas.** As duas abas, que antes eram cartões
 > empilhados, agora são **tabelas** (shadcn) com **paginação no servidor** (Anterior/Próxima),
@@ -46,7 +46,7 @@ ser uma simples troca de status.
 | Arquivo | Tipo | Descrição |
 |---------|------|-----------|
 | `app/(modules)/comercial/page.tsx` | Page | Abas; orquestra hooks de tabela + formulários; mantém a lista completa de clientes para o seletor da venda |
-| `services/comercial.ts` | Service | `/api/comercial/*`; helpers ARRAY (seletores) + `getClientesPaginated`/`getVendasPaginated`; `cancelarVenda` |
+| `services/comercial.ts` | Service | `/api/comercial/*`; helpers ARRAY (seletores) + `getClientesPaginated`/`getVendasPaginated`; `cancelarVenda`; `getRelatorioVendas` (Demanda 10) |
 | `services/cep.ts` | Service | `lookupCep` (ViaCEP) — reusado do Compras (D6) |
 | `lib/br-documents.ts` | Util | `validateDocument`, `maskDocument`, `maskCep`, `onlyDigits` — reusado do Compras (D6) |
 | `lib/use-debounced-value.ts` | Hook | Debounce da busca textual das tabelas (Demanda 8) |
@@ -57,6 +57,7 @@ ser uma simples troca de status.
 | `components/modules/comercial/ClienteForm.tsx` | Componente | Dialog (criar/editar) com RHF + Zod, validação de documento e endereço + ViaCEP |
 | `components/modules/comercial/VendaForm.tsx` | Componente | Dialog com aviso + confirmação de inadimplência, itens dinâmicos, subtotais e total |
 | `components/modules/comercial/VendaCard.tsx` | Componente | Detalhe da venda (reusado no painel): "Cancelar venda", "Ver notas fiscais", troca de status |
+| `components/modules/comercial/RelatoriosVendas.tsx` | Componente | Aba Relatórios (Demanda 10): filtro de período + KPIs, gráfico recharts, tabelas de status/mix/top/recebíveis |
 
 ## Cadastrar / editar cliente
 
@@ -100,6 +101,40 @@ Mensagens: "Cliente criado com sucesso" / "Cliente atualizado com sucesso".
 - Toggle "Apenas inadimplentes" filtra via `getClientes(true)`
 - Botão "Novo Cliente" abre `ClienteForm`
 - Lista de `ClienteRow`
+
+### 3. Relatórios
+- Abre o **Relatório de Vendas** por período (`RelatoriosVendas`) — ver a seção abaixo.
+
+## Relatórios de Vendas (aba "Relatórios" — Demanda 10)
+
+A aba **Relatórios** mostra o desempenho das vendas em um período escolhido. Ao abrir, já
+vem preenchida com o ano corrente (de **1º de janeiro** até **hoje**) e granularidade
+**Mês** — então o relatório aparece sozinho, sem precisar clicar em nada.
+
+### Como filtrar o período
+1. No card **"Período"**, escolha a data de **Início** e a data de **Fim**.
+2. Em **Granularidade**, escolha como o gráfico agrupa o tempo: **Dia**, **Semana** ou **Mês**.
+3. Clique em **"Gerar"**. O botão mostra "Gerando..." enquanto carrega.
+   - Se a data de **Início** for **maior** que a de **Fim**, aparece o aviso *"A data inicial
+     não pode ser maior que a data final"* e nada é gerado.
+
+### O que cada seção mostra
+- **KPIs** (3 cartões): **Faturamento** (líquido, sem as canceladas), **Nº de Vendas** e
+  **Ticket Médio** do período.
+- **Evolução do Faturamento** (gráfico de barras): faturamento por período conforme a
+  granularidade. Passe o mouse numa barra para ver o valor e o nº de vendas daquele ponto.
+- **Vendas por Status**: quantidade e total por status (Realizada, Entregue, Cancelada —
+  as canceladas aparecem **aqui**, mas ficam fora do faturamento dos KPIs).
+- **Mix de Pagamento**: divisão entre **À vista** e **Parcelado** (quantidade e total).
+- **Top Produtos** e **Top Clientes**: os que mais venderam no período (quantidade/nº de
+  vendas e total em R$).
+- **Recebíveis**: **Recebido no período** × **A receber no período**, e a **Inadimplência
+  (hoje)** com a tabela de **aging** (faixas de atraso 1-30 / 31-60 / 61-90 / 90+).
+  - ⚠️ A nota ao pé deixa claro: **recebido/a receber** são do **período**; **inadimplência
+    e aging** são uma **foto de hoje** (todas as parcelas vencidas em aberto), não se limitam
+    ao período do filtro.
+
+[SCREENSHOT: aba Relatórios com os KPIs e o gráfico de Evolução do Faturamento]
 
 ## Vender — aviso de inadimplência (avisar, não bloquear)
 

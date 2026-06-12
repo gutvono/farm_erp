@@ -22,6 +22,7 @@ from app.modules.financeiro.schemas import (
     AccountReceivableCreate,
     AccountReceivableOut,
     AccountReceivableUpdate,
+    AgingBucketOut,
     BalanceOut,
     BoletoPaymentInfo,
     CashFlowItem,
@@ -31,6 +32,7 @@ from app.modules.financeiro.schemas import (
     FinancialMovementCreate,
     FinancialMovementOut,
     PixPaymentInfo,
+    ReceivablesReportOut,
 )
 from app.shared.pagination import Page, PageParams
 from app.shared.enums import (
@@ -955,6 +957,59 @@ def list_defaulters(db: Session) -> list[DefaulterItem]:
         )
         for receivable, client in receivables
     ]
+
+
+def get_receivables_report(
+    db: Session, *, start: date, end: date
+) -> ReceivablesReportOut:
+    """Agrega a fatia de recebíveis por período (Demanda 10). É o ponto de
+    integração consumido pelo Comercial (que NÃO lê `accounts_receivable`
+    direto — regra de arquitetura travada).
+
+    - ``received_in_period``: Σ amount_received de AR com received_at ∈ [start, end];
+    - ``to_receive_in_period``: Σ saldo de AR em aberto com due_date ∈ [start, end];
+    - ``overdue_total`` + ``aging``: AR vencidas (due_date < hoje, em aberto,
+      reusando a def. derivada da 9.A ``_receivable_is_overdue``) — foto de
+      inadimplência **na data de hoje**, não limitada ao período do relatório.
+    """
+    received = fin_repo.sum_received_between(db, start, end)
+    to_receive = fin_repo.sum_open_due_between(db, start, end)
+
+    today = date.today()
+    buckets = {
+        "1-30": Decimal("0"),
+        "31-60": Decimal("0"),
+        "61-90": Decimal("0"),
+        "90+": Decimal("0"),
+    }
+    overdue_total = Decimal("0")
+    for ar in fin_repo.list_overdue_receivables(db, today):
+        if not _receivable_is_overdue(ar, today):
+            continue
+        saldo = Decimal(ar.amount) - Decimal(ar.amount_received)
+        dias_atraso = (today - ar.due_date).days
+        if dias_atraso <= 30:
+            key = "1-30"
+        elif dias_atraso <= 60:
+            key = "31-60"
+        elif dias_atraso <= 90:
+            key = "61-90"
+        else:
+            key = "90+"
+        buckets[key] += saldo
+        overdue_total += saldo
+
+    aging = [
+        AgingBucketOut(bucket=k, amount=_quantize(v)) for k, v in buckets.items()
+    ]
+    return ReceivablesReportOut(
+        start=start,
+        end=end,
+        received_in_period=_quantize(received),
+        to_receive_in_period=_quantize(to_receive),
+        overdue_total=_quantize(overdue_total),
+        aging=aging,
+    )
 
 
 # ---------------------------------------------------------------------------

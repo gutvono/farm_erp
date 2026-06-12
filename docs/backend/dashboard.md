@@ -48,7 +48,10 @@ Todos os endpoints exigem autenticação via cookie `session_token` (dependency 
     "pending_receivables": 3,
     "low_stock_items": 3,
     "open_production_orders": 0,
-    "defaulter_clients": 1
+    "defaulter_clients": 1,
+    "sales_revenue_month": 12700.00,
+    "sales_count_month": 1,
+    "sales_ticket_month": 12700.00
   },
   "cash_flow": [
     { "month": "11/2025", "income": 0.0, "expenses": 0.0 },
@@ -84,8 +87,20 @@ Nota: o campo do model é `is_read`; a API expõe como `read` para maior clareza
 | `low_stock_items` | `COUNT(*) WHERE quantity_on_hand < minimum_stock AND deleted_at IS NULL` em `stock_items` |
 | `open_production_orders` | `COUNT(*) WHERE status IN ('planejada','em_producao') AND deleted_at IS NULL` em `production_orders` |
 | `defaulter_clients` | `COUNT(*) WHERE is_delinquent=True AND deleted_at IS NULL` em `clients` |
+| `sales_revenue_month` | Faturamento de vendas do **mês corrente** (Σ `sales.total_amount`, NÃO canceladas) |
+| `sales_count_month` | Nº de vendas do mês corrente (NÃO canceladas) |
+| `sales_ticket_month` | Ticket médio do mês = `sales_revenue_month / sales_count_month` (0 sem vendas) |
 
-Cada KPI é uma query agregada independente sem JOIN, garantindo performance mesmo com volume de dados.
+Cada KPI financeiro/estoque é uma query agregada independente sem JOIN, garantindo performance mesmo com volume de dados.
+
+### Headline de vendas do mês (Demanda 10)
+
+Os três KPIs `sales_*_month` são o **headline de vendas** do dashboard. Eles **não**
+reimplementam SQL aqui: o `dashboard.service.get_dashboard` chama
+`comercial.service.get_current_month_sales_kpis(db)` — a **mesma** agregação que alimenta
+o Relatório de Vendas (`sales_summary` por `sold_at` no mês corrente, canceladas fora). Assim
+o headline e a tela de Relatórios nunca divergem. Valores líquidos (sobre `total_amount`,
+pós-desconto D9); `sales_ticket_month = 0` quando não há vendas no mês (sem divisão por zero).
 
 ## Fluxo de Caixa
 

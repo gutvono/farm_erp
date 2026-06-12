@@ -50,6 +50,11 @@ class DashboardKPIs(BaseModel):
     low_stock_items: int
     open_production_orders: int
     defaulter_clients: int
+    # Headline de vendas do mês corrente (Demanda 10). Computados pela agregação
+    # do Comercial (não reimplementam SQL aqui). `sales_ticket_month` = 0 sem vendas.
+    sales_revenue_month: float = 0.0
+    sales_count_month: int = 0
+    sales_ticket_month: float = 0.0
 
 
 class CashFlowPoint(BaseModel):

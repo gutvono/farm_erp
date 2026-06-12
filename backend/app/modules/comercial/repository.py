@@ -1,9 +1,9 @@
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from sqlalchemy import or_
+from sqlalchemy import case, func, or_
 from sqlalchemy.orm import Session
 
 from app.modules.comercial.model import Client, Sale, SaleItem
@@ -266,3 +266,155 @@ def _load_relations(db: Session, sale: Sale) -> None:
         stock_map = {s.id: s for s in rows}
     for item in sale.items:
         item.__dict__["stock_item"] = stock_map.get(item.stock_item_id)
+
+
+# ---------------------------------------------------------------------------
+# Sales report aggregations (Demanda 10 — fatia operacional)
+# ---------------------------------------------------------------------------
+#
+# Período filtrado por `sold_at` (cast a data). Vendas canceladas ficam FORA de
+# todas as agregações de total (faturamento, ticket, mix, séries, tops); só a
+# quebra por status (`sales_by_status`) as inclui. Sempre `deleted_at IS NULL`.
+
+
+def _period_filter(start: date, end: date) -> list:
+    return [
+        Sale.deleted_at.is_(None),
+        func.date(Sale.sold_at) >= start,
+        func.date(Sale.sold_at) <= end,
+    ]
+
+
+def _not_cancelled():
+    return Sale.status != SaleStatus.CANCELADA
+
+
+def _period_expr(granularity: str):
+    """Expressão SQL do rótulo de período da série temporal por granularidade."""
+    g = (granularity or "month").lower()
+    if g == "day":
+        return func.to_char(Sale.sold_at, "YYYY-MM-DD")
+    if g == "week":
+        return func.to_char(func.date_trunc("week", Sale.sold_at), "YYYY-MM-DD")
+    return func.to_char(Sale.sold_at, "YYYY-MM")
+
+
+def sales_summary(db: Session, *, start: date, end: date) -> tuple[Decimal, int]:
+    """Faturamento (Σ total_amount, já líquido pós-desconto D9) e nº de vendas
+    NÃO canceladas no período."""
+    row = (
+        db.query(
+            func.coalesce(func.sum(Sale.total_amount), 0),
+            func.count(Sale.id),
+        )
+        .filter(*_period_filter(start, end), _not_cancelled())
+        .one()
+    )
+    return Decimal(row[0]), int(row[1])
+
+
+def sales_by_status(
+    db: Session, *, start: date, end: date
+) -> list[tuple[str, int, Decimal]]:
+    """Quebra por status no período — única agregação que INCLUI canceladas."""
+    rows = (
+        db.query(
+            Sale.status,
+            func.count(Sale.id),
+            func.coalesce(func.sum(Sale.total_amount), 0),
+        )
+        .filter(*_period_filter(start, end))
+        .group_by(Sale.status)
+        .all()
+    )
+    return [
+        (getattr(status, "value", status), int(count), Decimal(total))
+        for status, count, total in rows
+    ]
+
+
+def sales_mix(
+    db: Session, *, start: date, end: date
+) -> list[tuple[str, int, Decimal]]:
+    """Mix à vista × parcelado (parcelado = `installments > 1`), NÃO canceladas."""
+    categoria = case((Sale.installments > 1, "parcelado"), else_="a_vista")
+    rows = (
+        db.query(
+            categoria.label("categoria"),
+            func.count(Sale.id),
+            func.coalesce(func.sum(Sale.total_amount), 0),
+        )
+        .filter(*_period_filter(start, end), _not_cancelled())
+        .group_by(categoria)
+        .all()
+    )
+    return [(cat, int(count), Decimal(total)) for cat, count, total in rows]
+
+
+def sales_timeseries(
+    db: Session, *, start: date, end: date, granularity: str = "month"
+) -> list[tuple[str, int, Decimal]]:
+    """Série temporal de faturamento/contagem por granularidade, NÃO canceladas."""
+    period = _period_expr(granularity)
+    rows = (
+        db.query(
+            period.label("period"),
+            func.count(Sale.id),
+            func.coalesce(func.sum(Sale.total_amount), 0),
+        )
+        .filter(*_period_filter(start, end), _not_cancelled())
+        .group_by(period)
+        .order_by(period)
+        .all()
+    )
+    return [(prd, int(count), Decimal(total)) for prd, count, total in rows]
+
+
+def top_products(
+    db: Session, *, start: date, end: date, limit: int = 5
+) -> list[tuple[UUID, str, Decimal, Decimal]]:
+    """Top produtos por faturamento (Σ subtotal, a preço de tabela) e quantidade,
+    a partir de `sale_items` de vendas NÃO canceladas."""
+    rows = (
+        db.query(
+            SaleItem.stock_item_id,
+            StockItem.name,
+            func.coalesce(func.sum(SaleItem.quantity), 0),
+            func.coalesce(func.sum(SaleItem.subtotal), 0),
+        )
+        .join(Sale, Sale.id == SaleItem.sale_id)
+        .outerjoin(StockItem, StockItem.id == SaleItem.stock_item_id)
+        .filter(*_period_filter(start, end), _not_cancelled())
+        .group_by(SaleItem.stock_item_id, StockItem.name)
+        .order_by(func.coalesce(func.sum(SaleItem.subtotal), 0).desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        (stock_item_id, name or "", Decimal(qty), Decimal(total))
+        for stock_item_id, name, qty, total in rows
+    ]
+
+
+def top_clients(
+    db: Session, *, start: date, end: date, limit: int = 5
+) -> list[tuple[UUID, str, int, Decimal]]:
+    """Top clientes por faturamento (Σ total_amount) e nº de vendas NÃO canceladas."""
+    rows = (
+        db.query(
+            Sale.client_id,
+            Client.name,
+            func.count(Sale.id),
+            func.coalesce(func.sum(Sale.total_amount), 0),
+        )
+        .outerjoin(Client, Client.id == Sale.client_id)
+        .filter(*_period_filter(start, end), _not_cancelled())
+        .group_by(Sale.client_id, Client.name)
+        .order_by(func.coalesce(func.sum(Sale.total_amount), 0).desc())
+        .limit(limit)
+        .all()
+    )
+    return [
+        (client_id, name or "", int(count), Decimal(total))
+        for client_id, name, count, total in rows
+    ]

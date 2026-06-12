@@ -7,6 +7,8 @@ import {
   PaymentMethod,
   Sale,
   SaleItem,
+  SalesGranularity,
+  SalesReport,
   SaleStatus,
 } from "@/types/index"
 
@@ -320,4 +322,108 @@ export async function cancelarVenda(id: string, reason?: string): Promise<Sale> 
     }
   )
   return parseSale(response.data)
+}
+
+// ── Relatório de Vendas (Demanda 10) ──────────────────────────────────────────
+
+interface RawSalesReport {
+  start: string
+  end: string
+  granularity: string
+  kpis: {
+    faturamento: string | number
+    num_vendas: number
+    ticket_medio: string | number
+  }
+  by_status: { status: string; count: number; total: string | number }[]
+  mix: { category: string; count: number; total: string | number }[]
+  timeseries: { period: string; count: number; total: string | number }[]
+  top_products: {
+    stock_item_id: string
+    name: string
+    quantity: string | number
+    total: string | number
+  }[]
+  top_clients: {
+    client_id: string
+    name: string
+    num_vendas: number
+    total: string | number
+  }[]
+  receivables: {
+    start: string
+    end: string
+    received_in_period: string | number
+    to_receive_in_period: string | number
+    overdue_total: string | number
+    aging: { bucket: string; amount: string | number }[]
+  }
+}
+
+function parseSalesReport(raw: RawSalesReport): SalesReport {
+  return {
+    start: raw.start,
+    end: raw.end,
+    granularity: raw.granularity,
+    kpis: {
+      faturamento: toNumber(raw.kpis.faturamento),
+      num_vendas: raw.kpis.num_vendas,
+      ticket_medio: toNumber(raw.kpis.ticket_medio),
+    },
+    by_status: (raw.by_status ?? []).map((s) => ({
+      status: s.status,
+      count: s.count,
+      total: toNumber(s.total),
+    })),
+    mix: (raw.mix ?? []).map((m) => ({
+      category: m.category,
+      count: m.count,
+      total: toNumber(m.total),
+    })),
+    timeseries: (raw.timeseries ?? []).map((t) => ({
+      period: t.period,
+      count: t.count,
+      total: toNumber(t.total),
+    })),
+    top_products: (raw.top_products ?? []).map((p) => ({
+      stock_item_id: p.stock_item_id,
+      name: p.name,
+      quantity: toNumber(p.quantity),
+      total: toNumber(p.total),
+    })),
+    top_clients: (raw.top_clients ?? []).map((c) => ({
+      client_id: c.client_id,
+      name: c.name,
+      num_vendas: c.num_vendas,
+      total: toNumber(c.total),
+    })),
+    receivables: {
+      start: raw.receivables.start,
+      end: raw.receivables.end,
+      received_in_period: toNumber(raw.receivables.received_in_period),
+      to_receive_in_period: toNumber(raw.receivables.to_receive_in_period),
+      overdue_total: toNumber(raw.receivables.overdue_total),
+      aging: (raw.receivables.aging ?? []).map((a) => ({
+        bucket: a.bucket,
+        amount: toNumber(a.amount),
+      })),
+    },
+  }
+}
+
+/**
+ * Relatório de Vendas por período (`GET /api/comercial/relatorios/vendas`).
+ * `start`/`end` no formato `YYYY-MM-DD`; `granularity` controla a série temporal.
+ * Decimais chegam como string (Decimal do backend) e são convertidos para number.
+ */
+export async function getRelatorioVendas(params: {
+  start: string
+  end: string
+  granularity: SalesGranularity
+}): Promise<SalesReport> {
+  const response = await apiFetch<ApiResponse<RawSalesReport>>(
+    "/api/comercial/relatorios/vendas",
+    { params }
+  )
+  return parseSalesReport(response.data)
 }

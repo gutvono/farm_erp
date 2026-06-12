@@ -503,3 +503,55 @@ def count_delinquent_receivables_by_client(db: Session, client_id: UUID) -> int:
         .scalar()
         or 0
     )
+
+
+# ---------------------------------------------------------------------------
+# Receivables aggregations (Demanda 10 — fatia de recebíveis do Relatório de Vendas)
+# ---------------------------------------------------------------------------
+
+
+def sum_received_between(db: Session, start: date, end: date) -> Decimal:
+    """Σ ``amount_received`` de AR (não canceladas) com ``received_at`` no período
+    [start, end] (inclusive, comparado por data). Reflete parcelas efetivamente
+    recebidas/quitadas no intervalo."""
+    total = (
+        db.query(func.coalesce(func.sum(AccountReceivable.amount_received), 0))
+        .filter(
+            AccountReceivable.deleted_at.is_(None),
+            AccountReceivable.status != AccountReceivableStatus.CANCELADA,
+            AccountReceivable.received_at.isnot(None),
+            func.date(AccountReceivable.received_at) >= start,
+            func.date(AccountReceivable.received_at) <= end,
+        )
+        .scalar()
+    )
+    return Decimal(total)
+
+
+def sum_open_due_between(db: Session, start: date, end: date) -> Decimal:
+    """Σ saldo (``amount − amount_received``) de AR **em aberto** (não cancelada,
+    saldo > 0) com ``due_date`` no período [start, end]."""
+    saldo = AccountReceivable.amount - AccountReceivable.amount_received
+    total = (
+        db.query(func.coalesce(func.sum(saldo), 0))
+        .filter(
+            AccountReceivable.deleted_at.is_(None),
+            AccountReceivable.status != AccountReceivableStatus.CANCELADA,
+            AccountReceivable.amount_received < AccountReceivable.amount,
+            AccountReceivable.due_date >= start,
+            AccountReceivable.due_date <= end,
+        )
+        .scalar()
+    )
+    return Decimal(total)
+
+
+def list_overdue_receivables(db: Session, today: date) -> list[AccountReceivable]:
+    """AR vencidas (Demanda 9.A: ``due_date < hoje``, saldo em aberto, não
+    cancelada — reusa ``_overdue_filter``). Base para a inadimplência em R$ + aging."""
+    return (
+        db.query(AccountReceivable)
+        .filter(*_overdue_filter(today))
+        .order_by(AccountReceivable.due_date.asc())
+        .all()
+    )

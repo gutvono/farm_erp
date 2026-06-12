@@ -238,3 +238,33 @@ class DefaulterItem(BaseModel):
     due_date: date
 
     model_config = ConfigDict(from_attributes=True)
+
+
+# ---------------------------------------------------------------------------
+# Receivables report (Demanda 10 — consumido pelo Comercial via Service)
+# ---------------------------------------------------------------------------
+
+
+class AgingBucketOut(BaseModel):
+    """Faixa de aging por dias de atraso, com o saldo vencido acumulado."""
+
+    bucket: str  # "1-30" | "31-60" | "61-90" | "90+"
+    amount: Decimal
+
+
+class ReceivablesReportOut(BaseModel):
+    """Fatia de recebíveis do Relatório de Vendas (Demanda 10). Lida **via service
+    do Financeiro** (regra de arquitetura travada: o Comercial é consumidor, não
+    consulta `accounts_receivable` direto).
+
+    - `received_in_period`: Σ amount_received de AR com received_at ∈ [start, end];
+    - `to_receive_in_period`: Σ saldo de AR em aberto com due_date ∈ [start, end];
+    - `overdue_total` + `aging`: AR vencidas (due_date < hoje, em aberto) — foto de
+      inadimplência **na data de hoje**, NÃO limitada ao período do relatório."""
+
+    start: date
+    end: date
+    received_in_period: Decimal
+    to_receive_in_period: Decimal
+    overdue_total: Decimal
+    aging: list[AgingBucketOut]
