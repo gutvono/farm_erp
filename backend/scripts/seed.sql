@@ -186,7 +186,26 @@ INSERT INTO app_settings (id, key, value) VALUES
 ('88888888-8888-8888-8888-888888880002', 'harvest_destination_embalagem_item_id', '55555555-5555-5555-5555-555555555001'),
 ('88888888-8888-8888-8888-888888880003', 'harvest_destination_descarte_item_id',  '55555555-5555-5555-5555-555555555031'),
 ('88888888-8888-8888-8888-888888880004', 'multa_atraso_percent',                  '2'),
-('88888888-8888-8888-8888-888888880005', 'juros_mora_mensal_percent',             '1')
+('88888888-8888-8888-8888-888888880005', 'juros_mora_mensal_percent',             '1'),
+-- Emitente da fazenda (D11.1): dados exibidos no cabeçalho da NF de venda.
+('88888888-8888-8888-8888-888888880006', 'emitter_legal_name',          'Fazenda Santa Esperança Café Ltda'),
+('88888888-8888-8888-8888-888888880007', 'emitter_trade_name',          'Café Santa Esperança'),
+('88888888-8888-8888-8888-888888880008', 'emitter_cnpj',                '12.345.678/0001-90'),
+('88888888-8888-8888-8888-888888880009', 'emitter_state_registration',  '062.307.831.0500'),
+('88888888-8888-8888-8888-888888880010', 'emitter_cep',                 '35400-000'),
+('88888888-8888-8888-8888-888888880011', 'emitter_street',              'Rodovia MG-187, km 12'),
+('88888888-8888-8888-8888-888888880012', 'emitter_number',              's/n'),
+('88888888-8888-8888-8888-888888880013', 'emitter_complement',          'Zona Rural'),
+('88888888-8888-8888-8888-888888880014', 'emitter_neighborhood',        'Distrito de São Bartolomeu'),
+('88888888-8888-8888-8888-888888880015', 'emitter_city',                'Ouro Preto'),
+('88888888-8888-8888-8888-888888880016', 'emitter_state',               'MG'),
+('88888888-8888-8888-8888-888888880017', 'emitter_phone',               '(31) 3551-7788'),
+('88888888-8888-8888-8888-888888880018', 'emitter_email',               'contato@cafesantaesperanca.com.br'),
+-- Impostos / alíquotas fiscais (D11.2): defaults = valores antes hardcoded no front.
+('88888888-8888-8888-8888-888888880019', 'icms_percent',                '12'),
+('88888888-8888-8888-8888-888888880020', 'pis_percent',                 '0.65'),
+('88888888-8888-8888-8888-888888880021', 'cofins_percent',              '3'),
+('88888888-8888-8888-8888-888888880022', 'ipi_percent',                 '0')
 ON CONFLICT (id) DO NOTHING;
 
 -- -----------------------------------------------------------------------------

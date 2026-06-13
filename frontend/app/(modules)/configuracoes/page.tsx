@@ -2,6 +2,8 @@
 
 import { RootLayout } from "@/components/layout/RootLayout"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { EmitenteTab } from "@/components/modules/configuracoes/EmitenteTab"
+import { ImpostosTab } from "@/components/modules/configuracoes/ImpostosTab"
 import { CategoriasTab } from "@/components/modules/configuracoes/CategoriasTab"
 import { PapeisTab } from "@/components/modules/configuracoes/PapeisTab"
 import { DestinosTab } from "@/components/modules/configuracoes/DestinosTab"
@@ -14,17 +16,28 @@ export default function ConfiguracoesPage() {
         <div>
           <h2 className="text-2xl font-bold text-slate-800">Configurações</h2>
           <p className="text-slate-500 text-sm">
-            Categorias de estoque, papéis de sistema, destinos da colheita e encargos por atraso
+            Dados da empresa, impostos, categorias de estoque, papéis de sistema, destinos da
+            colheita e encargos por atraso
           </p>
         </div>
 
-        <Tabs defaultValue="categorias">
+        <Tabs defaultValue="empresa">
           <TabsList>
+            <TabsTrigger value="empresa">Empresa</TabsTrigger>
+            <TabsTrigger value="impostos">Impostos</TabsTrigger>
             <TabsTrigger value="categorias">Categorias</TabsTrigger>
             <TabsTrigger value="papeis">Papéis de Sistema</TabsTrigger>
             <TabsTrigger value="destinos">Destinos da Colheita</TabsTrigger>
             <TabsTrigger value="encargos">Encargos por Atraso</TabsTrigger>
           </TabsList>
+
+          <TabsContent value="empresa" className="space-y-4">
+            <EmitenteTab />
+          </TabsContent>
+
+          <TabsContent value="impostos" className="space-y-4">
+            <ImpostosTab />
+          </TabsContent>
 
           <TabsContent value="categorias" className="space-y-4">
             <CategoriasTab />

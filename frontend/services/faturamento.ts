@@ -1,6 +1,7 @@
 import { apiFetch } from "@/lib/api"
 import {
   ApiResponse,
+  Destinatario,
   Invoice,
   InvoiceItem,
   InvoiceParcela,
@@ -59,12 +60,44 @@ function parseInvoiceParcela(raw: RawInvoiceParcela): InvoiceParcela {
   }
 }
 
+interface RawDestinatario {
+  name: string | null
+  document: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
+  phone: string | null
+  email: string | null
+}
+
+function parseDestinatario(raw: RawDestinatario | null): Destinatario | null {
+  if (!raw) return null
+  return {
+    name: raw.name ?? null,
+    document: raw.document ?? null,
+    cep: raw.cep ?? null,
+    street: raw.street ?? null,
+    number: raw.number ?? null,
+    complement: raw.complement ?? null,
+    neighborhood: raw.neighborhood ?? null,
+    city: raw.city ?? null,
+    state: raw.state ?? null,
+    phone: raw.phone ?? null,
+    email: raw.email ?? null,
+  }
+}
+
 interface RawInvoice {
   id: string
   number: string
   sale_id: string | null
   client_id: string | null
   client_name: string
+  destinatario: RawDestinatario | null
   status: InvoiceStatus
   total_amount: string | number
   subtotal: string | number
@@ -91,6 +124,7 @@ function parseInvoice(raw: RawInvoice): Invoice {
     sale_id: raw.sale_id,
     client_id: raw.client_id,
     client_name: raw.client_name,
+    destinatario: parseDestinatario(raw.destinatario ?? null),
     status: raw.status,
     total_amount: toNumber(raw.total_amount),
     subtotal: toNumber(raw.subtotal),

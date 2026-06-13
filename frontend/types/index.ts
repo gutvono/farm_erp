@@ -288,6 +288,37 @@ export interface EncargosTaxas {
   juros_mora_mensal_percent: number
 }
 
+/**
+ * Dados do emitente (a fazenda) usados no cabeçalho do PDF da NF (Demanda 11.1).
+ * Apenas `legal_name` é obrigatório; os demais campos podem ficar em branco.
+ */
+export interface EmitenteData {
+  legal_name: string
+  trade_name: string
+  cnpj: string
+  state_registration: string
+  cep: string
+  street: string
+  number: string
+  complement: string
+  neighborhood: string
+  city: string
+  state: string
+  phone: string
+  email: string
+}
+
+/**
+ * Alíquotas fiscais (percentuais) editáveis em Configurações (Demanda 11.2).
+ * Alimentam o cálculo de imposto exibido no PDF da NF (venda/recebimento/devolução).
+ */
+export interface ImpostosTaxas {
+  icms_percent: number
+  pis_percent: number
+  cofins_percent: number
+  ipi_percent: number
+}
+
 // ── COMPRAS ──────────────────────────────────────────────────────────────────
 
 export interface Supplier {
@@ -620,12 +651,33 @@ export interface InvoiceParcela {
   payment_method: PaymentMethod | null
 }
 
+/**
+ * Destinatário (cliente) da NF de venda — nome, documento e endereço estruturado
+ * projetados de `clients` (Demanda 11.3). Todos os campos são opcionais: a NF de
+ * venda (layout DANFE, 11.4) degrada com elegância quando a nota não tem cliente.
+ */
+export interface Destinatario {
+  name: string | null
+  document: string | null
+  cep: string | null
+  street: string | null
+  number: string | null
+  complement: string | null
+  neighborhood: string | null
+  city: string | null
+  state: string | null
+  phone: string | null
+  email: string | null
+}
+
 export interface Invoice {
   id: string
   number: string
   sale_id: string | null
   client_id: string | null
   client_name: string
+  /** Destinatário completo (Demanda 11.3); null para nota sem cliente. */
+  destinatario: Destinatario | null
   status: InvoiceStatus
   total_amount: number
   /** Subtotal BRUTO dos itens (Σ a preço de tabela), antes do desconto — Demanda 9.C. */

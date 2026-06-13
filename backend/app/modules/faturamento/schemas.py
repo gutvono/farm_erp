@@ -73,11 +73,33 @@ class InvoiceParcelaOut(BaseModel):
         )
 
 
+class DestinatarioOut(BaseModel):
+    """Destinatário (cliente) da NF de venda — nome, documento e endereço
+    estruturado, projetados de `clients` por `client_id` (Demanda 11.3). Todos
+    opcionais: a 11.4 degrada com elegância quando a nota não tem cliente."""
+
+    name: Optional[str] = None
+    document: Optional[str] = None
+    cep: Optional[str] = None
+    street: Optional[str] = None
+    number: Optional[str] = None
+    complement: Optional[str] = None
+    neighborhood: Optional[str] = None
+    city: Optional[str] = None
+    state: Optional[str] = None
+    phone: Optional[str] = None
+    email: Optional[str] = None
+
+
 class InvoiceOut(BaseModel):
     id: UUID
     number: str
     client_id: Optional[UUID] = None
     client_name: str
+    # Destinatário completo (Demanda 11.3): nome + documento + endereço do cliente
+    # projetados de `clients`. `null` para nota sem cliente (recebimento/devolução/
+    # transporte/serviço/folha); `client_name` (string) continua existindo.
+    destinatario: Optional[DestinatarioOut] = None
     sale_id: Optional[UUID] = None
     issue_date: date
     due_date: Optional[date] = None
@@ -107,7 +129,12 @@ class InvoiceOut(BaseModel):
 
     @classmethod
     def from_model(
-        cls, invoice, client_name: str, parcelas=None, discount_amount=Decimal("0")
+        cls,
+        invoice,
+        client_name: str,
+        parcelas=None,
+        discount_amount=Decimal("0"),
+        destinatario: Optional["DestinatarioOut"] = None,
     ) -> "InvoiceOut":
         """Serializa a nota. ``parcelas`` é a lista de AR (não canceladas) ligadas
         à nota por `invoice_id`; quando informada, o `status` é **derivado**: a
@@ -138,6 +165,7 @@ class InvoiceOut(BaseModel):
             number=invoice.number,
             client_id=invoice.client_id,
             client_name=client_name,
+            destinatario=destinatario,
             sale_id=invoice.sale_id,
             issue_date=invoice.issue_date,
             due_date=invoice.due_date,

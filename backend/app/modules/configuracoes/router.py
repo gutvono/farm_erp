@@ -9,7 +9,9 @@ from app.modules.auth.router import get_current_user
 from app.modules.configuracoes import service as config_service
 from app.modules.configuracoes.schemas import (
     CategoryRolesUpdate,
+    EmitenteUpdate,
     EncargosUpdate,
+    ImpostosUpdate,
     HarvestDestinationsUpdate,
     StockCategoryCreate,
     StockCategoryOut,
@@ -163,4 +165,64 @@ def update_encargos(
     return success(
         "Taxas de encargo atualizadas com sucesso",
         encargos.model_dump(mode="json"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Impostos (alíquotas fiscais)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/impostos", response_model=SuccessResponse)
+def get_impostos(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    impostos = config_service.get_impostos(db)
+    return success(
+        "Alíquotas fiscais obtidas com sucesso",
+        impostos.model_dump(mode="json"),
+    )
+
+
+@router.put("/impostos", response_model=SuccessResponse)
+def update_impostos(
+    body: ImpostosUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    impostos = config_service.update_impostos(db, body)
+    return success(
+        "Alíquotas fiscais atualizadas com sucesso",
+        impostos.model_dump(mode="json"),
+    )
+
+
+# ---------------------------------------------------------------------------
+# Emitente da fazenda (dados da empresa que emite a NF)
+# ---------------------------------------------------------------------------
+
+
+@router.get("/emitente", response_model=SuccessResponse)
+def get_emitente(
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    emitente = config_service.get_emitente(db)
+    return success(
+        "Dados do emitente obtidos com sucesso",
+        emitente.model_dump(mode="json"),
+    )
+
+
+@router.put("/emitente", response_model=SuccessResponse)
+def update_emitente(
+    body: EmitenteUpdate,
+    db: Session = Depends(get_db),
+    _: User = Depends(get_current_user),
+) -> SuccessResponse:
+    emitente = config_service.update_emitente(db, body)
+    return success(
+        "Dados do emitente atualizados com sucesso",
+        emitente.model_dump(mode="json"),
     )

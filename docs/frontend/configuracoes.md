@@ -7,9 +7,13 @@
 ## Visão geral da tela
 
 **Configurações** (item **Configurações** no menu lateral, ícone de engrenagem) é onde
-o administrador define como o estoque é organizado e como o sistema "entende" cada
-item. Tem quatro abas:
+o administrador define os dados da empresa, como o estoque é organizado e como o
+sistema "entende" cada item. Tem seis abas:
 
+- **Empresa** — dados do emitente (a fazenda) que aparecem no cabeçalho da nota fiscal
+  (Demanda 11.1).
+- **Impostos** — alíquotas de ICMS, PIS, COFINS e IPI usadas no cálculo de imposto
+  exibido no PDF da nota fiscal (Demanda 11.2).
 - **Categorias** — cadastro das categorias de estoque (ex.: Café, Insumo, Veículo).
 - **Papéis de Sistema** — para cada categoria, marca o que aquela categoria habilita
   no sistema (ex.: aparecer na venda, ser tratada como produção de café…).
@@ -28,6 +32,46 @@ item. Tem quatro abas:
 ---
 
 ## 1. Fluxos passo a passo
+
+### 1.0 Preencher os dados da empresa (Emitente da fazenda)
+
+A aba **Empresa** é a **primeira** da tela e guarda os dados da fazenda que aparecem no
+cabeçalho do PDF da nota fiscal.
+
+1. Abra **Configurações → Empresa**.
+2. O formulário carrega já preenchido com os dados salvos, agrupados em duas seções:
+   - **Identificação** — Razão social, Nome fantasia, CNPJ e Inscrição Estadual.
+   - **Endereço** — CEP, Logradouro, Número, Complemento, Bairro, Município, UF,
+     Telefone e Email.
+3. Edite os campos desejados. A **Razão social** é **obrigatória**; os demais campos são
+   opcionais e podem ficar em branco.
+4. Clique em **"Salvar dados"**. Em caso de sucesso aparece o toast *"Dados do emitente
+   salvos com sucesso"* e o formulário recarrega com os valores atualizados.
+   - Se a **Razão social** estiver vazia, o salvamento é bloqueado e aparece a mensagem
+     *"Razão social é obrigatória"* abaixo do campo.
+
+[SCREENSHOT: aba Empresa com as seções Identificação e Endereço preenchidas]
+
+### 1.0.1 Definir os impostos (alíquotas da nota fiscal)
+
+A aba **Impostos** guarda as alíquotas usadas no cálculo de imposto que aparece no PDF
+da nota fiscal. Elas valem para as notas de **venda**, **recebimento** e **devolução**
+(as que têm o detalhamento fiscal). Notas de transporte, serviço e folha não têm bloco
+de impostos e não são afetadas.
+
+1. Abra **Configurações → Impostos**.
+2. O formulário carrega com os valores atuais — por padrão **ICMS 12%**, **PIS 0,65%**,
+   **COFINS 3%** e **IPI 0%**.
+3. Ajuste os percentuais desejados (cada um entre 0 e 100).
+4. Clique em **"Salvar alíquotas"**. Em caso de sucesso aparece o toast *"Alíquotas
+   salvas com sucesso"*.
+   - Valores **negativos** ou **acima de 100%** são bloqueados com a mensagem de erro
+     abaixo do campo (*"Não pode ser negativo"* / *"Não pode passar de 100%"*).
+5. A partir daí, **toda nota fiscal gerada** (botão **PDF** no Faturamento) passa a
+   exibir o imposto calculado com as novas alíquotas. Ex.: alterar o ICMS para 18% faz
+   o bloco fiscal e a coluna **ICMS** do PDF refletirem 18%.
+
+[SCREENSHOT: aba Impostos com os quatro campos ICMS / PIS / COFINS / IPI]
 
 ### 1.1 Gerenciar categorias
 
@@ -177,6 +221,10 @@ getDestinosColheita(): Promise<HarvestDestinations>
 updateDestinosColheita({ industria_item_id, embalagem_item_id, descarte_item_id })
 getEncargos(): Promise<EncargosTaxas>                 // GET /encargos
 updateEncargos({ multa_atraso_percent, juros_mora_mensal_percent })  // PUT /encargos
+getEmitente(): Promise<EmitenteData>                  // GET /emitente
+updateEmitente(data: EmitenteData): Promise<EmitenteData>  // PUT /emitente (13 campos)
+getImpostos(): Promise<ImpostosTaxas>                 // GET /impostos
+updateImpostos(data: ImpostosTaxas): Promise<ImpostosTaxas>  // PUT /impostos (4 alíquotas)
 ```
 
 `GET /categorias` responde o **envelope `Page[T]` cru** (por isso `fetchPaginated`);
@@ -192,7 +240,17 @@ type SystemRole =
 interface Category { id; name; description; is_active; roles: SystemRole[] }
 interface HarvestDestinations { industria_item_id; embalagem_item_id; descarte_item_id }  // cada um string | null
 interface EncargosTaxas { multa_atraso_percent: number; juros_mora_mensal_percent: number }
+interface EmitenteData {
+  legal_name; trade_name; cnpj; state_registration
+  cep; street; number; complement; neighborhood; city; state; phone; email
+}  // todos string; só legal_name é obrigatório no form
+interface ImpostosTaxas { icms_percent; pis_percent; cofins_percent; ipi_percent }  // 4 number (0–100)
 ```
+
+> **Impostos × Faturamento:** a aba **Impostos** é a fonte das alíquotas que o PDF da
+> nota fiscal usa. Ao gerar um PDF (venda/recebimento/devolução), o Faturamento lê
+> `getImpostos()` e calcula ICMS/PIS/COFINS/IPI com esses valores. Se a leitura falhar,
+> usa um fallback-padrão (12 / 0,65 / 3 / 0) para não impedir a geração do PDF.
 
 ### Integração com outros módulos
 
