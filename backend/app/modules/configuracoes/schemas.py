@@ -3,7 +3,7 @@ from decimal import Decimal
 from typing import Optional
 from uuid import UUID
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from app.shared.enums import SystemRole
 
@@ -96,3 +96,88 @@ class EncargosOut(BaseModel):
 class EncargosUpdate(BaseModel):
     multa_atraso_percent: Decimal = Field(ge=0)
     juros_mora_mensal_percent: Decimal = Field(ge=0)
+
+
+# ---------------------------------------------------------------------------
+# Impostos (alíquotas fiscais) — app_settings (Demanda 11.2)
+# ---------------------------------------------------------------------------
+
+
+class ImpostosOut(BaseModel):
+    """Alíquotas fiscais (percentuais) aplicadas no cálculo da NF."""
+
+    icms_percent: Decimal
+    pis_percent: Decimal
+    cofins_percent: Decimal
+    ipi_percent: Decimal
+
+
+class ImpostosUpdate(BaseModel):
+    icms_percent: Decimal = Field(ge=0, le=100)
+    pis_percent: Decimal = Field(ge=0, le=100)
+    cofins_percent: Decimal = Field(ge=0, le=100)
+    ipi_percent: Decimal = Field(ge=0, le=100)
+
+
+# ---------------------------------------------------------------------------
+# Emitente da fazenda (dados da empresa que emite a NF) — app_settings (D11.1)
+# ---------------------------------------------------------------------------
+
+
+class EmitenteOut(BaseModel):
+    """Dados do emitente (a fazenda) exibidos no cabeçalho da NF."""
+
+    legal_name: str
+    trade_name: str
+    cnpj: str
+    state_registration: str
+    cep: str
+    street: str
+    number: str
+    complement: str
+    neighborhood: str
+    city: str
+    state: str
+    phone: str
+    email: str
+
+
+class EmitenteUpdate(BaseModel):
+    legal_name: str = Field(min_length=1, max_length=255)
+    trade_name: str = Field(default="", max_length=255)
+    cnpj: str = Field(default="", max_length=18)
+    state_registration: str = Field(default="", max_length=30)
+    cep: str = Field(default="", max_length=9)
+    street: str = Field(default="", max_length=255)
+    number: str = Field(default="", max_length=30)
+    complement: str = Field(default="", max_length=120)
+    neighborhood: str = Field(default="", max_length=120)
+    city: str = Field(default="", max_length=120)
+    state: str = Field(default="", max_length=2)
+    phone: str = Field(default="", max_length=30)
+    email: str = Field(default="", max_length=255)
+
+    @field_validator(
+        "legal_name",
+        "trade_name",
+        "cnpj",
+        "state_registration",
+        "cep",
+        "street",
+        "number",
+        "complement",
+        "neighborhood",
+        "city",
+        "state",
+        "phone",
+        "email",
+        mode="before",
+    )
+    @classmethod
+    def _strip(cls, v):
+        return v.strip() if isinstance(v, str) else v
+
+    @field_validator("state")
+    @classmethod
+    def _upper_uf(cls, v: str) -> str:
+        return v.upper()

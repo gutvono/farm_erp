@@ -52,6 +52,34 @@ Chaves em `app_settings`: `multa_atraso_percent` (multa única %) e `juros_mora_
 vencida (ver `docs/backend/financeiro.md` → "Juros/multa por atraso na baixa"). Semeadas pelo
 DBA (9.B) com `2` e `1`.
 
+### Emitente da fazenda (Demanda 11.1)
+
+| Método | Rota | O que faz | Body |
+|--------|------|-----------|------|
+| `GET` | `/emitente` | Lê os 13 dados do emitente (a fazenda) de `app_settings` (defaults fictícios se ausentes) | — |
+| `PUT` | `/emitente` | Persiste os 13 campos do emitente | `EmitenteUpdate` |
+
+Dados do emitente exibidos no cabeçalho da NF de venda (razão social, CNPJ, IE e endereço
+completo da fazenda). Persistidos como key-value em `app_settings`, uma chave por campo
+(`emitter_legal_name`, `emitter_trade_name`, `emitter_cnpj`, `emitter_state_registration`,
+`emitter_cep`, `emitter_street`, `emitter_number`, `emitter_complement`,
+`emitter_neighborhood`, `emitter_city`, `emitter_state`, `emitter_phone`, `emitter_email`).
+Semeados no `seed.sql` com dados fictícios de uma fazenda de café em MG. **Sem migration** —
+mesmo padrão dos "Encargos de atraso". Consumidos pelo PDF da NF de venda (Demanda 11.4).
+
+### Impostos (alíquotas fiscais — Demanda 11.2)
+
+| Método | Rota | O que faz | Body |
+|--------|------|-----------|------|
+| `GET` | `/impostos` | Lê as 4 alíquotas fiscais de `app_settings` (defaults `12`/`0.65`/`3`/`0` se ausentes) | — |
+| `PUT` | `/impostos` | Persiste as 4 alíquotas (percentuais, validadas `0 ≤ x ≤ 100`) | `ImpostosUpdate` |
+
+Chaves em `app_settings`: `icms_percent`, `pis_percent`, `cofins_percent`, `ipi_percent`.
+Substituem os valores antes hardcoded no frontend (`FaturaCard.tsx`: ICMS 12 %, PIS 0,65 %,
+COFINS 3 %, IPI 0 %); os defaults seedados são exatamente esses. **Sem migration** — mesmo
+padrão dos "Encargos de atraso"/"Emitente". Consumidas pelo cálculo de imposto da NF (a NF de
+venda, recebimento e devolução passam a ler a mesma fonte na Demanda 11.4).
+
 ## Schemas
 
 ### StockCategoryCreate / StockCategoryUpdate (JSON)
@@ -100,6 +128,42 @@ DBA (9.B) com `2` e `1`.
 ```
 - Percentuais (`Decimal`), validados `≥ 0` no `Update`. O `Out` devolve sempre as 2 taxas (com
   os defaults `2`/`1` quando a chave não existe em `app_settings`).
+
+### EmitenteUpdate / EmitenteOut (Demanda 11.1)
+```json
+{
+  "legal_name": "Fazenda Santa Esperança Café Ltda",
+  "trade_name": "Café Santa Esperança",
+  "cnpj": "12.345.678/0001-90",
+  "state_registration": "062.307.831.0500",
+  "cep": "35400-000",
+  "street": "Rodovia MG-187, km 12",
+  "number": "s/n",
+  "complement": "Zona Rural",
+  "neighborhood": "Distrito de São Bartolomeu",
+  "city": "Ouro Preto",
+  "state": "MG",
+  "phone": "(31) 3551-7788",
+  "email": "contato@cafesantaesperanca.com.br"
+}
+```
+- Todos os campos são `str`. `legal_name` é **obrigatório** (1–255); os demais são opcionais
+  (default `""`). Validação leve: `strip` em todos, `state` (UF) em maiúsculas e limitado a 2
+  caracteres, limites de tamanho por campo. **Sem** validação de dígito verificador de CNPJ nem
+  regra fiscal. O `Out` devolve sempre os 13 campos (defaults fictícios quando a chave não
+  existe em `app_settings`).
+
+### ImpostosUpdate / ImpostosOut (Demanda 11.2)
+```json
+{
+  "icms_percent": 12,
+  "pis_percent": 0.65,
+  "cofins_percent": 3,
+  "ipi_percent": 0
+}
+```
+- 4 alíquotas percentuais (`Decimal`), validadas `0 ≤ x ≤ 100` no `Update`. O `Out` devolve
+  sempre as 4 (com os defaults `12`/`0.65`/`3`/`0` quando a chave não existe em `app_settings`).
 
 ## Papéis de sistema (`SystemRole`)
 

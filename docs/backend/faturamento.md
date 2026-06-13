@@ -87,6 +87,13 @@ envelope inalterados.
   sem AR (transporte/serviço/etc.) o bloco vem **vazio**.
 - **`status` é derivado** (ver "Status derivado das parcelas" abaixo) — não reflete
   cegamente `invoices.status`.
+- **`destinatario` (Demanda 11.3):** bloco com o **destinatário completo** da NF — `name`,
+  `document`, `cep`, `street`, `number`, `complement`, `neighborhood`, `city`, `state`,
+  `phone`, `email` — projetado de `clients` por `client_id` em `serialize_invoice`. **Sem
+  migration** (só join + projeção; reusa o endereço estruturado do cliente da Demanda 7).
+  É **`null`** quando a nota não tem cliente (recebimento/devolução/transporte/serviço/folha) —
+  o consumidor (PDF DANFE, Demanda 11.4) degrada com elegância. O `client_name` (string)
+  **continua existindo** em paralelo — não foi substituído.
 
 ## Modelo 1 NF + N parcelas (Demanda 9.0)
 

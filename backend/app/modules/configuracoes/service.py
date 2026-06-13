@@ -8,8 +8,12 @@ from sqlalchemy.orm import Session
 from app.modules.configuracoes import repository as config_repo
 from app.modules.configuracoes.model import StockCategory
 from app.modules.configuracoes.schemas import (
+    EmitenteOut,
+    EmitenteUpdate,
     EncargosOut,
     EncargosUpdate,
+    ImpostosOut,
+    ImpostosUpdate,
     HarvestDestinationsOut,
     HarvestDestinationsUpdate,
     StockCategoryCreate,
@@ -31,6 +35,48 @@ MULTA_ATRASO_KEY = "multa_atraso_percent"
 JUROS_MORA_MENSAL_KEY = "juros_mora_mensal_percent"
 DEFAULT_MULTA_ATRASO_PERCENT = Decimal("2")
 DEFAULT_JUROS_MORA_MENSAL_PERCENT = Decimal("1")
+
+# Chaves de app_settings para as alíquotas fiscais (Demanda 11.2).
+# Defaults = valores hoje hardcoded no frontend (FaturaCard.tsx).
+ICMS_PERCENT_KEY = "icms_percent"
+PIS_PERCENT_KEY = "pis_percent"
+COFINS_PERCENT_KEY = "cofins_percent"
+IPI_PERCENT_KEY = "ipi_percent"
+DEFAULT_ICMS_PERCENT = Decimal("12")
+DEFAULT_PIS_PERCENT = Decimal("0.65")
+DEFAULT_COFINS_PERCENT = Decimal("3")
+DEFAULT_IPI_PERCENT = Decimal("0")
+
+# Chaves de app_settings para o emitente da fazenda (Demanda 11.1).
+# Dados exibidos no cabeçalho da NF (razão social, CNPJ, IE, endereço).
+EMITTER_LEGAL_NAME_KEY = "emitter_legal_name"
+EMITTER_TRADE_NAME_KEY = "emitter_trade_name"
+EMITTER_CNPJ_KEY = "emitter_cnpj"
+EMITTER_STATE_REGISTRATION_KEY = "emitter_state_registration"
+EMITTER_CEP_KEY = "emitter_cep"
+EMITTER_STREET_KEY = "emitter_street"
+EMITTER_NUMBER_KEY = "emitter_number"
+EMITTER_COMPLEMENT_KEY = "emitter_complement"
+EMITTER_NEIGHBORHOOD_KEY = "emitter_neighborhood"
+EMITTER_CITY_KEY = "emitter_city"
+EMITTER_STATE_KEY = "emitter_state"
+EMITTER_PHONE_KEY = "emitter_phone"
+EMITTER_EMAIL_KEY = "emitter_email"
+
+# Defaults fictícios (fazenda de café em MG) — semeados no seed.sql.
+DEFAULT_EMITTER_LEGAL_NAME = "Fazenda Santa Esperança Café Ltda"
+DEFAULT_EMITTER_TRADE_NAME = "Café Santa Esperança"
+DEFAULT_EMITTER_CNPJ = "12.345.678/0001-90"
+DEFAULT_EMITTER_STATE_REGISTRATION = "062.307.831.0500"
+DEFAULT_EMITTER_CEP = "35400-000"
+DEFAULT_EMITTER_STREET = "Rodovia MG-187, km 12"
+DEFAULT_EMITTER_NUMBER = "s/n"
+DEFAULT_EMITTER_COMPLEMENT = "Zona Rural"
+DEFAULT_EMITTER_NEIGHBORHOOD = "Distrito de São Bartolomeu"
+DEFAULT_EMITTER_CITY = "Ouro Preto"
+DEFAULT_EMITTER_STATE = "MG"
+DEFAULT_EMITTER_PHONE = "(31) 3551-7788"
+DEFAULT_EMITTER_EMAIL = "contato@cafesantaesperanca.com.br"
 
 
 # ---------------------------------------------------------------------------
@@ -192,6 +238,90 @@ def update_encargos(db: Session, data: EncargosUpdate) -> EncargosOut:
         db, JUROS_MORA_MENSAL_KEY, str(data.juros_mora_mensal_percent)
     )
     return get_encargos(db)
+
+
+# ---------------------------------------------------------------------------
+# Impostos (alíquotas fiscais) — app_settings (Demanda 11.2)
+# ---------------------------------------------------------------------------
+
+
+def get_impostos(db: Session) -> ImpostosOut:
+    return ImpostosOut(
+        icms_percent=_setting_decimal(db, ICMS_PERCENT_KEY, DEFAULT_ICMS_PERCENT),
+        pis_percent=_setting_decimal(db, PIS_PERCENT_KEY, DEFAULT_PIS_PERCENT),
+        cofins_percent=_setting_decimal(
+            db, COFINS_PERCENT_KEY, DEFAULT_COFINS_PERCENT
+        ),
+        ipi_percent=_setting_decimal(db, IPI_PERCENT_KEY, DEFAULT_IPI_PERCENT),
+    )
+
+
+def update_impostos(db: Session, data: ImpostosUpdate) -> ImpostosOut:
+    config_repo.set_setting(db, ICMS_PERCENT_KEY, str(data.icms_percent))
+    config_repo.set_setting(db, PIS_PERCENT_KEY, str(data.pis_percent))
+    config_repo.set_setting(db, COFINS_PERCENT_KEY, str(data.cofins_percent))
+    config_repo.set_setting(db, IPI_PERCENT_KEY, str(data.ipi_percent))
+    return get_impostos(db)
+
+
+# ---------------------------------------------------------------------------
+# Emitente da fazenda (dados da empresa que emite a NF) — app_settings (D11.1)
+# ---------------------------------------------------------------------------
+
+
+def _setting_str(db: Session, key: str, default: str) -> str:
+    """Lê um texto de app_settings; usa `default` se ausente/vazio."""
+    setting = config_repo.get_setting(db, key)
+    if not setting or setting.value is None:
+        return default
+    return str(setting.value)
+
+
+def get_emitente(db: Session) -> EmitenteOut:
+    return EmitenteOut(
+        legal_name=_setting_str(
+            db, EMITTER_LEGAL_NAME_KEY, DEFAULT_EMITTER_LEGAL_NAME
+        ),
+        trade_name=_setting_str(
+            db, EMITTER_TRADE_NAME_KEY, DEFAULT_EMITTER_TRADE_NAME
+        ),
+        cnpj=_setting_str(db, EMITTER_CNPJ_KEY, DEFAULT_EMITTER_CNPJ),
+        state_registration=_setting_str(
+            db, EMITTER_STATE_REGISTRATION_KEY, DEFAULT_EMITTER_STATE_REGISTRATION
+        ),
+        cep=_setting_str(db, EMITTER_CEP_KEY, DEFAULT_EMITTER_CEP),
+        street=_setting_str(db, EMITTER_STREET_KEY, DEFAULT_EMITTER_STREET),
+        number=_setting_str(db, EMITTER_NUMBER_KEY, DEFAULT_EMITTER_NUMBER),
+        complement=_setting_str(
+            db, EMITTER_COMPLEMENT_KEY, DEFAULT_EMITTER_COMPLEMENT
+        ),
+        neighborhood=_setting_str(
+            db, EMITTER_NEIGHBORHOOD_KEY, DEFAULT_EMITTER_NEIGHBORHOOD
+        ),
+        city=_setting_str(db, EMITTER_CITY_KEY, DEFAULT_EMITTER_CITY),
+        state=_setting_str(db, EMITTER_STATE_KEY, DEFAULT_EMITTER_STATE),
+        phone=_setting_str(db, EMITTER_PHONE_KEY, DEFAULT_EMITTER_PHONE),
+        email=_setting_str(db, EMITTER_EMAIL_KEY, DEFAULT_EMITTER_EMAIL),
+    )
+
+
+def update_emitente(db: Session, data: EmitenteUpdate) -> EmitenteOut:
+    config_repo.set_setting(db, EMITTER_LEGAL_NAME_KEY, data.legal_name)
+    config_repo.set_setting(db, EMITTER_TRADE_NAME_KEY, data.trade_name)
+    config_repo.set_setting(db, EMITTER_CNPJ_KEY, data.cnpj)
+    config_repo.set_setting(
+        db, EMITTER_STATE_REGISTRATION_KEY, data.state_registration
+    )
+    config_repo.set_setting(db, EMITTER_CEP_KEY, data.cep)
+    config_repo.set_setting(db, EMITTER_STREET_KEY, data.street)
+    config_repo.set_setting(db, EMITTER_NUMBER_KEY, data.number)
+    config_repo.set_setting(db, EMITTER_COMPLEMENT_KEY, data.complement)
+    config_repo.set_setting(db, EMITTER_NEIGHBORHOOD_KEY, data.neighborhood)
+    config_repo.set_setting(db, EMITTER_CITY_KEY, data.city)
+    config_repo.set_setting(db, EMITTER_STATE_KEY, data.state)
+    config_repo.set_setting(db, EMITTER_PHONE_KEY, data.phone)
+    config_repo.set_setting(db, EMITTER_EMAIL_KEY, data.email)
+    return get_emitente(db)
 
 
 # ---------------------------------------------------------------------------

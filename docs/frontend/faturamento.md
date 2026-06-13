@@ -242,11 +242,68 @@ envelope `SuccessResponse` (`data: []`).
 
 ### PDF
 
-Gerado com `jspdf` via import dinâmico (SSR-safe). Notas de **venda**, **recebimento**
-e **devolução** usam o layout fiscal completo (NCM/CFOP/impostos). Notas de
-**transporte** e **serviço** usam o layout simples `generateSimplePdf(invoice, title)`
-(descrição + total, sem CFOP de mercadoria): títulos "NOTA FISCAL DE TRANSPORTE" e
-"NOTA FISCAL DE SERVIÇO".
+Gerado com `jspdf` via import dinâmico (SSR-safe). O roteamento por tipo é:
+
+- **venda** → `generateDanfeVenda(invoice, impostos, emitente)` — **layout DANFE**
+  (Demanda 11.4, ver seção abaixo).
+- **recebimento** e **devolução** → layout fiscal rico atual em `generatePdf`
+  (NCM/CFOP/impostos, sem o chrome DANFE) — **inalterado** na 11.4.
+- **transporte**, **serviço** e **folha** → layout simples `generateSimplePdf(invoice, title)`
+  (descrição + total, sem bloco fiscal) — **inalterado**.
+
+`generatePdf` desvia a venda para o renderer DANFE no topo (com `return`); o restante do
+código segue intacto para os outros tipos (regressão por construção).
+
+**Alíquotas vêm da configuração (Demanda 11.2).** As taxas de ICMS, PIS, COFINS e IPI do
+bloco fiscal **não são mais constantes fixas** no código: ao clicar em **PDF**, o
+`FaturaCard` lê `getImpostos()` (aba **Configurações → Impostos**) e passa as alíquotas
+para `generatePdf(invoice, nfType, impostos)`. Assim, alterar o ICMS na aba Impostos para
+18% faz o bloco fiscal e a coluna ICMS do próximo PDF (venda/recebimento/devolução)
+refletirem 18%. Se a leitura da config falhar, há um **fallback-padrão** (12 / 0,65 / 3 /
+0) só para não impedir a geração. O layout simples (transporte/serviço/folha) **não** tem
+bloco fiscal e não é afetado.
+
+#### Layout DANFE da NF de venda (Demanda 11.4)
+
+A NF de **venda** sai com aparência de DANFE (NF-e brasileira): caixas com bordas, A4
+retrato, rótulos pequenos em cinza + valores. Ao clicar em **PDF**, o `FaturaCard` busca
+em paralelo o **emitente** (`getEmitente()`, aba Empresa) e os **impostos**
+(`getImpostos()`, aba Impostos) — com fallback-padrão se a leitura falhar — e os repassa
+ao renderer. Os blocos, de cima para baixo:
+
+1. **Canhoto / recibo** — faixa "RECEBEMOS DE {emitente} OS PRODUTOS CONSTANTES DA NOTA
+   FISCAL INDICADA AO LADO", campos vazios de data/assinatura do recebedor e caixa "NF-e
+   Nº {número} · Série 1". Linha tracejada separa do corpo.
+2. **Cabeçalho** — emitente (razão social, CNPJ, IE, endereço, fone — da aba Empresa) à
+   esquerda; "DANFE" + "Documento Auxiliar da Nota Fiscal Eletrônica" + indicador
+   "1-Entrada / 2-Saída" marcando **2 (saída)** ao centro; código de barras ilustrativo +
+   **"DOCUMENTO SEM VALOR FISCAL"** à direita.
+3. **Faixa fiscal** — Natureza da operação ("Venda de mercadorias"), Chave de acesso
+   **ilustrativa** (44 dígitos derivados de número/data/id — só estética) e IE/CNPJ do
+   emitente.
+4. **Destinatário / Remetente** — nome, CNPJ/CPF, endereço, bairro, CEP, município, UF,
+   fone do cliente (de `invoice.destinatario`, Demanda 11.3) + data de emissão/saída.
+   Inscrição Estadual sai "ISENTO" (não temos o dado). Se `destinatario` for `null`, os
+   campos saem em branco e o PDF **não quebra**.
+5. **Fatura / Duplicatas** — uma célula por parcela (`invoice.parcelas`, Demanda 9.0):
+   número {nota}/{parcela}, vencimento, valor.
+6. **Cálculo do imposto** — a grade fiscal: BC ICMS e Valor do ICMS (de
+   `impostos.icms_percent`), BC/Valor ICMS-ST = 0,00, Valor total dos produtos =
+   `subtotal`, Frete/Seguro/Outras = 0,00, **Desconto** = `discount_amount` (9.C), Valor
+   do IPI (de `impostos.ipi_percent`) e **Valor total da nota** = `total_amount`.
+7. **Itens** — Código (—), Descrição, NCM (`FISCAL_NCM`), CFOP (venda = `6101`), UN, Qtde,
+   V.Unit, V.Total, BC ICMS, V.ICMS e %ICMS (das alíquotas configuradas).
+8. **Dados adicionais** — "Informações complementares" (= `invoice.notes`) + caixa
+   "Reservado ao fisco" vazia.
+
+**Fontes de dado:** emitente (config 11.1), impostos (config 11.2), destinatário
+(`InvoiceOut.destinatario`, 11.3), parcelas (9.0) e desconto (9.C). **Fixo/ilustrativo:**
+chave de acesso, código de barras, série 1, IE do cliente ("ISENTO"), ICMS-ST, frete,
+seguro e outras despesas (0,00). **Totais não são recalculados** — usa-se
+`invoice.total_amount`; por construção Σ itens = `subtotal` e `subtotal − discount_amount
+= total_amount` (garantido pela 9.C).
+
+[SCREENSHOT: PDF de uma NF de venda no layout DANFE — canhoto, cabeçalho com "DOCUMENTO SEM VALOR FISCAL", destinatário, grade de imposto e itens]
 
 Quando a nota tem parcelas (`invoice.parcelas.length > 0`), o PDF imprime, ao final, um
 bloco **"PARCELAS"** com a tabela completa (nº / vencimento / valor / status) e o **total
@@ -275,12 +332,19 @@ interface InvoiceParcela {
   payment_method: PaymentMethod | null
 }
 
+// Destinatário (cliente) da NF de venda — Demanda 11.3; null sem cliente. Alimenta o
+// bloco "Destinatário/Remetente" do DANFE (11.4). Todos os campos string | null.
+interface Destinatario {
+  name; document; cep; street; number; complement; neighborhood; city; state; phone; email
+}
+
 interface Invoice {
   id: string
   number: string
   sale_id: string | null          // null = não originada de venda
   client_id: string | null        // null = NF sem cliente (compras, inclui serviço)
   client_name: string
+  destinatario: Destinatario | null  // endereço estruturado do cliente (11.3); null sem cliente
   status: InvoiceStatus           // DERIVADO: emitida→paga só quando TODAS as parcelas quitadas
   total_amount: number            // total LÍQUIDO (já com desconto)
   subtotal: number                // Σ itens a preço de tabela (bruto) — Demanda 9.C

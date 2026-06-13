@@ -9,7 +9,11 @@ from sqlalchemy.orm import Session
 
 from app.modules.faturamento import repository as fat_repo
 from app.modules.faturamento.model import Invoice
-from app.modules.faturamento.schemas import InvoiceCreate, InvoiceOut
+from app.modules.faturamento.schemas import (
+    DestinatarioOut,
+    InvoiceCreate,
+    InvoiceOut,
+)
 from app.shared.enums import (
     AccountReceivableStatus,
     FinancialCategory,
@@ -37,6 +41,34 @@ def _get_client_name(db: Session, client_id: Optional[UUID]) -> str:
     from app.modules.comercial.model import Client
     client = db.query(Client).filter(Client.id == client_id).first()
     return client.name if client else ""
+
+
+def _get_destinatario(
+    db: Session, client_id: Optional[UUID]
+) -> Optional[DestinatarioOut]:
+    """Destinatário completo da NF (Demanda 11.3): nome, documento e endereço
+    estruturado do cliente, projetados de `clients` por `client_id`. Retorna
+    ``None`` para nota sem cliente (recebimento/devolução/transporte/serviço/
+    folha) ou cliente inexistente — a 11.4 degrada o PDF sem quebrar."""
+    if client_id is None:
+        return None
+    from app.modules.comercial.model import Client
+    client = db.query(Client).filter(Client.id == client_id).first()
+    if client is None:
+        return None
+    return DestinatarioOut(
+        name=client.name,
+        document=client.document,
+        cep=client.cep,
+        street=client.street,
+        number=client.number,
+        complement=client.complement,
+        neighborhood=client.neighborhood,
+        city=client.city,
+        state=client.state,
+        phone=client.phone,
+        email=client.email,
+    )
 
 
 def _get_sale_discount(db: Session, sale_id: Optional[UUID]) -> Decimal:
@@ -263,6 +295,7 @@ def serialize_invoice(db: Session, invoice: Invoice) -> InvoiceOut:
     from app.shared.enums import AccountReceivableStatus
 
     client_name = _get_client_name(db, invoice.client_id)
+    destinatario = _get_destinatario(db, invoice.client_id)
     parcelas = [
         ar
         for ar in fin_service.get_receivables_by_invoice(db, invoice.id)
@@ -279,7 +312,11 @@ def serialize_invoice(db: Session, invoice: Invoice) -> InvoiceOut:
         _get_sale_discount(db, invoice.sale_id) if is_venda else Decimal("0")
     )
     return InvoiceOut.from_model(
-        invoice, client_name, parcelas=parcelas, discount_amount=discount_amount
+        invoice,
+        client_name,
+        parcelas=parcelas,
+        discount_amount=discount_amount,
+        destinatario=destinatario,
     )
 
 

@@ -3,8 +3,10 @@ import { fetchPaginated } from "@/lib/pagination"
 import {
   ApiResponse,
   Category,
+  EmitenteData,
   EncargosTaxas,
   HarvestDestinations,
+  ImpostosTaxas,
   Paginated,
   SystemRole,
 } from "@/types/index"
@@ -166,4 +168,72 @@ export async function updateEncargos(data: {
     multa_atraso_percent: toNumber(response.data.multa_atraso_percent),
     juros_mora_mensal_percent: toNumber(response.data.juros_mora_mensal_percent),
   }
+}
+
+// ── Emitente da fazenda (Demanda 11.1) ────────────────────────────────────────
+
+function parseEmitente(raw: EmitenteData): EmitenteData {
+  return {
+    legal_name: raw.legal_name ?? "",
+    trade_name: raw.trade_name ?? "",
+    cnpj: raw.cnpj ?? "",
+    state_registration: raw.state_registration ?? "",
+    cep: raw.cep ?? "",
+    street: raw.street ?? "",
+    number: raw.number ?? "",
+    complement: raw.complement ?? "",
+    neighborhood: raw.neighborhood ?? "",
+    city: raw.city ?? "",
+    state: raw.state ?? "",
+    phone: raw.phone ?? "",
+    email: raw.email ?? "",
+  }
+}
+
+export async function getEmitente(): Promise<EmitenteData> {
+  const response = await apiFetch<ApiResponse<EmitenteData>>(
+    "/api/configuracoes/emitente"
+  )
+  return parseEmitente(response.data)
+}
+
+export async function updateEmitente(data: EmitenteData): Promise<EmitenteData> {
+  const response = await apiFetch<ApiResponse<EmitenteData>>(
+    "/api/configuracoes/emitente",
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return parseEmitente(response.data)
+}
+
+// ── Impostos / alíquotas fiscais (Demanda 11.2) ───────────────────────────────
+
+interface RawImpostos {
+  icms_percent: number | string
+  pis_percent: number | string
+  cofins_percent: number | string
+  ipi_percent: number | string
+}
+
+function parseImpostos(raw: RawImpostos): ImpostosTaxas {
+  return {
+    icms_percent: toNumber(raw.icms_percent),
+    pis_percent: toNumber(raw.pis_percent),
+    cofins_percent: toNumber(raw.cofins_percent),
+    ipi_percent: toNumber(raw.ipi_percent),
+  }
+}
+
+export async function getImpostos(): Promise<ImpostosTaxas> {
+  const response = await apiFetch<ApiResponse<RawImpostos>>(
+    "/api/configuracoes/impostos"
+  )
+  return parseImpostos(response.data)
+}
+
+export async function updateImpostos(data: ImpostosTaxas): Promise<ImpostosTaxas> {
+  const response = await apiFetch<ApiResponse<RawImpostos>>(
+    "/api/configuracoes/impostos",
+    { method: "PUT", body: JSON.stringify(data) }
+  )
+  return parseImpostos(response.data)
 }
