@@ -155,7 +155,7 @@ export function RecebimentosTable({
       />
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent size="table" className="w-full overflow-y-auto">
           <SheetHeader>
             <SheetTitle>
               Conferência de recebimento{selected ? ` — ${selected.supplier_name}` : ""}

@@ -19,6 +19,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { deleteCliente } from "@/services/comercial"
 import { Client, Paginated } from "@/types/index"
 import { formatDate } from "@/lib/utils"
@@ -219,6 +220,14 @@ export function ClientesTable({
         >
           Apenas inadimplentes
         </Button>
+
+        <ClearFiltersButton
+          active={Boolean(search) || delinquentOnly}
+          onClear={() => {
+            onSearchChange("")
+            onDelinquentOnlyChange(false)
+          }}
+        />
       </div>
 
       <DataTable<Client>

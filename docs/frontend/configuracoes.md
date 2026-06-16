@@ -78,7 +78,8 @@ de impostos e não são afetadas.
 1. Abra **Configurações → Categorias**.
 2. A tabela lista as categorias com **Nome**, **Descrição**, **Papéis** e **Situação**
    (Ativa/Inativa). Use a busca **"Buscar categoria por nome..."** ou clique no
-   cabeçalho **Nome** para ordenar.
+   cabeçalho **Nome** para ordenar. Com a busca preenchida, aparece o botão
+   **"Limpar filtros"** ao lado (ver [`_clear-filters.md`](_clear-filters.md)).
 3. Clique em **"Nova Categoria"**, preencha **Nome** (obrigatório), **Descrição**
    (opcional) e **Situação** (Ativa por padrão) e clique em **"Cadastrar categoria"**.
 4. Para alterar, clique em **"Editar"** na linha; para remover, clique em **"Excluir"**

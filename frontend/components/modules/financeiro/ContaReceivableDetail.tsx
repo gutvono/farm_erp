@@ -258,7 +258,7 @@ export function ContaReceivableDetail({
   return (
     <>
       <Sheet open={open} onOpenChange={onOpenChange}>
-        <SheetContent className="flex w-full flex-col gap-0 overflow-y-auto sm:max-w-md">
+        <SheetContent size="detail" className="flex w-full flex-col gap-0 overflow-y-auto">
           <SheetHeader>
             <SheetTitle>{conta.number}</SheetTitle>
             <SheetDescription>Detalhes da conta a receber</SheetDescription>

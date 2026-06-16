@@ -11,6 +11,10 @@ pessoal, máquinas, embalagens, serviços).
 
 A página `/pcp` tem 4 abas: **Ordens de Produção**, **Talhões**, **Atividades** e **Relatórios**.
 
+Nas abas **Ordens de Produção** (filtro de status) e **Atividades** (filtro por talhão),
+ao selecionar um filtro aparece o botão **"Limpar filtros"** que volta ao default
+("Todos") — ver [`_clear-filters.md`](_clear-filters.md).
+
 ## Fluxos passo a passo (ótica do usuário)
 
 ### Cadastrar um talhão (com área em hectares)
@@ -39,6 +43,10 @@ A página `/pcp` tem 4 abas: **Ordens de Produção**, **Talhões**, **Atividade
 8. **Serviços Externos** (opcional): fornecedor, descrição, valor e vencimento (a conta a pagar é
    gerada ao iniciar a produção).
 9. **"Criar ordem"**. A OP nasce **Planejada**.
+
+> As datas da ordem (**Planejada**, **Início**, **Término Previsto**) e o **vencimento**
+> de cada Serviço Externo são escolhidas num **calendário** (com mês/ano por dropdown),
+> assim como a **Data** no formulário de **Atividade**. Ver [`_ui-date-combobox.md`](_ui-date-combobox.md).
 
 [SCREENSHOT: formulário Nova Ordem com cargo/máquina mostrando "N disponíveis"]
 

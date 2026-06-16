@@ -19,6 +19,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { OrdemCard } from "@/components/modules/compras/OrdemCard"
 import { Paginated, PurchaseOrder, PurchaseOrderStatus, Supplier } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -206,6 +207,15 @@ export function OrdensTable({
             </SelectContent>
           </Select>
         </div>
+
+        <ClearFiltersButton
+          active={Boolean(search) || status !== undefined || supplierId !== undefined}
+          onClear={() => {
+            onSearchChange("")
+            onStatusChange(undefined)
+            onSupplierChange(undefined)
+          }}
+        />
       </div>
 
       <DataTable<PurchaseOrder>
@@ -224,7 +234,7 @@ export function OrdensTable({
       />
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent size="table" className="w-full overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Detalhes da ordem</SheetTitle>
           </SheetHeader>

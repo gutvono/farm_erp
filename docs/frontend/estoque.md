@@ -26,7 +26,7 @@ Página única com 4 abas (Tabs shadcn): **Itens**, **Movimentações**, **Inven
 [SCREENSHOT: formulário de item com o menu suspenso de Categoria aberto]
 
 **Filtrar movimentações**
-1. Na aba **Movimentações**, use a **Busca** (descrição ou nome do item), o intervalo **De / Até** (datas), e os filtros de **item**, **tipo** e **módulo**.
+1. Na aba **Movimentações**, use a **Busca** (descrição ou nome do item), o **Período** (um seletor de intervalo — calendário de 2 meses; ver [`_ui-date-combobox.md`](_ui-date-combobox.md)), e os filtros de **item**, **tipo** e **módulo**. Quando houver filtro aplicado, o botão **"Limpar filtros"** (ver [`_clear-filters.md`](_clear-filters.md)) zera tudo e recarrega a lista — na aba **Itens** também há o mesmo botão (busca/categoria/papel/críticos).
 2. Clique nos cabeçalhos **Data**, **Quantidade**, **Valor unit.** ou **Valor total** para ordenar.
 3. Tudo é aplicado **no servidor**, com paginação (Anterior/Próxima).
 

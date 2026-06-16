@@ -12,8 +12,8 @@ import {
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
 import {
   Select,
   SelectContent,
@@ -146,27 +146,17 @@ export function RelatoriosVendas() {
         <CardContent>
           <div className="flex flex-wrap items-end gap-3">
             <div className="space-y-1">
-              <Label htmlFor="report-start" className="text-xs">
-                Início
+              <Label htmlFor="report-period" className="text-xs">
+                Intervalo
               </Label>
-              <Input
-                id="report-start"
-                type="date"
-                value={start}
-                onChange={(e) => setStart(e.target.value)}
-                className="w-40"
-              />
-            </div>
-            <div className="space-y-1">
-              <Label htmlFor="report-end" className="text-xs">
-                Fim
-              </Label>
-              <Input
-                id="report-end"
-                type="date"
-                value={end}
-                onChange={(e) => setEnd(e.target.value)}
-                className="w-40"
+              <DateRangePicker
+                id="report-period"
+                value={{ from: start, to: end }}
+                onChange={(range) => {
+                  setStart(range.from ?? "")
+                  setEnd(range.to ?? "")
+                }}
+                className="w-64"
               />
             </div>
             <div className="space-y-1">

@@ -33,7 +33,7 @@ Página única em quatro abas: **Folha do Mês** (gestão de períodos e holerit
 2. Preencha **Nome**, **CPF**, e no campo **Cargo** escolha um cargo no **menu suspenso**.
 3. Ao escolher o cargo, o campo **Salário base** é **preenchido automaticamente** com o salário daquele cargo (apenas uma sugestão).
 4. Se quiser, **altere o salário** — o valor digitado prevalece sobre a sugestão do cargo. Se deixar o campo em branco, o sistema usa o salário do cargo.
-5. Escolha **Tipo de contrato** e **Data de admissão** (e, opcionalmente, custo de demissão e foto).
+5. Escolha **Tipo de contrato** e a **Data de admissão** — esta agora num **calendário** (com mês/ano por dropdown; ver [`_ui-date-combobox.md`](_ui-date-combobox.md)) — e, opcionalmente, custo de demissão e foto. (Vale tanto no cadastro quanto na edição do funcionário.)
 6. Clique em **"Cadastrar funcionário"**.
 
    Exemplo: escolher **"Operador de Máquinas"** (salário 2.200) preenche o campo com **2.200**; mudar para **2.400** e salvar deixa o funcionário com **2.400**.
@@ -65,6 +65,7 @@ A lista de holerites já vem **completa** do período selecionado; o filtro/orde
 - **Ordem padrão:** alfabética por **nome** do funcionário.
 - **Ordenar (clique no cabeçalho):** Funcionário (nome), Salário base, Horas extras, Descontos e Total — alterna ↑/↓. (Contrato e Status não ordenam; Status filtra.)
 - **Filtros (menus):** **Status** (Pendente / Aguardando aprovação / Pago) e **Contrato** (CLT / PJ / Temporário). A barra mostra "X de Y holerites". Filtro vazio → "Nenhum holerite corresponde aos filtros".
+- **Limpar filtros:** com filtro ativo aparece o botão **"Limpar filtros"** (ver [`_clear-filters.md`](_clear-filters.md)) que zera Status + Contrato. O mesmo botão existe nas barras de **Funcionários** (busca + contrato + "apenas ativos", que volta ao default) e **Cargos** (busca).
 - **Ordem estável (a dor que isso resolve):** ao clicar **"Solicitar pagamento"** (ou "Solicitar pagamento de todos"), o funcionário **não muda de posição** na tabela — antes a linha "pulava" porque o status mudava. Agora a ordem depende **só do critério escolhido** (padrão: nome), nunca do status; após recarregar, a ordenação é reaplicada e a linha permanece no mesmo lugar.
 - **Importante:** o filtro é só visual. **"Solicitar pagamento de todos"** continua agindo sobre **todos os holerites pendentes do período**, mesmo que a tela esteja filtrada (ex.: filtrar Status=Pendente e clicar no botão cobre todos os pendentes, não só os visíveis).
 

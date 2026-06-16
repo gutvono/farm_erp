@@ -105,11 +105,18 @@ Fluxo passo a passo (ótica do usuário):
 ### 3. Contas a Pagar (`payables`)
 Tabela paginada (`ContasPagarTable`) com filtros e ordenação **server-side**:
 - **Buscar** (campo de texto): procura por número, descrição ou nome do fornecedor.
-- **Vence de / Vence até**: intervalo de datas de vencimento.
+- **Período de vencimento**: um **seletor de intervalo** (calendário de 2 meses) —
+  escolha início e fim de uma vez (ver [`_ui-date-combobox.md`](_ui-date-combobox.md)).
 - **Status**: Todos / Em aberto / Paga / Cancelada.
 - Ordenação clicando nos cabeçalhos **Vencimento** e **Valor** (alterna ↑/↓).
 - Navegação por páginas (**Anterior / Próxima**), 20 por página.
-- Botão "Nova conta a pagar" dispara `NovaContaForm type="pagar"`.
+- **Limpar filtros:** quando há filtro aplicado, aparece o botão **"Limpar filtros"** que
+  zera busca + status + período de uma vez e recarrega a lista (página 1), sem F5.
+  Ver [`_clear-filters.md`](_clear-filters.md). Vale para as 3 tabelas do Financeiro.
+- Botão "Nova conta a pagar" dispara `NovaContaForm type="pagar"`. No diálogo, o
+  **Vencimento** é escolhido num **calendário** (com mês/ano por dropdown) e o
+  **Fornecedor** é selecionado numa **lista com busca** por nome/documento
+  (opcional — há a opção "Sem fornecedor (avulsa)"); não se digita mais UUID.
 - Cada linha tem **Detalhes** → abre `ContaPayableDetail` como `Sheet`. No Sheet: **Pagar** (desabilitado se status final), **Cancelar conta** (com `AlertDialog`) e, conforme o método, **Ver informações PIX** / **Ver Boleto**. Após ação: toast, fecha Sheet, recarrega lista + saldo + movimentações.
 - A coluna **Descrição** mostra o texto em 1 linha; quando ele não cabe, fica **cortado com reticências** e o **texto completo aparece num tooltip ao passar o mouse** (só quando truncado). Vale para as 3 tabelas do Financeiro.
 
@@ -118,20 +125,23 @@ Tabela paginada (`ContasPagarTable`) com filtros e ordenação **server-side**:
 ### 4. Contas a Receber (`receivables`)
 Tabela paginada (`ContasReceberTable`), mesmos filtros/ordenação:
 - **Buscar**: número, descrição ou nome do cliente.
-- **Vence de / Vence até** e **Status** (Todos / Em aberto / Parcialmente pago / Quitado / Cancelada).
+- **Período de vencimento** (seletor de intervalo) e **Status** (Todos / Em aberto / Parcialmente pago / Quitado / Cancelada).
 - Ordenação por **Vencimento** e **Valor**; paginado (20 por página).
 - **Indicador de vencida (Demanda 9.A):** na coluna **Vencimento**, contas em aberto/parcial
   cujo vencimento já passou exibem um **badge vermelho "Vencida"** e o texto **"há N dias"**
   (dias de atraso). Contas quitadas, canceladas, com vencimento **hoje** ou **futuro** não
   mostram o indicador.
-- Botão "Nova conta a receber" dispara `NovaContaForm type="receber"` (requer ID do cliente).
+- Botão "Nova conta a receber" dispara `NovaContaForm type="receber"`. No diálogo, o
+  **Vencimento** sai de um **calendário** (mês/ano por dropdown) e o **Cliente** é
+  escolhido numa **lista com busca** por nome/documento (obrigatório — sem cliente,
+  bloqueia com a mensagem "Selecione o cliente"); não se digita mais o UUID.
 - Cada linha tem **Detalhes** → abre `ContaReceivableDetail`. No Sheet: campo "Valor recebido" + **Confirmar recebimento** (validação: `0 < valor ≤ amount - amount_received`); **Cliente não vai pagar** (em aberto/parcial) e **Reverter inadimplência** (status `cancelada`); PIX/Boleto conforme o método.
 
 [SCREENSHOT: aba Contas a Receber com a AR-0002 marcada "Vencida · há 55 dias"]
 
 ### 5. Movimentações (`movements`)
 Tabela paginada (`MovimentacoesTable`) com colunas Data, Descrição, Categoria, Módulo, Tipo (badge verde/vermelho), Valor. Filtros/ordenação **server-side**:
-- **Buscar** (em descrição), **De / Até** (intervalo de datas), **Tipo** (Entrada/Saída), **Categoria** (venda, compra, folha, produção, ...) e **Módulo**.
+- **Buscar** (em descrição), **Período** (seletor de intervalo — calendário de 2 meses), **Tipo** (Entrada/Saída), **Categoria** (venda, compra, folha, produção, ...) e **Módulo**.
 - Ordenação por **Data** e **Valor**; navegação por páginas (20 por página).
 
 [SCREENSHOT: aba Movimentações com filtros de tipo/categoria/datas e a tabela paginada]

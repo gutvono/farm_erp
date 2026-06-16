@@ -26,6 +26,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { demitirFuncionario } from "@/services/folha"
 import { ContractType, Employee, Paginated } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -272,6 +273,17 @@ export function FuncionariosTable({
         >
           {activeOnly ? "Apenas ativos" : "Todos"}
         </Button>
+
+        <ClearFiltersButton
+          // Estado inicial da barra: busca vazia, contrato "todos" e
+          // "Apenas ativos" (is_active=true) — o padrão da listagem.
+          active={Boolean(search) || contractType !== undefined || !activeOnly}
+          onClear={() => {
+            onSearchChange("")
+            onContractTypeChange(undefined)
+            onActiveOnlyChange(true)
+          }}
+        />
       </div>
 
       <DataTable<Employee>

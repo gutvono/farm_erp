@@ -30,7 +30,10 @@ do sistema: as de **venda** (emitidas para clientes) e as de **compra**
 1. Abra o menu **Faturamento**.
 2. A lista mostra todas as notas, da mais recente para a mais antiga.
 3. Use o seletor **"Todos os status"** para filtrar por **Emitida**, **Paga** ou
-   **Cancelada**.
+   **Cancelada**. Ao escolher um status, aparece ao lado o botão **"Limpar filtros"**
+   que volta para "Todos os status" (ver [`_clear-filters.md`](_clear-filters.md)). Não
+   confundir com o **"Limpar filtro"** do banner azul, que remove o recorte por
+   origem (nota de uma compra/venda específica) gravado no endereço da página.
 4. Ao lado do filtro, o sistema mostra a **contagem de notas** e o **total em R$**
    das notas exibidas.
 5. Clique na **seta** (˅) de uma nota para expandir e ver os itens, quantidades e
@@ -224,7 +227,9 @@ NF" e expandir.
   transporte de **venda** mantém "estornará o valor do frete".
 
 **`FaturaManualForm`** — Dialog (RHF + Zod) para faturas avulsas: cliente, vencimento,
-observações e itens dinâmicos com subtotal/total em tempo real.
+observações e itens dinâmicos com subtotal/total em tempo real. O **Vencimento** é
+escolhido num **calendário** (com mês/ano por dropdown), não mais no campo de data do
+navegador (ver [`_ui-date-combobox.md`](_ui-date-combobox.md)).
 
 ### Service (`services/faturamento.ts`)
 

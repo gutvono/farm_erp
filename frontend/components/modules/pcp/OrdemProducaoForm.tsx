@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useForm, useFieldArray } from "react-hook-form"
+import { Controller, useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Plus, Trash2 } from "lucide-react"
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -277,15 +278,45 @@ export function OrdemProducaoForm({
           <div className="grid grid-cols-3 gap-4">
             <div className="space-y-1">
               <Label htmlFor="planned_date">Data Planejada</Label>
-              <Input id="planned_date" type="date" {...register("planned_date")} />
+              <Controller
+                control={control}
+                name="planned_date"
+                render={({ field }) => (
+                  <DatePicker
+                    id="planned_date"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="start_date">Data de Início</Label>
-              <Input id="start_date" type="date" {...register("start_date")} />
+              <Controller
+                control={control}
+                name="start_date"
+                render={({ field }) => (
+                  <DatePicker
+                    id="start_date"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
             </div>
             <div className="space-y-1">
               <Label htmlFor="expected_end_date">Término Previsto</Label>
-              <Input id="expected_end_date" type="date" {...register("expected_end_date")} />
+              <Controller
+                control={control}
+                name="expected_end_date"
+                render={({ field }) => (
+                  <DatePicker
+                    id="expected_end_date"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
             </div>
           </div>
 
@@ -683,7 +714,16 @@ export function OrdemProducaoForm({
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">Vencimento *</Label>
-                    <Input type="date" {...register(`services.${idx}.due_date`)} />
+                    <Controller
+                      control={control}
+                      name={`services.${idx}.due_date`}
+                      render={({ field }) => (
+                        <DatePicker
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
                     {errors.services?.[idx]?.due_date && (
                       <p className="text-xs text-red-500">
                         {errors.services[idx]?.due_date?.message}

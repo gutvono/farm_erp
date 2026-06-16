@@ -13,6 +13,7 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { AtividadeForm } from "@/components/modules/pcp/AtividadeForm"
 import { OrdemProducaoCard } from "@/components/modules/pcp/OrdemProducaoCard"
 import { OrdemProducaoForm } from "@/components/modules/pcp/OrdemProducaoForm"
@@ -131,18 +132,25 @@ export default function PCPPage() {
           {/* ── Aba Ordens de Produção ── */}
           <TabsContent value="ordens" className="space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <Select value={ordemStatusFilter} onValueChange={setOrdemStatusFilter}>
-                <SelectTrigger className="w-48">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  {ORDEM_STATUS_OPTIONS.map((o) => (
-                    <SelectItem key={o.value} value={o.value}>
-                      {o.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select value={ordemStatusFilter} onValueChange={setOrdemStatusFilter}>
+                  <SelectTrigger className="w-48">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {ORDEM_STATUS_OPTIONS.map((o) => (
+                      <SelectItem key={o.value} value={o.value}>
+                        {o.label}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <ClearFiltersButton
+                  active={ordemStatusFilter !== "all"}
+                  onClear={() => setOrdemStatusFilter("all")}
+                />
+              </div>
 
               <Button size="sm" onClick={() => setOrdemFormOpen(true)}>
                 <Plus className="h-4 w-4 mr-1" />
@@ -201,19 +209,26 @@ export default function PCPPage() {
           {/* ── Aba Atividades ── */}
           <TabsContent value="atividades" className="space-y-4">
             <div className="flex items-center justify-between gap-3 flex-wrap">
-              <Select value={atividadePlotFilter} onValueChange={setAtividadePlotFilter}>
-                <SelectTrigger className="w-56">
-                  <SelectValue placeholder="Filtrar por talhão" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">Todos os talhões</SelectItem>
-                  {plots.map((p) => (
-                    <SelectItem key={p.id} value={p.id}>
-                      {p.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <div className="flex items-center gap-2">
+                <Select value={atividadePlotFilter} onValueChange={setAtividadePlotFilter}>
+                  <SelectTrigger className="w-56">
+                    <SelectValue placeholder="Filtrar por talhão" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="all">Todos os talhões</SelectItem>
+                    {plots.map((p) => (
+                      <SelectItem key={p.id} value={p.id}>
+                        {p.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+
+                <ClearFiltersButton
+                  active={atividadePlotFilter !== "all"}
+                  onClear={() => setAtividadePlotFilter("all")}
+                />
+              </div>
 
               <Button size="sm" onClick={() => setAtividadeFormOpen(true)}>
                 <Plus className="h-4 w-4 mr-1" />

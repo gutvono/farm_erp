@@ -41,6 +41,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import { CashFlowChart } from "@/components/modules/dashboard/CashFlowChart"
 import { SaldoCard } from "@/components/modules/financeiro/SaldoCard"
 import { ContaPayableDetail } from "@/components/modules/financeiro/ContaPayableDetail"
@@ -748,10 +749,9 @@ export default function FinanceiroPage() {
                   </div>
                   <div className="space-y-1">
                     <Label className="text-xs">1ª Parcela</Label>
-                    <Input
-                      type="date"
+                    <DatePicker
                       value={approveFirstDueDate}
-                      onChange={(e) => setApproveFirstDueDate(e.target.value)}
+                      onChange={setApproveFirstDueDate}
                     />
                   </div>
                   <div className="space-y-1">

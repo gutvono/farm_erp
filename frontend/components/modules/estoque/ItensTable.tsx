@@ -26,6 +26,7 @@ import {
   AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { deleteItem } from "@/services/estoque"
 import { Category, Paginated, StockItem, SystemRole } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
@@ -265,6 +266,21 @@ export function ItensTable({
           <AlertTriangle className="h-4 w-4 mr-1" />
           Apenas críticos
         </Button>
+
+        <ClearFiltersButton
+          active={
+            Boolean(search) ||
+            categoryId !== undefined ||
+            role !== undefined ||
+            belowMinimum
+          }
+          onClear={() => {
+            onSearchChange("")
+            onCategoryChange(undefined)
+            onRoleChange(undefined)
+            onBelowMinimumChange(false)
+          }}
+        />
       </div>
 
       <DataTable<StockItem>

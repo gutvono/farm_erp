@@ -1201,27 +1201,68 @@ python -m poetry run alembic upgrade head
 
 ---
 
-## Inventário do seed
+## Massa de seed — cobertura de produção e datas relativas (revisão DBA)
+
+> **Datas RELATIVAS a `CURRENT_DATE` (decisão travada).** Todo o `seed.sql` deixou
+> de usar datas fixas (`2026-…`) e passou a ancorar eventos em expressões SQL:
+> `CURRENT_DATE - INTERVAL 'N days/months'` para o passado, `CURRENT_DATE + INTERVAL
+> 'N days'` para vencimentos futuros, e `EXTRACT(... FROM CURRENT_DATE - INTERVAL 'N
+> months')` para as competências de folha (sem hardcode de ano/mês). Assim o banco
+> demo fica **sempre "fresco"**: ao rodar `reset-db` em qualquer data, há sempre
+> contas vencidas em aberto, a vencer e quitadas; vendas distribuídas nos últimos
+> ~5 meses; e a competência corrente da folha em aberto. As **únicas** datas fixas
+> remanescentes são as admissões dos funcionários CLT/PJ de longo prazo
+> (2020–2023), que por natureza são históricas; os dois temporários usam admissão
+> relativa (`CURRENT_DATE - INTERVAL '5 months'`).
+>
+> **Gotcha do `%`:** qualquer `%` em `seed.sql` (mesmo em comentário) é tratado como
+> placeholder pelo psycopg2 (`exec_driver_sql`) e quebra o `reset_db`. Todos os `%`
+> estão escapados como `%%` (ex.: "100%%", "desconto 10%%").
+
+### Inventário do seed (cobertura ponta a ponta de todos os fluxos)
 
 - **1** usuário admin
 - **3** clientes (1 inadimplente: Mercearia Dona Rita)
-- **3** fornecedores
-- **8** cargos (`job_positions`) com salário sugerido (R$ 1.800–6.000)
-- **8** funcionários — 3 CLT (R$ 2.200–6.000), 3 PJ (R$ 4.000–5.500), 2 Temporários (R$ 1.800); cada um vinculado a um cargo via `position_id` (campo legado `role` fica NULL)
-- **5** categorias de estoque (`stock_categories`: Café, Insumo, Veículo, Equipamento, Outro) + **6** atribuições de papel (`category_role_assignments`; Café com 2 papéis, Outro com `produto_descartado`)
-- **3** configurações (`app_settings`): itens-destino da colheita (indústria/embalagem/descarte)
-- **10** itens de estoque — 3 qualidades de café, 4 insumos, 1 trator, 1 colheitadeira, 1 Café Descarte (refugo); cada item com `category_id` (enum `category` legado fica NULL)
-- **2** talhões e **3** atividades registradas
-- **1** ordem de produção concluída (100 sacas: 19 especial, 52 superior, 29 tradicional)
-- **1** ordem de compra concluída (R$ 7.600)
-- **2** vendas (1 entregue quitada, 1 realizada em aberto)
-- **2** faturas
-- **2** contas a pagar (1 paga, 1 em aberto)
-- **3** contas a receber (1 quitada, 1 em aberto, 1 cancelada)
-- **3** períodos de folha (01/2026 e 02/2026 fechadas e pagas, 03/2026 aberta) — **24** lançamentos
-- **17** movimentações de estoque
-- **25** movimentações financeiras cobrindo os últimos 3 meses
-- **3** notificações
+- **3** fornecedores; **10** itens de catálogo fornecedor↔item (`supplier_items`)
+- **8** cargos (`job_positions`) + **8** funcionários (3 CLT, 3 PJ, 2 Temporários)
+- **6** categorias de estoque + **7** atribuições de papel; **22** chaves `app_settings`
+- **11** itens de estoque — 3 cafés, 4 insumos, 1 trator, 1 colheitadeira, 1 descarte,
+  1 embalagem. **4 abaixo** do mínimo (CAFE-ESP/SUP/TRA + INS-PEST → dispara
+  notificação) e **7 acima/igual** ao mínimo
+- **2** talhões e **4** atividades registradas
+- **2** ordens de produção: 1 concluída (100 sacas, 100%) + 1 em execução parcial
+  (talhão B, 40%) com **1** colheita parcial (`production_harvests`); **5** insumos,
+  **5** requisitos por cargo, **1** recurso de máquina, **1** serviço externo
+- **4** ordens de compra: 2 concluídas (fertilizante/adubo R$ 7.600; trator
+  R$ 182.000), 1 em conferência (`purchase_order_receipts` pendentes), 1 aprovada
+  gerada pela Cotação 1
+- **9** vendas — status `entregue`(3)/`realizada`(5)/`cancelada`(1); mix à vista(6) ×
+  parcelado(2 — 3x e 2x) + 1 com desconto de cabeçalho; `sold_at` espalhado nos
+  últimos ~5 meses (série temporal do Relatório de Vendas). **12** `sale_items`
+- **9** faturas (3 pagas, 5 emitidas, 1 cancelada) — 1 NF por venda; **12**
+  `invoice_items`. Soma das AR de cada NF = `total_amount` da nota (provado por SELECT)
+- **7** contas a pagar — 3 pagas, 2 vencidas em aberto, 2 a vencer (inclui as 4
+  parcelas do trator)
+- **13** contas a receber — 5 quitadas (com `received_at`), 3 a vencer, 3 vencidas
+  em aberto (inadimplência em R$ por cliente) e 2 canceladas
+- **3** períodos de folha (mês-2 e mês-1 fechadas+pagas; mês atual aberta) — **24**
+  lançamentos, **96** itens de holerite, **11** eventos
+- **19** movimentações de estoque (ledger coerente com PCP/compras/vendas)
+- **36** movimentações financeiras; **5** notificações
+- **3** cotações (1 produto concluída, 1 produto aguardando financeiro, 1 serviço em
+  andamento), **3** itens, **5** propostas, **6** itens de proposta
 
-**Saldo inicial:** R$ 150.000,00 (movimentação `saldo_inicial` em 2026-01-01)
-**Saldo projetado ao final do seed:** ~R$ 103.156,67
+**Saldo inicial:** R$ 150.000,00 (movimentação `saldo_inicial` ~170 dias atrás).
+**Saldo projetado ao final do seed:** **R$ 47.081,67** (positivo, mediano). A compra
+do trator (R$ 182.000) com 2 das 4 parcelas (R$ 91.000) já pagas pesa no caixa, mas
+os recebimentos das vendas já quitadas (AR-0004/0008/0010/0012 = R$ 32.725) mantêm um
+saldo mediano — deixando margem para criar vendas/recebimentos ao vivo na apresentação.
+Cada AR `quitado` no banco gera a entrada de caixa correspondente (respaldo histórico).
+
+> **Integridade verificada (smoke SQL pós `reset-db`):** zero órfãos em todos os
+> FKs principais (`sale_items`, `invoice_items`, AR/AP, recibos de compra, insumos/
+> colheitas de PCP, holerites); soma dos `sale_items` − `discount_amount` = total da
+> venda (0 divergências); soma das AR por NF = total da nota (0 divergências);
+> vencimentos espalhados nas 3 faixas para AR **e** AP; ≥1 item abaixo e ≥1 acima do
+> mínimo; saldo financeiro positivo. Idempotência: `reset_db` + `seed_only` (×2) sem
+> erro de FK nem duplicação.

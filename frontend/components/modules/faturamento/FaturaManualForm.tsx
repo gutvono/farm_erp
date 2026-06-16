@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useForm, useFieldArray } from "react-hook-form"
+import { Controller, useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { Plus, Trash2 } from "lucide-react"
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -146,7 +147,17 @@ export function FaturaManualForm({
 
             <div className="space-y-1">
               <Label htmlFor="due_date">Vencimento</Label>
-              <Input id="due_date" type="date" {...register("due_date")} />
+              <Controller
+                control={control}
+                name="due_date"
+                render={({ field }) => (
+                  <DatePicker
+                    id="due_date"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
             </div>
           </div>
 
