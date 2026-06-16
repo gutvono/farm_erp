@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useForm, useFieldArray } from "react-hook-form"
+import { Controller, useForm, useFieldArray } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { AlertTriangle, Plus, Trash2 } from "lucide-react"
@@ -15,6 +15,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -338,7 +339,16 @@ export function VendaForm({
 
                   <div className="space-y-1">
                     <Label className="text-xs">Vencimento 1ª Parcela</Label>
-                    <Input type="date" {...register("first_due_date")} />
+                    <Controller
+                      control={control}
+                      name="first_due_date"
+                      render={({ field }) => (
+                        <DatePicker
+                          value={field.value}
+                          onChange={field.onChange}
+                        />
+                      )}
+                    />
                     {errors.first_due_date && (
                       <p className="text-xs text-red-500">{errors.first_due_date.message}</p>
                     )}

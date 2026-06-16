@@ -37,6 +37,9 @@ pagamento. O **pagamento** é uma etapa **posterior e separada**, feita na tela
   Ordene por **Nome**; **Buscar** por nome/documento. Ações na linha: **catálogo de itens**,
   **Editar** e **Excluir**.
 
+Nas três abas, quando há filtro aplicado aparece o botão **"Limpar filtros"** que zera
+todos os filtros da barra de uma vez e recarrega a lista (ver [`_clear-filters.md`](_clear-filters.md)).
+
 [SCREENSHOT: aba Ordens de Compra em tabela + painel de detalhe da ordem]
 [SCREENSHOT: aba Fornecedores em tabela paginada com busca]
 
@@ -310,7 +313,7 @@ em_andamento ──selecionar vencedor──▶ aguardando_aprovacao_financeiro
 | `CotacaoCard.tsx` | Card por cotação com badges e botões contextuais; abre detalhe e "Realizar Pedido" |
 | `CotacaoDetalheModal.tsx` | Detalhe; tabela de comparação de propostas, seleção de vencedor, CRUD de proposta |
 | `PropostaForm.tsx` | Dialog adicionar/editar proposta; trata 409 (fornecedor duplicado) |
-| `RealizeOrderModal.tsx` | Resumo da proposta vencedora + `ordered_at`, `notes`, `shipping_cost` |
+| `RealizeOrderModal.tsx` | Resumo da proposta vencedora + `ordered_at` (escolhido num **calendário**, ver [`_ui-date-combobox.md`](_ui-date-combobox.md)), `notes`, `shipping_cost` |
 
 ### Service functions (`services/compras.ts`)
 

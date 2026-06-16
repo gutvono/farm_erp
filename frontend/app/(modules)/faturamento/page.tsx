@@ -13,6 +13,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { FaturaCard } from "@/components/modules/faturamento/FaturaCard"
 import { FaturaManualForm } from "@/components/modules/faturamento/FaturaManualForm"
 import { getFaturas } from "@/services/faturamento"
@@ -115,6 +116,11 @@ function FaturamentoContent() {
                 ))}
               </SelectContent>
             </Select>
+
+            <ClearFiltersButton
+              active={statusFilter !== "all"}
+              onClear={() => setStatusFilter("all")}
+            />
 
             {!loading && (
               <span className="text-sm text-slate-500">

@@ -3,6 +3,8 @@
 import { Badge } from "@/components/ui/badge"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import {
   Select,
   SelectContent,
@@ -133,26 +135,17 @@ export function MovimentacoesTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">De</Label>
-          <Input
-            type="date"
-            value={filters.start_date ?? ""}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, start_date: e.target.value || undefined })
+          <Label className="text-xs text-slate-500">Período</Label>
+          <DateRangePicker
+            value={{ from: filters.start_date, to: filters.end_date }}
+            onChange={(range) =>
+              onFiltersChange({
+                ...filters,
+                start_date: range.from,
+                end_date: range.to,
+              })
             }
-            className="w-40"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Até</Label>
-          <Input
-            type="date"
-            value={filters.end_date ?? ""}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, end_date: e.target.value || undefined })
-            }
-            className="w-40"
+            className="w-64"
           />
         </div>
 
@@ -222,6 +215,24 @@ export function MovimentacoesTable({
             </SelectContent>
           </Select>
         )}
+
+        <ClearFiltersButton
+          active={Boolean(
+            filters.search ||
+              filters.start_date ||
+              filters.end_date ||
+              filters.movement_type ||
+              filters.source_module ||
+              (!hideItemFilter && filters.stock_item_id)
+          )}
+          onClear={() =>
+            onFiltersChange(
+              // No histórico de um item (hideItemFilter), o stock_item_id é fixo
+              // do contexto — preserva; nas demais telas limpa tudo.
+              hideItemFilter ? { stock_item_id: filters.stock_item_id } : {}
+            )
+          }
+        />
       </div>
 
       <DataTable<StockMovement>

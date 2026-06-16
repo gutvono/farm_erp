@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useForm } from "react-hook-form"
+import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -410,10 +411,16 @@ export function FuncionarioForm({
 
               <div className="space-y-1">
                 <Label htmlFor="edit-admission_date">Data de admissão *</Label>
-                <Input
-                  id="edit-admission_date"
-                  type="date"
-                  {...editForm.register("admission_date")}
+                <Controller
+                  control={editForm.control}
+                  name="admission_date"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="edit-admission_date"
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
                 />
                 {editForm.formState.errors.admission_date && (
                   <p className="text-xs text-red-500">
@@ -609,10 +616,16 @@ export function FuncionarioForm({
 
               <div className="space-y-1">
                 <Label htmlFor="admission_date">Data de admissão *</Label>
-                <Input
-                  id="admission_date"
-                  type="date"
-                  {...createForm.register("admission_date")}
+                <Controller
+                  control={createForm.control}
+                  name="admission_date"
+                  render={({ field }) => (
+                    <DatePicker
+                      id="admission_date"
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
                 />
                 {createForm.formState.errors.admission_date && (
                   <p className="text-xs text-red-500">

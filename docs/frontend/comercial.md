@@ -27,6 +27,8 @@ ser uma simples troca de status.
     marcação). Passe o mouse no badge para ver a **origem** (manual, vencida ou ambas).
 - **Ordenar:** clique em **Nome** ou **Cadastro**.
 - **Filtrar/buscar:** caixa **Buscar** (nome ou documento) e o botão **Apenas inadimplentes**.
+  Com filtro ativo aparece o **"Limpar filtros"** (ver [`_clear-filters.md`](_clear-filters.md)),
+  que zera busca + inadimplentes; na aba **Vendas** o mesmo botão limpa o filtro de status.
 - **Ações na linha:** **Editar** (abre o formulário) e **Excluir** (com confirmação).
 
 [SCREENSHOT: aba Clientes em tabela com busca, "Apenas inadimplentes" e paginação]
@@ -93,7 +95,9 @@ Mensagens: "Cliente criado com sucesso" / "Cliente atualizado com sucesso".
 
 ### 1. Vendas
 - Select de filtro por status (`all`, `realizada`, `entregue`, `cancelada`)
-- Botão "Nova Venda" abre `VendaForm`
+- Botão "Nova Venda" abre `VendaForm` — quando o pagamento é **parcelado**, o
+  **Vencimento da 1ª Parcela** é escolhido num **calendário** (com mês/ano por dropdown),
+  não mais no campo de data do navegador (ver [`_ui-date-combobox.md`](_ui-date-combobox.md)).
 - Lista de `VendaCard`; expandível mostra tabela de itens
 
 ### 2. Clientes
@@ -112,7 +116,8 @@ vem preenchida com o ano corrente (de **1º de janeiro** até **hoje**) e granul
 **Mês** — então o relatório aparece sozinho, sem precisar clicar em nada.
 
 ### Como filtrar o período
-1. No card **"Período"**, escolha a data de **Início** e a data de **Fim**.
+1. No card **"Período"**, abra o **seletor de intervalo** (`Intervalo`) e escolha a data
+   inicial e a final num calendário de 2 meses (ver [`_ui-date-combobox.md`](_ui-date-combobox.md)).
 2. Em **Granularidade**, escolha como o gráfico agrupa o tempo: **Dia**, **Semana** ou **Mês**.
 3. Clique em **"Gerar"**. O botão mostra "Gerando..." enquanto carrega.
    - Se a data de **Início** for **maior** que a de **Fim**, aparece o aviso *"A data inicial

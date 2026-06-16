@@ -1,7 +1,7 @@
 "use client"
 
-import { useState } from "react"
-import { useForm } from "react-hook-form"
+import { useEffect, useState } from "react"
+import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -17,7 +17,11 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { Combobox, ComboboxOption } from "@/components/ui/combobox"
+import { DatePicker } from "@/components/ui/date-picker"
 import { createContaPagar, createContaReceber } from "@/services/financeiro"
+import { getClientes } from "@/services/comercial"
+import { getFornecedores } from "@/services/compras"
 
 const schema = z.object({
   description: z.string().min(1, "Descrição é obrigatória"),
@@ -39,9 +43,12 @@ interface NovaContaFormProps {
 export function NovaContaForm({ type, onSuccess, trigger }: NovaContaFormProps) {
   const [open, setOpen] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [options, setOptions] = useState<ComboboxOption[]>([])
+  const [loadingOptions, setLoadingOptions] = useState(false)
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     formState: { errors },
@@ -49,12 +56,53 @@ export function NovaContaForm({ type, onSuccess, trigger }: NovaContaFormProps) 
     resolver: zodResolver(schema),
   })
 
+  // Carrega clientes (receber) ou fornecedores (pagar) via service ao abrir.
+  useEffect(() => {
+    if (!open) return
+    let active = true
+    setLoadingOptions(true)
+    const loader =
+      type === "receber"
+        ? getClientes().then((clientes) =>
+            clientes.map<ComboboxOption>((c) => ({
+              value: c.id,
+              label: c.name,
+              description: c.document ?? undefined,
+            }))
+          )
+        : getFornecedores().then((fornecedores) =>
+            fornecedores.map<ComboboxOption>((f) => ({
+              value: f.id,
+              label: f.name,
+              description: f.document ?? undefined,
+            }))
+          )
+    loader
+      .then((opts) => {
+        if (active) setOptions(opts)
+      })
+      .catch(() => {
+        if (active)
+          toast.error(
+            type === "receber"
+              ? "Erro ao carregar clientes"
+              : "Erro ao carregar fornecedores"
+          )
+      })
+      .finally(() => {
+        if (active) setLoadingOptions(false)
+      })
+    return () => {
+      active = false
+    }
+  }, [open, type])
+
   const title =
     type === "pagar" ? "Nova conta a pagar" : "Nova conta a receber"
   const description =
     type === "pagar"
-      ? "Cadastre uma conta a pagar avulsa."
-      : "Cadastre uma conta a receber avulsa. Informe o ID do cliente para vincular."
+      ? "Cadastre uma conta a pagar avulsa. Vincule um fornecedor (opcional)."
+      : "Cadastre uma conta a receber avulsa. Selecione o cliente para vincular."
 
   async function onSubmit(data: FormData) {
     setSubmitting(true)
@@ -68,7 +116,7 @@ export function NovaContaForm({ type, onSuccess, trigger }: NovaContaFormProps) 
         })
       } else {
         if (!data.reference_id) {
-          toast.error("Informe o ID do cliente")
+          toast.error("Selecione o cliente")
           setSubmitting(false)
           return
         }
@@ -126,7 +174,17 @@ export function NovaContaForm({ type, onSuccess, trigger }: NovaContaFormProps) 
 
           <div className="space-y-2">
             <Label htmlFor="due_date">Vencimento</Label>
-            <Input id="due_date" type="date" {...register("due_date")} />
+            <Controller
+              control={control}
+              name="due_date"
+              render={({ field }) => (
+                <DatePicker
+                  id="due_date"
+                  value={field.value}
+                  onChange={field.onChange}
+                />
+              )}
+            />
             {errors.due_date && (
               <p className="text-xs text-red-600">{errors.due_date.message}</p>
             )}
@@ -134,14 +192,33 @@ export function NovaContaForm({ type, onSuccess, trigger }: NovaContaFormProps) 
 
           <div className="space-y-2">
             <Label htmlFor="reference_id">
-              {type === "pagar"
-                ? "ID do fornecedor (opcional)"
-                : "ID do cliente"}
+              {type === "pagar" ? "Fornecedor (opcional)" : "Cliente"}
             </Label>
-            <Input
-              id="reference_id"
-              placeholder="UUID"
-              {...register("reference_id")}
+            <Controller
+              control={control}
+              name="reference_id"
+              render={({ field }) => (
+                <Combobox
+                  id="reference_id"
+                  options={options}
+                  value={field.value}
+                  onChange={field.onChange}
+                  loading={loadingOptions}
+                  placeholder={
+                    type === "pagar"
+                      ? "Selecione um fornecedor"
+                      : "Selecione um cliente"
+                  }
+                  searchPlaceholder="Buscar por nome ou documento..."
+                  emptyMessage={
+                    type === "pagar"
+                      ? "Nenhum fornecedor encontrado"
+                      : "Nenhum cliente encontrado"
+                  }
+                  allowClear={type === "pagar"}
+                  clearLabel="Sem fornecedor (avulsa)"
+                />
+              )}
             />
           </div>
 

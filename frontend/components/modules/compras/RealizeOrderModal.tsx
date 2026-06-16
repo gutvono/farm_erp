@@ -11,6 +11,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Table,
   TableBody,
@@ -22,9 +23,10 @@ import {
 import { realizarPedido } from "@/services/compras"
 import { Quotation } from "@/types/index"
 import { formatCurrency } from "@/lib/utils"
+import { toISODate } from "@/lib/date"
 
 function todayISO(): string {
-  return new Date().toISOString().slice(0, 10)
+  return toISODate(new Date())
 }
 
 interface RealizeOrderModalProps {
@@ -167,11 +169,10 @@ export function RealizeOrderModal({
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-1">
               <Label htmlFor="ordered_at">Data do pedido</Label>
-              <Input
+              <DatePicker
                 id="ordered_at"
-                type="date"
                 value={orderedAt}
-                onChange={(e) => setOrderedAt(e.target.value)}
+                onChange={setOrderedAt}
               />
             </div>
             {!isService && (

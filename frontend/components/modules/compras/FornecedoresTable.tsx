@@ -18,6 +18,7 @@ import {
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { deleteFornecedor } from "@/services/compras"
 import { Paginated, StockItem, Supplier } from "@/types/index"
 import { CatalogoFornecedorModal } from "./CatalogoFornecedorModal"
@@ -205,13 +206,20 @@ export function FornecedoresTable({
 
   return (
     <div className="space-y-3">
-      <div className="flex flex-col gap-1">
-        <Label className="text-xs text-slate-500">Buscar</Label>
-        <Input
-          value={search}
-          onChange={(e) => onSearchChange(e.target.value)}
-          placeholder="Nome ou documento..."
-          className="w-72"
+      <div className="flex flex-wrap items-end gap-2">
+        <div className="flex flex-col gap-1">
+          <Label className="text-xs text-slate-500">Buscar</Label>
+          <Input
+            value={search}
+            onChange={(e) => onSearchChange(e.target.value)}
+            placeholder="Nome ou documento..."
+            className="w-72"
+          />
+        </div>
+
+        <ClearFiltersButton
+          active={Boolean(search)}
+          onClear={() => onSearchChange("")}
         />
       </div>
 

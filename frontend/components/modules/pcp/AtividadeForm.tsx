@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { useForm } from "react-hook-form"
+import { Controller, useForm } from "react-hook-form"
 import { zodResolver } from "@hookform/resolvers/zod"
 import { z } from "zod"
 import { toast } from "sonner"
@@ -14,6 +14,7 @@ import {
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DatePicker } from "@/components/ui/date-picker"
 import {
   Select,
   SelectContent,
@@ -79,6 +80,7 @@ export function AtividadeForm({
 
   const {
     register,
+    control,
     handleSubmit,
     reset,
     watch,
@@ -192,7 +194,17 @@ export function AtividadeForm({
 
             <div className="space-y-1">
               <Label htmlFor="activity_date">Data *</Label>
-              <Input id="activity_date" type="date" {...register("activity_date")} />
+              <Controller
+                control={control}
+                name="activity_date"
+                render={({ field }) => (
+                  <DatePicker
+                    id="activity_date"
+                    value={field.value}
+                    onChange={field.onChange}
+                  />
+                )}
+              />
               {errors.activity_date && (
                 <p className="text-xs text-red-500">{errors.activity_date.message}</p>
               )}

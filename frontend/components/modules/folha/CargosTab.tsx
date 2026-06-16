@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { CargoForm } from "@/components/modules/folha/CargoForm"
 import { useCargos } from "@/components/modules/folha/useCargos"
 import { deleteCargo } from "@/services/folha"
@@ -120,12 +121,18 @@ export function CargosTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Input
-          placeholder="Buscar cargo por nome..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Buscar cargo por nome..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-64"
+          />
+          <ClearFiltersButton
+            active={Boolean(search)}
+            onClear={() => setSearch("")}
+          />
+        </div>
         <Button size="sm" onClick={handleNew}>
           <Plus className="h-4 w-4 mr-1" />
           Novo Cargo

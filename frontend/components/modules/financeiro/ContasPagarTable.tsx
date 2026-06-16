@@ -3,6 +3,8 @@
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { DateRangePicker } from "@/components/ui/date-range-picker"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import {
   Select,
   SelectContent,
@@ -119,26 +121,17 @@ export function ContasPagarTable({
         </div>
 
         <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Data início</Label>
-          <Input
-            type="date"
-            value={filters.due_after ?? ""}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, due_after: e.target.value || undefined })
+          <Label className="text-xs text-slate-500">Período de vencimento</Label>
+          <DateRangePicker
+            value={{ from: filters.due_after, to: filters.due_before }}
+            onChange={(range) =>
+              onFiltersChange({
+                ...filters,
+                due_after: range.from,
+                due_before: range.to,
+              })
             }
-            className="w-40"
-          />
-        </div>
-
-        <div className="flex flex-col gap-1">
-          <Label className="text-xs text-slate-500">Data fim</Label>
-          <Input
-            type="date"
-            value={filters.due_before ?? ""}
-            onChange={(e) =>
-              onFiltersChange({ ...filters, due_before: e.target.value || undefined })
-            }
-            className="w-40"
+            className="w-64"
           />
         </div>
 
@@ -165,6 +158,16 @@ export function ContasPagarTable({
             </SelectContent>
           </Select>
         </div>
+
+        <ClearFiltersButton
+          active={Boolean(
+            filters.search ||
+              filters.status ||
+              filters.due_after ||
+              filters.due_before
+          )}
+          onClear={() => onFiltersChange({})}
+        />
       </div>
 
       <DataTable<AccountsPayable>

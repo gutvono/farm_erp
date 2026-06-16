@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { CotacaoCard } from "@/components/modules/compras/CotacaoCard"
 import { Paginated, Quotation, QuotationStatus, Supplier } from "@/types/index"
 import { formatDate } from "@/lib/utils"
@@ -191,6 +192,14 @@ export function CotacoesTable({
             </SelectContent>
           </Select>
         </div>
+
+        <ClearFiltersButton
+          active={status !== undefined || orderType !== undefined}
+          onClear={() => {
+            onStatusChange(undefined)
+            onOrderTypeChange(undefined)
+          }}
+        />
       </div>
 
       <DataTable<Quotation>
@@ -209,7 +218,7 @@ export function CotacoesTable({
       />
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent size="table" className="w-full overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Detalhes da cotação</SheetTitle>
           </SheetHeader>

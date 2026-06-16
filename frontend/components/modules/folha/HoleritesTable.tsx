@@ -4,6 +4,7 @@ import { ArrowDown, ArrowUp, ArrowUpDown } from "lucide-react"
 
 import { cn } from "@/lib/utils"
 import { Label } from "@/components/ui/label"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import {
   Select,
   SelectContent,
@@ -141,6 +142,11 @@ export function HoleritesTable({
             </SelectContent>
           </Select>
         </div>
+
+        <ClearFiltersButton
+          active={Boolean(filters.status || filters.contract_type)}
+          onClear={() => setFilters({})}
+        />
 
         <span className="ml-auto self-center text-xs text-slate-500">
           {rows.length} de {entries.length} holerite

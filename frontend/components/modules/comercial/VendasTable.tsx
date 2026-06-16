@@ -18,6 +18,7 @@ import {
   SheetTitle,
 } from "@/components/ui/sheet"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { VendaCard } from "@/components/modules/comercial/VendaCard"
 import { Paginated, Sale, SaleStatus } from "@/types/index"
 import { formatCurrency, formatDate } from "@/lib/utils"
@@ -143,6 +144,11 @@ export function VendasTable({
             </SelectContent>
           </Select>
         </div>
+
+        <ClearFiltersButton
+          active={status !== undefined}
+          onClear={() => onStatusChange(undefined)}
+        />
       </div>
 
       <DataTable<Sale>
@@ -161,7 +167,7 @@ export function VendasTable({
       />
 
       <Sheet open={selected !== null} onOpenChange={(open) => !open && setSelected(null)}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent size="table" className="w-full overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Detalhes da venda</SheetTitle>
           </SheetHeader>

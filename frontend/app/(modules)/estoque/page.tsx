@@ -272,7 +272,7 @@ export default function EstoquePage() {
 
       {/* Sheet de histórico por item */}
       <Sheet open={historyOpen} onOpenChange={setHistoryOpen}>
-        <SheetContent className="w-full sm:max-w-2xl overflow-y-auto">
+        <SheetContent size="table" className="w-full overflow-y-auto">
           <SheetHeader>
             <SheetTitle>Histórico: {historyItem?.name}</SheetTitle>
           </SheetHeader>

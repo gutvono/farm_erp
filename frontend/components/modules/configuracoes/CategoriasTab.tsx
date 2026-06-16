@@ -17,6 +17,7 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { DataTable, DataTableColumn } from "@/components/ui/data-table"
+import { ClearFiltersButton } from "@/components/ui/clear-filters-button"
 import { CategoriaForm } from "@/components/modules/configuracoes/CategoriaForm"
 import { useCategorias } from "@/components/modules/configuracoes/useCategorias"
 import { roleLabel } from "@/components/modules/configuracoes/roleLabels"
@@ -128,12 +129,18 @@ export function CategoriasTab() {
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between gap-3 flex-wrap">
-        <Input
-          placeholder="Buscar categoria por nome..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="w-64"
-        />
+        <div className="flex items-center gap-2">
+          <Input
+            placeholder="Buscar categoria por nome..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="w-64"
+          />
+          <ClearFiltersButton
+            active={Boolean(search)}
+            onClear={() => setSearch("")}
+          />
+        </div>
         <Button size="sm" onClick={handleNew}>
           <Plus className="h-4 w-4 mr-1" />
           Nova Categoria
